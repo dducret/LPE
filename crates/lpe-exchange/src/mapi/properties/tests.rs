@@ -1439,6 +1439,170 @@ fn contact_secondary_email_named_property_uses_emails_json() {
 }
 
 #[test]
+fn contact_rich_properties_project_and_update_canonical_fields() {
+    let account_id = Uuid::from_u128(0x45454545_4545_4545_8454_545454545454);
+    let mut contact = default_contact_for_mapping(account_id, "default");
+    contact.photo_data = Some("/9j/4AAQ".to_string());
+    contact.categories_json = serde_json::json!(["Friends", "VIP"]);
+    contact.birthday = Some("1815-12-10".to_string());
+    contact.anniversary = Some("1835-07-08".to_string());
+    contact.children_json = serde_json::json!(["Byron"]);
+    contact.spouse = "William".to_string();
+    contact.assistant_name = "Charles".to_string();
+    contact.assistant_phone = "+44 20 5555".to_string();
+    contact.addresses_json = serde_json::json!([
+        {"label": "work", "street": "1 Analytical Engine Way", "city": "London"},
+        {"label": "home", "street": "2 St James's Square"},
+        {"label": "other", "country": "United Kingdom"}
+    ]);
+    contact.phones_json = serde_json::json!([
+        {"label": "work2", "phone": "+44 20 0001"},
+        {"label": "home2", "phone": "+44 20 0002"},
+        {"label": "other", "phone": "+44 20 0003"}
+    ]);
+
+    assert_eq!(
+        contact_property_value(&contact, 1, CONTACTS_FOLDER_ID, PID_LID_HAS_PICTURE_TAG),
+        Some(MapiValue::Bool(true))
+    );
+    assert_eq!(
+        contact_property_value(&contact, 1, CONTACTS_FOLDER_ID, PID_NAME_KEYWORDS_TAG),
+        Some(MapiValue::MultiString(vec![
+            "Friends".to_string(),
+            "VIP".to_string()
+        ]))
+    );
+    assert_eq!(
+        contact_property_value(&contact, 1, CONTACTS_FOLDER_ID, PID_TAG_BIRTHDAY),
+        Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+            "1815-12-10T00:00:00Z"
+        )))
+    );
+    assert_eq!(
+        contact_property_value(&contact, 1, CONTACTS_FOLDER_ID, PID_TAG_WEDDING_ANNIVERSARY),
+        Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+            "1835-07-08T00:00:00Z"
+        )))
+    );
+    assert_eq!(
+        contact_property_value(&contact, 1, CONTACTS_FOLDER_ID, PID_TAG_CHILDRENS_NAMES_W),
+        Some(MapiValue::MultiString(vec!["Byron".to_string()]))
+    );
+    assert_eq!(
+        contact_property_value(&contact, 1, CONTACTS_FOLDER_ID, PID_TAG_SPOUSE_NAME_W),
+        Some(MapiValue::String("William".to_string()))
+    );
+    assert_eq!(
+        contact_property_value(&contact, 1, CONTACTS_FOLDER_ID, PID_TAG_ASSISTANT_W),
+        Some(MapiValue::String("Charles".to_string()))
+    );
+    assert_eq!(
+        contact_property_value(
+            &contact,
+            1,
+            CONTACTS_FOLDER_ID,
+            PID_TAG_ASSISTANT_TELEPHONE_NUMBER_W,
+        ),
+        Some(MapiValue::String("+44 20 5555".to_string()))
+    );
+    assert_eq!(
+        contact_property_value(
+            &contact,
+            1,
+            CONTACTS_FOLDER_ID,
+            PID_TAG_BUSINESS2_TELEPHONE_NUMBER_W,
+        ),
+        Some(MapiValue::String("+44 20 0001".to_string()))
+    );
+    assert_eq!(
+        contact_property_value(
+            &contact,
+            1,
+            CONTACTS_FOLDER_ID,
+            PID_LID_WORK_ADDRESS_STREET_W_TAG,
+        ),
+        Some(MapiValue::String("1 Analytical Engine Way".to_string()))
+    );
+    assert_eq!(
+        contact_property_value(
+            &contact,
+            1,
+            CONTACTS_FOLDER_ID,
+            PID_TAG_HOME_ADDRESS_STREET_W,
+        ),
+        Some(MapiValue::String("2 St James's Square".to_string()))
+    );
+    assert_eq!(
+        contact_property_value(
+            &contact,
+            1,
+            CONTACTS_FOLDER_ID,
+            PID_TAG_OTHER_ADDRESS_COUNTRY_W,
+        ),
+        Some(MapiValue::String("United Kingdom".to_string()))
+    );
+
+    let mut properties = HashMap::new();
+    properties.insert(
+        PID_NAME_KEYWORDS_TAG,
+        MapiValue::MultiString(vec!["Family".to_string()]),
+    );
+    properties.insert(
+        PID_LID_BIRTHDAY_LOCAL_TAG,
+        MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+            "1816-12-10T00:00:00Z",
+        )),
+    );
+    properties.insert(
+        PID_TAG_CHILDRENS_NAMES_W,
+        MapiValue::MultiString(vec!["Ada".to_string(), "Byron".to_string()]),
+    );
+    properties.insert(
+        PID_TAG_SPOUSE_NAME_W,
+        MapiValue::String("Lord Byron".to_string()),
+    );
+    properties.insert(PID_TAG_ASSISTANT_W, MapiValue::String("Mary".to_string()));
+    properties.insert(
+        PID_TAG_ASSISTANT_TELEPHONE_NUMBER_W,
+        MapiValue::String("+44 20 7777".to_string()),
+    );
+    properties.insert(
+        PID_TAG_BUSINESS2_TELEPHONE_NUMBER_W,
+        MapiValue::String("+44 20 8888".to_string()),
+    );
+    properties.insert(
+        PID_LID_WORK_ADDRESS_CITY_W_TAG,
+        MapiValue::String("Paris".to_string()),
+    );
+    let input = contact_input_from_mapi(account_id, Some(contact.id), &contact, &properties);
+    assert_eq!(input.categories_json, Some(serde_json::json!(["Family"])));
+    assert_eq!(input.birthday, Some(Some("1816-12-10".to_string())));
+    assert_eq!(
+        input.children_json,
+        Some(serde_json::json!(["Ada", "Byron"]))
+    );
+    assert_eq!(input.spouse, Some("Lord Byron".to_string()));
+    assert_eq!(input.assistant_name, Some("Mary".to_string()));
+    assert_eq!(input.assistant_phone, Some("+44 20 7777".to_string()));
+    assert_eq!(
+        input.phones_json,
+        Some(serde_json::json!([
+            {"label": "work2", "phone": "+44 20 8888"},
+            {"label": "home2", "phone": "+44 20 0002"},
+            {"label": "other", "phone": "+44 20 0003"}
+        ]))
+    );
+    assert_eq!(
+        input.addresses_json,
+        Some(serde_json::json!([
+            {"label": "work", "street": "1 Analytical Engine Way", "city": "Paris"},
+            {"label": "home", "street": "2 St James's Square"},
+            {"label": "other", "country": "United Kingdom"}
+        ]))
+    );
+}
+
+#[test]
 fn outlook_contact_view_provider_array_restriction_matches_contact_email() {
     let account_id = Uuid::from_u128(0x55555555_5555_4555_8555_555555555555);
     let mut contact = default_contact_for_mapping(account_id, "default");
@@ -6394,6 +6558,7 @@ fn already_open_common_view_missing_descriptor_uses_empty_stream_semantics() {
         message_handle_generations: std::collections::HashMap::new(),
         pending_message_recipient_replacements: std::collections::HashMap::new(),
         pending_message_attachments: std::collections::HashMap::new(),
+        pending_contact_photo_attachments: std::collections::HashMap::new(),
         pending_attachment_parent_messages: std::collections::HashMap::new(),
         pending_event_attachment_transactions: std::collections::HashMap::new(),
         pending_attachment_deletions: std::collections::HashSet::new(),
@@ -6485,6 +6650,7 @@ fn common_view_named_view_descriptor_accepts_microsoft_write_stream_sequence() {
         message_handle_generations: std::collections::HashMap::new(),
         pending_message_recipient_replacements: std::collections::HashMap::new(),
         pending_message_attachments: std::collections::HashMap::new(),
+        pending_contact_photo_attachments: std::collections::HashMap::new(),
         pending_attachment_parent_messages: std::collections::HashMap::new(),
         pending_event_attachment_transactions: std::collections::HashMap::new(),
         pending_attachment_deletions: std::collections::HashSet::new(),
@@ -6597,6 +6763,7 @@ fn associated_config_stream_rops_require_the_actual_stream_handle() {
         message_handle_generations: std::collections::HashMap::new(),
         pending_message_recipient_replacements: std::collections::HashMap::new(),
         pending_message_attachments: std::collections::HashMap::new(),
+        pending_contact_photo_attachments: std::collections::HashMap::new(),
         pending_attachment_parent_messages: std::collections::HashMap::new(),
         pending_event_attachment_transactions: std::collections::HashMap::new(),
         pending_attachment_deletions: std::collections::HashSet::new(),
@@ -6758,6 +6925,7 @@ fn message_list_settings_private_binary_stream_is_projected_without_widening_oth
         message_handle_generations: std::collections::HashMap::new(),
         pending_message_recipient_replacements: std::collections::HashMap::new(),
         pending_message_attachments: std::collections::HashMap::new(),
+        pending_contact_photo_attachments: std::collections::HashMap::new(),
         pending_attachment_parent_messages: std::collections::HashMap::new(),
         pending_event_attachment_transactions: std::collections::HashMap::new(),
         pending_attachment_deletions: std::collections::HashSet::new(),

@@ -564,6 +564,15 @@ pub struct UpsertClientContactRequest {
     pub phones_json: Option<Value>,
     pub addresses_json: Option<Value>,
     pub urls_json: Option<Value>,
+    pub photo_data: Option<String>,
+    pub photo_content_type: Option<String>,
+    pub categories_json: Option<Value>,
+    pub birthday: Option<String>,
+    pub anniversary: Option<String>,
+    pub children_json: Option<Value>,
+    pub spouse: Option<String>,
+    pub assistant_name: Option<String>,
+    pub assistant_phone: Option<String>,
     #[serde(default)]
     pub organization_name: String,
     #[serde(default)]
@@ -588,6 +597,19 @@ pub struct PatchClientContactRequest {
     pub phones_json: Option<Value>,
     pub addresses_json: Option<Value>,
     pub urls_json: Option<Value>,
+    #[serde(default)]
+    pub photo_data: PatchField<String>,
+    #[serde(default)]
+    pub photo_content_type: PatchField<String>,
+    pub categories_json: Option<Value>,
+    #[serde(default)]
+    pub birthday: PatchField<String>,
+    #[serde(default)]
+    pub anniversary: PatchField<String>,
+    pub children_json: Option<Value>,
+    pub spouse: Option<String>,
+    pub assistant_name: Option<String>,
+    pub assistant_phone: Option<String>,
     pub organization_name: Option<String>,
     pub job_title: Option<String>,
     #[serde(default)]

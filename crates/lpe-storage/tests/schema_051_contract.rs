@@ -8,15 +8,15 @@ const INSTALL_COMMON: &str =
     include_str!("../../../installation/debian-trixie/lib/install-common.sh");
 
 #[test]
-fn canonical_schema_uses_052_release_label() {
+fn canonical_schema_uses_053_release_label() {
     assert!(
-        SCHEMA.contains("schema_version = '0.5.2-sql'")
-            && SCHEMA.contains("VALUES (TRUE, '0.5.2-sql')"),
-        "the canonical schema must use the exact 0.5.2-sql release label"
+        SCHEMA.contains("schema_version = '0.5.3-sql'")
+            && SCHEMA.contains("VALUES (TRUE, '0.5.3-sql')"),
+        "the canonical schema must use the exact 0.5.3-sql release label"
     );
     assert!(
-        !SCHEMA.contains("0.5.1-sql"),
-        "the canonical 0.5.2 schema must not retain the old release label"
+        !SCHEMA.contains("0.5.2-sql"),
+        "the canonical 0.5.3 schema must not retain the old release label"
     );
 }
 

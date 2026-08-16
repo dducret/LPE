@@ -316,6 +316,15 @@ impl FakeStore {
             phones_json: contact.phones_json,
             addresses_json: contact.addresses_json,
             urls_json: contact.urls_json,
+            photo_data: contact.photo_data,
+            photo_content_type: contact.photo_content_type,
+            categories_json: contact.categories_json,
+            birthday: contact.birthday,
+            anniversary: contact.anniversary,
+            children_json: contact.children_json,
+            spouse: contact.spouse,
+            assistant_name: contact.assistant_name,
+            assistant_phone: contact.assistant_phone,
             organization_name: contact.organization_name,
             job_title: contact.job_title,
             raw_vcard: contact.raw_vcard,
@@ -560,6 +569,15 @@ impl FakeStore {
             urls_json: json!([
                 {"url": "https://example.test/bob", "label": "profile"}
             ]),
+            photo_data: Some("iVBORw0KGgo=".to_string()),
+            photo_content_type: Some("image/png".to_string()),
+            categories_json: json!(["VIP"]),
+            birthday: Some("1984-05-12".to_string()),
+            anniversary: Some("2010-06-04".to_string()),
+            children_json: json!(["Jamie"]),
+            spouse: "Alex Example".to_string(),
+            assistant_name: "Sam Assistant".to_string(),
+            assistant_phone: "+33123456780".to_string(),
             organization_name: "Example Ltd".to_string(),
             job_title: "Account Executive".to_string(),
             ..Default::default()
@@ -1764,6 +1782,19 @@ impl JmapStore for FakeStore {
                 .addresses_json
                 .unwrap_or_else(|| Value::Array(Vec::new())),
             urls_json: input.urls_json.unwrap_or_else(|| Value::Array(Vec::new())),
+            photo_data: input.photo_data.flatten(),
+            photo_content_type: input.photo_content_type.flatten(),
+            categories_json: input
+                .categories_json
+                .unwrap_or_else(|| Value::Array(Vec::new())),
+            birthday: input.birthday.flatten(),
+            anniversary: input.anniversary.flatten(),
+            children_json: input
+                .children_json
+                .unwrap_or_else(|| Value::Array(Vec::new())),
+            spouse: input.spouse.unwrap_or_default(),
+            assistant_name: input.assistant_name.unwrap_or_default(),
+            assistant_phone: input.assistant_phone.unwrap_or_default(),
             organization_name: input.organization_name,
             job_title: input.job_title,
             raw_vcard: input.raw_vcard,
@@ -12798,7 +12829,10 @@ async fn contacts_methods_use_canonical_contact_store() {
         contacts: Arc::new(Mutex::new(vec![FakeStore::contact()])),
         ..Default::default()
     };
-    let service = JmapService::new(store.clone());
+    let service = JmapService::new_with_validator(
+        store.clone(),
+        validator_ok("image/png", "png", "png", 0.99),
+    );
 
     let response = service
         .handle_api_request(
@@ -12825,6 +12859,13 @@ async fn contacts_methods_use_canonical_contact_store() {
                                     "name": {"full": "Carol Example"},
                                     "emails": {"main": {"address": "carol@example.test"}},
                                     "phones": {"main": {"number": "+339999"}},
+                                    "photo": {"data": "iVBORw0KGgo=", "contentType": "image/png"},
+                                    "categories": ["Operations"],
+                                    "birthday": "1990-01-02",
+                                    "anniversary": "2015-06-07",
+                                    "children": ["Morgan"],
+                                    "spouse": "Chris Example",
+                                    "assistant": {"name": "Taylor Assistant", "phone": "+338888"},
                                     "organizations": {"main": {"name": "Ops"}},
                                     "titles": {"main": {"name": "Manager"}},
                                     "notes": {"main": {"note": "Priority"}},
@@ -12849,6 +12890,22 @@ async fn contacts_methods_use_canonical_contact_store() {
         Value::String("Bob Example".to_string())
     );
     assert_eq!(
+        response.method_responses[1].1["list"][0]["photo"]["contentType"],
+        "image/png"
+    );
+    assert_eq!(
+        response.method_responses[1].1["list"][0]["categories"],
+        json!(["VIP"])
+    );
+    assert_eq!(
+        response.method_responses[1].1["list"][0]["birthday"],
+        "1984-05-12"
+    );
+    assert_eq!(
+        response.method_responses[1].1["list"][0]["assistant"]["name"],
+        "Sam Assistant"
+    );
+    assert_eq!(
         response.method_responses[2].1["canCalculateChanges"],
         Value::Bool(true)
     );
@@ -12856,12 +12913,24 @@ async fn contacts_methods_use_canonical_contact_store() {
         response.method_responses[3].1["canCalculateChanges"],
         Value::Bool(true)
     );
-    assert!(response.created_ids.contains_key("new1"));
+    assert!(
+        response.created_ids.contains_key("new1"),
+        "contact creation failed: {:?}",
+        response.method_responses[4].1
+    );
     let contacts = store.contacts.lock().unwrap();
     assert_eq!(contacts.len(), 2);
     assert!(contacts
         .iter()
         .any(|contact| contact.email == "carol@example.test"));
+    let carol = contacts
+        .iter()
+        .find(|contact| contact.email == "carol@example.test")
+        .unwrap();
+    assert_eq!(carol.categories_json, json!(["Operations"]));
+    assert_eq!(carol.birthday.as_deref(), Some("1990-01-02"));
+    assert_eq!(carol.children_json, json!(["Morgan"]));
+    assert_eq!(carol.assistant_name, "Taylor Assistant");
 }
 
 #[tokio::test]

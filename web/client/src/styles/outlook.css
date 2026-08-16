@@ -592,7 +592,8 @@ body {
   }
 
   .form-grid,
-  .settings-grid {
+  .settings-grid,
+  .contact-photo {
     grid-template-columns: 1fr;
   }
 }
@@ -619,6 +620,31 @@ body {
 .brand-mark {
   background: var(--lpe-primary);
   box-shadow: none;
+}
+
+.contact-avatar img,
+.contact-photo-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.contact-photo {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: end;
+}
+
+.contact-photo-preview {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  overflow: hidden;
+  border-radius: var(--admin-radius-sm);
+  color: var(--outlook-blue-strong);
+  background: rgba(37, 100, 207, 0.12);
 }
 
 @media (max-width: 900px) {

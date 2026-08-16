@@ -21,7 +21,7 @@ pub(crate) const IM_CONTACT_LIST_ROLE: &str = "im_contact_list";
 pub(crate) const DEFAULT_TASK_LIST_NAME: &str = "Tasks";
 pub(crate) const DEFAULT_TASK_LIST_ROLE: &str = "inbox";
 pub(crate) const CANONICAL_CHANGE_CHANNEL: &str = "lpe_canonical_changes";
-pub(crate) const EXPECTED_SCHEMA_VERSION: &str = "0.5.2-sql";
+pub(crate) const EXPECTED_SCHEMA_VERSION: &str = "0.5.3-sql";
 
 impl Storage {
     pub async fn fetch_account_category_modseq(

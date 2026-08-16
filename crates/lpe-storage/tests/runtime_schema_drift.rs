@@ -323,7 +323,7 @@ async fn assert_schema_metadata(pool: &PgPool) -> Result<()> {
     .await
     .context("read schema_metadata after applying schema.sql")?;
     anyhow::ensure!(
-        version == "0.5.2-sql",
+        version == "0.5.3-sql",
         "unexpected schema version {version}"
     );
     Ok(())

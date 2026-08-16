@@ -1,4 +1,5 @@
 use super::*;
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 
 mod save_contract;
 
@@ -189,20 +190,30 @@ pub(super) fn append_get_attachment_table_response(
         return;
     }
     let parent_handle = input_handle(handle_slots, request);
-    let (folder_id, message_id, is_calendar_event, is_pending_event) =
+    let (folder_id, message_id, is_calendar_event, is_pending_event, is_contact) =
         match input_object(session, handle_slots, request) {
-            Some(MapiObject::PendingMessage { folder_id, .. }) => (*folder_id, 0, false, false),
+            Some(MapiObject::PendingMessage { folder_id, .. }) => {
+                (*folder_id, 0, false, false, false)
+            }
             Some(MapiObject::Message {
                 folder_id,
                 message_id,
                 ..
-            }) => (*folder_id, *message_id, false, false),
+            }) => (*folder_id, *message_id, false, false, false),
             Some(MapiObject::Event {
                 folder_id,
                 event_id: message_id,
                 ..
-            }) => (*folder_id, *message_id, true, false),
-            Some(MapiObject::PendingEvent { folder_id, .. }) => (*folder_id, 0, true, true),
+            }) => (*folder_id, *message_id, true, false, false),
+            Some(MapiObject::PendingEvent { folder_id, .. }) => (*folder_id, 0, true, true, false),
+            Some(MapiObject::Contact {
+                folder_id,
+                contact_id,
+                ..
+            }) => (*folder_id, *contact_id, false, false, true),
+            Some(MapiObject::PendingContact { folder_id, .. }) => {
+                (*folder_id, 0, false, false, true)
+            }
             _ => {
                 responses.extend_from_slice(&rop_error_response(
                     0x21,
@@ -242,6 +253,21 @@ pub(super) fn append_get_attachment_table_response(
             ));
         }
     }
+    if is_contact {
+        if let MapiObject::AttachmentTable {
+            materialized_attachments,
+            ..
+        } = &mut table
+        {
+            *materialized_attachments = Some(
+                snapshot
+                    .contact_for_id(folder_id, message_id)
+                    .and_then(contact_photo_attachment)
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+            );
+        }
+    }
     let handle = session.allocate_output_handle(request.output_handle_index, table);
     set_handle_slot(handle_slots, request.output_handle_index, handle);
     responses.extend_from_slice(&get_attachment_table_response(request));
@@ -265,19 +291,24 @@ pub(super) fn append_open_attachment_response(
         return;
     }
     let parent_handle = input_handle(handle_slots, request);
-    let (folder_id, message_id, is_calendar_event, is_pending_event) =
+    let (folder_id, message_id, is_calendar_event, is_pending_event, is_contact) =
         match input_object(session, handle_slots, request) {
             Some(MapiObject::Message {
                 folder_id,
                 message_id,
                 ..
-            }) => (*folder_id, *message_id, false, false),
+            }) => (*folder_id, *message_id, false, false, false),
             Some(MapiObject::Event {
                 folder_id,
                 event_id: message_id,
                 ..
-            }) => (*folder_id, *message_id, true, false),
-            Some(MapiObject::PendingEvent { folder_id, .. }) => (*folder_id, 0, true, true),
+            }) => (*folder_id, *message_id, true, false, false),
+            Some(MapiObject::PendingEvent { folder_id, .. }) => (*folder_id, 0, true, true, false),
+            Some(MapiObject::Contact {
+                folder_id,
+                contact_id,
+                ..
+            }) => (*folder_id, *contact_id, false, false, true),
             _ => {
                 responses.extend_from_slice(&rop_error_response(
                     0x22,
@@ -299,6 +330,37 @@ pub(super) fn append_open_attachment_response(
         return;
     }
     let attach_num = request.attach_num().unwrap_or(u32::MAX);
+    if is_contact {
+        let Some(contact) = snapshot.contact_for_id(folder_id, message_id) else {
+            responses.extend_from_slice(&rop_error_response(
+                0x22,
+                request.output_handle_index.unwrap_or(0),
+                0x8004_010F,
+            ));
+            return;
+        };
+        let Some(object) = contact_photo_attachment_object(folder_id, message_id, contact) else {
+            responses.extend_from_slice(&rop_error_response(
+                0x22,
+                request.output_handle_index.unwrap_or(0),
+                0x8004_010F,
+            ));
+            return;
+        };
+        if attach_num != 0 {
+            responses.extend_from_slice(&rop_error_response(
+                0x22,
+                request.output_handle_index.unwrap_or(0),
+                0x8004_010F,
+            ));
+            return;
+        }
+        let handle = session.allocate_output_handle(request.output_handle_index, object);
+        set_handle_slot(handle_slots, request.output_handle_index, handle);
+        responses.extend_from_slice(&rop_open_attachment_response(request));
+        output_handles.push(handle);
+        return;
+    }
     if is_calendar_event {
         let Some(parent_handle) = parent_handle else {
             responses.extend_from_slice(&rop_error_response(
@@ -416,32 +478,55 @@ pub(super) fn append_create_attachment_response(
             Some(MapiObject::Event { .. } | MapiObject::PendingEvent { .. })
         )
     });
-    let (folder_id, message_id, is_calendar_event, is_pending_message, is_pending_event) =
-        match input_object(session, handle_slots, request) {
-            Some(MapiObject::Message {
-                folder_id,
-                message_id,
-                ..
-            }) => (*folder_id, *message_id, false, false, false),
-            Some(MapiObject::PendingMessage { folder_id, .. }) => {
-                (*folder_id, 0, false, true, false)
-            }
-            Some(MapiObject::Event {
-                folder_id,
-                event_id,
-                ..
-            }) => (*folder_id, *event_id, true, false, false),
-            Some(MapiObject::PendingEvent { folder_id, .. }) => (*folder_id, 0, true, false, true),
-            _ => {
-                responses.extend_from_slice(&rop_error_response(
-                    0x23,
-                    request.output_handle_index.unwrap_or(0),
-                    0x0000_04B9,
-                ));
-                return;
-            }
-        };
+    let parent_contact_handle = parent_handle.filter(|handle| {
+        matches!(
+            session.handles.get(handle),
+            Some(MapiObject::Contact { .. } | MapiObject::PendingContact { .. })
+        )
+    });
+    let (
+        folder_id,
+        message_id,
+        is_calendar_event,
+        is_pending_message,
+        is_pending_event,
+        is_contact,
+    ) = match input_object(session, handle_slots, request) {
+        Some(MapiObject::Message {
+            folder_id,
+            message_id,
+            ..
+        }) => (*folder_id, *message_id, false, false, false, false),
+        Some(MapiObject::PendingMessage { folder_id, .. }) => {
+            (*folder_id, 0, false, true, false, false)
+        }
+        Some(MapiObject::Event {
+            folder_id,
+            event_id,
+            ..
+        }) => (*folder_id, *event_id, true, false, false, false),
+        Some(MapiObject::PendingEvent { folder_id, .. }) => {
+            (*folder_id, 0, true, false, true, false)
+        }
+        Some(MapiObject::Contact {
+            folder_id,
+            contact_id,
+            ..
+        }) => (*folder_id, *contact_id, false, false, false, true),
+        Some(MapiObject::PendingContact { folder_id, .. }) => {
+            (*folder_id, 0, false, false, false, true)
+        }
+        _ => {
+            responses.extend_from_slice(&rop_error_response(
+                0x23,
+                request.output_handle_index.unwrap_or(0),
+                0x0000_04B9,
+            ));
+            return;
+        }
+    };
     if !is_calendar_event
+        && !is_contact
         && !is_pending_message
         && message_for_id(folder_id, message_id, mailboxes, emails).is_none()
     {
@@ -492,7 +577,9 @@ pub(super) fn append_create_attachment_response(
         }
     }
 
-    let attach_num = if let Some(parent_handle) = parent_message_handle {
+    let attach_num = if is_contact {
+        0
+    } else if let Some(parent_handle) = parent_message_handle {
         session
             .pending_message_attachments
             .get(&parent_handle)
@@ -520,7 +607,10 @@ pub(super) fn append_create_attachment_response(
             data: Vec::new(),
         },
     );
-    if let Some(parent_handle) = parent_message_handle.or(parent_event_handle) {
+    if let Some(parent_handle) = parent_message_handle
+        .or(parent_event_handle)
+        .or(parent_contact_handle)
+    {
         session
             .pending_attachment_parent_messages
             .insert(handle, parent_handle);
@@ -881,6 +971,10 @@ pub(super) async fn append_save_changes_attachment_response<S, V>(
             session.handles.get(&parent_handle),
             Some(MapiObject::Event { .. } | MapiObject::PendingEvent { .. })
         );
+        let parent_is_contact = matches!(
+            session.handles.get(&parent_handle),
+            Some(MapiObject::Contact { .. } | MapiObject::PendingContact { .. })
+        );
         if parent_is_pending_message {
             session
                 .pending_message_attachments
@@ -905,6 +999,36 @@ pub(super) async fn append_save_changes_attachment_response<S, V>(
                 attachment: attachment.clone(),
                 custom_property_upserts: mapi_event_custom_property_values_from_map(&properties),
             });
+        } else if parent_is_contact {
+            if !properties
+                .get(&PID_TAG_ATTACHMENT_CONTACT_PHOTO)
+                .and_then(MapiValue::as_bool)
+                .unwrap_or(false)
+            {
+                responses.extend_from_slice(&rop_error_response(
+                    0x25,
+                    request.response_handle_index(),
+                    0x8004_0102,
+                ));
+                return;
+            }
+            session
+                .pending_contact_photo_attachments
+                .insert(parent_handle, attachment.clone());
+            match session.handles.get_mut(&parent_handle) {
+                Some(MapiObject::Contact { transaction, .. }) => {
+                    transaction
+                        .pending_properties
+                        .insert(PID_LID_HAS_PICTURE_TAG, MapiValue::Bool(true));
+                    transaction
+                        .deleted_properties
+                        .remove(&PID_LID_HAS_PICTURE_TAG);
+                }
+                Some(MapiObject::PendingContact { properties, .. }) => {
+                    properties.insert(PID_LID_HAS_PICTURE_TAG, MapiValue::Bool(true));
+                }
+                _ => unreachable!("contact attachment parent changed during save"),
+            }
         } else {
             responses.extend_from_slice(&rop_error_response(
                 0x25,
@@ -921,7 +1045,13 @@ pub(super) async fn append_save_changes_attachment_response<S, V>(
                 attach_num,
                 file_reference: format!(
                     "pending-{}:{parent_handle}:{attach_num}",
-                    if parent_is_event { "event" } else { "message" }
+                    if parent_is_event {
+                        "event"
+                    } else if parent_is_contact {
+                        "contact"
+                    } else {
+                        "message"
+                    }
                 ),
                 file_name: attachment.file_name,
                 media_type: attachment.media_type,
@@ -1045,6 +1175,65 @@ pub(super) fn event_attachments_for_parent_handle(
     );
     attachments.sort_by_key(|attachment| attachment.attach_num);
     attachments
+}
+
+fn contact_photo_attachment(
+    contact: &crate::mapi_store::MapiContact,
+) -> Option<crate::mapi_store::MapiAttachment> {
+    let photo_data = contact.contact.photo_data.as_deref()?.trim();
+    let bytes = BASE64_STANDARD.decode(photo_data).ok()?;
+    let media_type = contact
+        .contact
+        .photo_content_type
+        .clone()
+        .unwrap_or_else(|| "image/jpeg".to_string());
+    Some(crate::mapi_store::MapiAttachment {
+        attach_num: 0,
+        canonical_id: Uuid::nil(),
+        file_reference: format!("contact-photo:{}", contact.canonical_id),
+        file_name: contact_photo_file_name(&media_type),
+        media_type,
+        disposition: Some("inline".to_string()),
+        content_id: None,
+        size_octets: bytes.len() as u64,
+    })
+}
+
+fn contact_photo_attachment_object(
+    folder_id: u64,
+    contact_id: u64,
+    contact: &crate::mapi_store::MapiContact,
+) -> Option<MapiObject> {
+    let photo_data = contact.contact.photo_data.as_deref()?.trim();
+    let data = BASE64_STANDARD.decode(photo_data).ok()?;
+    let media_type = contact
+        .contact
+        .photo_content_type
+        .clone()
+        .unwrap_or_else(|| "image/jpeg".to_string());
+    let file_name = contact_photo_file_name(&media_type);
+    Some(MapiObject::PendingAttachment {
+        folder_id,
+        message_id: contact_id,
+        attach_num: 0,
+        properties: HashMap::from([
+            (PID_TAG_ATTACHMENT_CONTACT_PHOTO, MapiValue::Bool(true)),
+            (PID_TAG_ATTACH_MIME_TAG_W, MapiValue::String(media_type)),
+            (PID_TAG_ATTACH_LONG_FILENAME_W, MapiValue::String(file_name)),
+            (PID_TAG_ATTACH_METHOD, MapiValue::U32(ATTACH_BY_VALUE)),
+            (PID_TAG_ATTACH_SIZE, MapiValue::U32(data.len() as u32)),
+            (PID_TAG_ATTACHMENT_HIDDEN, MapiValue::Bool(true)),
+        ]),
+        data,
+    })
+}
+
+fn contact_photo_file_name(media_type: &str) -> String {
+    if media_type.eq_ignore_ascii_case("image/png") {
+        "ContactPhoto.png".to_string()
+    } else {
+        "ContactPhoto.jpg".to_string()
+    }
 }
 
 fn pending_event_attachment_object(

@@ -138,6 +138,67 @@ pub(in crate::mapi) fn contact_property_value_with_identity(
         PID_TAG_BUSINESS2_TELEPHONE_NUMBERS_W => Some(MapiValue::MultiString(
             contact_phone_values_by_label(contact, &["work2", "business2"]),
         )),
+        PID_TAG_BUSINESS2_TELEPHONE_NUMBER_W => Some(MapiValue::String(
+            contact_phone_values_by_label(contact, &["work2", "business2"])
+                .into_iter()
+                .next()
+                .unwrap_or_default(),
+        )),
+        PID_TAG_HOME2_TELEPHONE_NUMBER_W => Some(MapiValue::String(
+            contact_phone_values_by_label(contact, &["home2"])
+                .into_iter()
+                .next()
+                .unwrap_or_default(),
+        )),
+        PID_TAG_OTHER_TELEPHONE_NUMBER_W => Some(MapiValue::String(
+            contact_phone_values_by_label(contact, &["other"])
+                .into_iter()
+                .next()
+                .unwrap_or_default(),
+        )),
+        PID_TAG_ASSISTANT_TELEPHONE_NUMBER_W => {
+            Some(MapiValue::String(contact.assistant_phone.clone()))
+        }
+        PID_TAG_ASSISTANT_W => Some(MapiValue::String(contact.assistant_name.clone())),
+        PID_TAG_SPOUSE_NAME_W => Some(MapiValue::String(contact.spouse.clone())),
+        PID_TAG_CHILDRENS_NAMES_W => Some(MapiValue::MultiString(contact_string_values(
+            &contact.children_json,
+        ))),
+        PID_NAME_KEYWORDS_TAG => Some(MapiValue::MultiString(contact_string_values(
+            &contact.categories_json,
+        ))),
+        PID_TAG_BIRTHDAY | PID_LID_BIRTHDAY_LOCAL_TAG => {
+            contact_date_value(contact.birthday.as_deref())
+        }
+        PID_TAG_WEDDING_ANNIVERSARY | PID_LID_WEDDING_ANNIVERSARY_LOCAL_TAG => {
+            contact_date_value(contact.anniversary.as_deref())
+        }
+        PID_LID_HAS_PICTURE_TAG => Some(MapiValue::Bool(
+            contact
+                .photo_data
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty()),
+        )),
+        PID_LID_WORK_ADDRESS_STREET_W_TAG
+        | PID_LID_WORK_ADDRESS_CITY_W_TAG
+        | PID_LID_WORK_ADDRESS_STATE_W_TAG
+        | PID_LID_WORK_ADDRESS_POSTAL_CODE_W_TAG
+        | PID_LID_WORK_ADDRESS_COUNTRY_W_TAG
+        | PID_LID_WORK_ADDRESS_PO_BOX_W_TAG
+        | PID_TAG_HOME_ADDRESS_STREET_W
+        | PID_TAG_HOME_ADDRESS_CITY_W
+        | PID_TAG_HOME_ADDRESS_STATE_W
+        | PID_TAG_HOME_ADDRESS_POSTAL_CODE_W
+        | PID_TAG_HOME_ADDRESS_COUNTRY_W
+        | PID_TAG_HOME_ADDRESS_PO_BOX_W
+        | PID_TAG_OTHER_ADDRESS_STREET_W
+        | PID_TAG_OTHER_ADDRESS_CITY_W
+        | PID_TAG_OTHER_ADDRESS_STATE_W
+        | PID_TAG_OTHER_ADDRESS_POSTAL_CODE_W
+        | PID_TAG_OTHER_ADDRESS_COUNTRY_W
+        | PID_TAG_OTHER_ADDRESS_PO_BOX_W => Some(MapiValue::String(
+            contact_address_property_value(contact, property_tag),
+        )),
         PID_TAG_COMPANY_NAME_W => Some(MapiValue::String(contact_organization_name(contact))),
         PID_TAG_DEPARTMENT_NAME_W => Some(MapiValue::String(contact.team.clone())),
         PID_TAG_TITLE_W => Some(MapiValue::String(contact_job_title(contact))),
@@ -315,6 +376,67 @@ fn contact_url_by_label(contact: &AccessibleContact, labels: &[&str]) -> String 
         .unwrap_or_default()
 }
 
+fn contact_date_value(value: Option<&str>) -> Option<MapiValue> {
+    value.filter(|value| value.len() == 10).map(|value| {
+        MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(&format!(
+            "{value}T00:00:00Z"
+        )))
+    })
+}
+
+fn contact_string_values(value: &serde_json::Value) -> Vec<String> {
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn contact_address_property_value(contact: &AccessibleContact, property_tag: u32) -> String {
+    let (label, key) = match property_tag {
+        PID_LID_WORK_ADDRESS_STREET_W_TAG => ("work", "street"),
+        PID_LID_WORK_ADDRESS_CITY_W_TAG => ("work", "city"),
+        PID_LID_WORK_ADDRESS_STATE_W_TAG => ("work", "state"),
+        PID_LID_WORK_ADDRESS_POSTAL_CODE_W_TAG => ("work", "postalCode"),
+        PID_LID_WORK_ADDRESS_COUNTRY_W_TAG => ("work", "country"),
+        PID_LID_WORK_ADDRESS_PO_BOX_W_TAG => ("work", "postOfficeBox"),
+        PID_TAG_HOME_ADDRESS_STREET_W => ("home", "street"),
+        PID_TAG_HOME_ADDRESS_CITY_W => ("home", "city"),
+        PID_TAG_HOME_ADDRESS_STATE_W => ("home", "state"),
+        PID_TAG_HOME_ADDRESS_POSTAL_CODE_W => ("home", "postalCode"),
+        PID_TAG_HOME_ADDRESS_COUNTRY_W => ("home", "country"),
+        PID_TAG_HOME_ADDRESS_PO_BOX_W => ("home", "postOfficeBox"),
+        PID_TAG_OTHER_ADDRESS_STREET_W => ("other", "street"),
+        PID_TAG_OTHER_ADDRESS_CITY_W => ("other", "city"),
+        PID_TAG_OTHER_ADDRESS_STATE_W => ("other", "state"),
+        PID_TAG_OTHER_ADDRESS_POSTAL_CODE_W => ("other", "postalCode"),
+        PID_TAG_OTHER_ADDRESS_COUNTRY_W => ("other", "country"),
+        PID_TAG_OTHER_ADDRESS_PO_BOX_W => ("other", "postOfficeBox"),
+        _ => return String::new(),
+    };
+    contact_address_by_label(contact, label)
+        .and_then(|address| address.get(key))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn contact_address_by_label<'a>(
+    contact: &'a AccessibleContact,
+    label: &str,
+) -> Option<&'a serde_json::Value> {
+    contact.addresses_json.as_array()?.iter().find(|address| {
+        address
+            .get("label")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|value| value.eq_ignore_ascii_case(label))
+    })
+}
+
 fn contact_labeled_json_values(
     value: &serde_json::Value,
     key: &str,
@@ -449,6 +571,19 @@ pub(in crate::mapi) fn contact_input_from_mapi(
     let business_phone =
         optional_pending_text_property(properties, &[PID_TAG_BUSINESS_TELEPHONE_NUMBER_W]);
     let home_phone = optional_pending_text_property(properties, &[PID_TAG_HOME_TELEPHONE_NUMBER_W]);
+    let home2_phone =
+        optional_pending_text_property(properties, &[PID_TAG_HOME2_TELEPHONE_NUMBER_W]);
+    let other_phone =
+        optional_pending_text_property(properties, &[PID_TAG_OTHER_TELEPHONE_NUMBER_W]);
+    let business2_phone =
+        optional_pending_text_property(properties, &[PID_TAG_BUSINESS2_TELEPHONE_NUMBER_W])
+            .or_else(|| {
+                optional_pending_multi_string_property(
+                    properties,
+                    PID_TAG_BUSINESS2_TELEPHONE_NUMBERS_W,
+                )
+                .and_then(|values| values.into_iter().next())
+            });
     let primary_phone =
         optional_pending_text_property(properties, &[PID_TAG_PRIMARY_TELEPHONE_NUMBER_W]);
     let phone = mobile_phone
@@ -484,14 +619,25 @@ pub(in crate::mapi) fn contact_input_from_mapi(
             email2.as_deref(),
             email3.as_deref(),
         )),
-        phones_json: Some(contact_phones_json_from_mapi(
-            existing,
-            &phone,
-            mobile_phone.as_deref(),
-            business_phone.as_deref().or(primary_phone.as_deref()),
-            home_phone.as_deref(),
-        )),
-        addresses_json: None,
+        phones_json: (mobile_phone.is_some()
+            || business_phone.is_some()
+            || home_phone.is_some()
+            || business2_phone.is_some()
+            || home2_phone.is_some()
+            || other_phone.is_some()
+            || primary_phone.is_some())
+        .then(|| {
+            contact_phones_json_from_mapi(
+                existing,
+                mobile_phone.as_deref(),
+                business_phone.as_deref().or(primary_phone.as_deref()),
+                home_phone.as_deref(),
+                business2_phone.as_deref(),
+                home2_phone.as_deref(),
+                other_phone.as_deref(),
+            )
+        }),
+        addresses_json: contact_addresses_json_from_mapi(existing, properties),
         urls_json: (personal_url.is_some() || business_url.is_some()).then(|| {
             contact_urls_json_from_mapi(
                 &existing.urls_json,
@@ -501,6 +647,40 @@ pub(in crate::mapi) fn contact_input_from_mapi(
         }),
         organization_name: company,
         job_title: title,
+        categories_json: optional_pending_categories_property(properties),
+        birthday: optional_pending_contact_date_property(
+            properties,
+            &[PID_TAG_BIRTHDAY, PID_LID_BIRTHDAY_LOCAL_TAG],
+        ),
+        anniversary: optional_pending_contact_date_property(
+            properties,
+            &[
+                PID_TAG_WEDDING_ANNIVERSARY,
+                PID_LID_WEDDING_ANNIVERSARY_LOCAL_TAG,
+            ],
+        ),
+        children_json: optional_pending_multi_string_property(
+            properties,
+            PID_TAG_CHILDRENS_NAMES_W,
+        )
+        .map(|values| {
+            serde_json::Value::Array(values.into_iter().map(serde_json::Value::String).collect())
+        }),
+        spouse: optional_pending_text_property(properties, &[PID_TAG_SPOUSE_NAME_W]),
+        assistant_name: optional_pending_text_property(properties, &[PID_TAG_ASSISTANT_W]),
+        assistant_phone: optional_pending_text_property(
+            properties,
+            &[PID_TAG_ASSISTANT_TELEPHONE_NUMBER_W],
+        ),
+        photo_data: properties
+            .get(&PID_LID_HAS_PICTURE_TAG)
+            .and_then(|value| match value {
+                MapiValue::Bool(false) => Some(None),
+                _ => None,
+            }),
+        photo_content_type: properties
+            .get(&PID_LID_HAS_PICTURE_TAG)
+            .and_then(|value| matches!(value, MapiValue::Bool(false)).then_some(None)),
         ..Default::default()
     }
 }
@@ -585,20 +765,21 @@ fn update_primary_labeled_json(
 
 fn contact_phones_json_from_mapi(
     existing: &AccessibleContact,
-    primary: &str,
     mobile: Option<&str>,
     business: Option<&str>,
     home: Option<&str>,
+    business2: Option<&str>,
+    home2: Option<&str>,
+    other: Option<&str>,
 ) -> serde_json::Value {
-    let mut rows = Vec::new();
-    push_labeled_value(&mut rows, "phone", "mobile", mobile);
-    push_labeled_value(&mut rows, "phone", "work", business.or(Some(primary)));
-    push_labeled_value(&mut rows, "phone", "home", home);
-    if rows.is_empty() {
-        existing.phones_json.clone()
-    } else {
-        serde_json::Value::Array(rows)
-    }
+    let mut rows = existing.phones_json.as_array().cloned().unwrap_or_default();
+    upsert_labeled_value(&mut rows, "phone", "mobile", mobile);
+    upsert_labeled_value(&mut rows, "phone", "work", business);
+    upsert_labeled_value(&mut rows, "phone", "home", home);
+    upsert_labeled_value(&mut rows, "phone", "work2", business2);
+    upsert_labeled_value(&mut rows, "phone", "home2", home2);
+    upsert_labeled_value(&mut rows, "phone", "other", other);
+    serde_json::Value::Array(rows)
 }
 
 fn contact_urls_json_from_mapi(
@@ -610,17 +791,6 @@ fn contact_urls_json_from_mapi(
     upsert_labeled_value(&mut rows, "url", "home", personal);
     upsert_labeled_value(&mut rows, "url", "work", business);
     serde_json::Value::Array(rows)
-}
-
-fn push_labeled_value(
-    rows: &mut Vec<serde_json::Value>,
-    key: &str,
-    label: &str,
-    value: Option<&str>,
-) {
-    if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-        rows.push(serde_json::json!({ key: value, "label": label }));
-    }
 }
 
 fn upsert_labeled_value(
@@ -648,6 +818,153 @@ fn upsert_labeled_value(
     }
 }
 
+fn contact_addresses_json_from_mapi(
+    existing: &AccessibleContact,
+    properties: &HashMap<u32, MapiValue>,
+) -> Option<serde_json::Value> {
+    let mut rows = existing
+        .addresses_json
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let mut changed = false;
+    for (label, fields) in [
+        (
+            "work",
+            [
+                (PID_LID_WORK_ADDRESS_STREET_W_TAG, "street"),
+                (PID_LID_WORK_ADDRESS_CITY_W_TAG, "city"),
+                (PID_LID_WORK_ADDRESS_STATE_W_TAG, "state"),
+                (PID_LID_WORK_ADDRESS_POSTAL_CODE_W_TAG, "postalCode"),
+                (PID_LID_WORK_ADDRESS_COUNTRY_W_TAG, "country"),
+                (PID_LID_WORK_ADDRESS_PO_BOX_W_TAG, "postOfficeBox"),
+            ],
+        ),
+        (
+            "home",
+            [
+                (PID_TAG_HOME_ADDRESS_STREET_W, "street"),
+                (PID_TAG_HOME_ADDRESS_CITY_W, "city"),
+                (PID_TAG_HOME_ADDRESS_STATE_W, "state"),
+                (PID_TAG_HOME_ADDRESS_POSTAL_CODE_W, "postalCode"),
+                (PID_TAG_HOME_ADDRESS_COUNTRY_W, "country"),
+                (PID_TAG_HOME_ADDRESS_PO_BOX_W, "postOfficeBox"),
+            ],
+        ),
+        (
+            "other",
+            [
+                (PID_TAG_OTHER_ADDRESS_STREET_W, "street"),
+                (PID_TAG_OTHER_ADDRESS_CITY_W, "city"),
+                (PID_TAG_OTHER_ADDRESS_STATE_W, "state"),
+                (PID_TAG_OTHER_ADDRESS_POSTAL_CODE_W, "postalCode"),
+                (PID_TAG_OTHER_ADDRESS_COUNTRY_W, "country"),
+                (PID_TAG_OTHER_ADDRESS_PO_BOX_W, "postOfficeBox"),
+            ],
+        ),
+    ] {
+        let values = fields
+            .into_iter()
+            .filter_map(|(tag, key)| {
+                properties
+                    .get(&tag)
+                    .and_then(MapiValue::as_text)
+                    .map(|value| (key, value.to_string()))
+            })
+            .collect::<Vec<_>>();
+        if values.is_empty() {
+            continue;
+        }
+        changed = true;
+        if let Some(address) = rows.iter_mut().find(|address| {
+            address
+                .get("label")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|current| current.eq_ignore_ascii_case(label))
+        }) {
+            let object = address.as_object_mut()?;
+            for (key, value) in values {
+                if value.trim().is_empty() {
+                    object.remove(key);
+                } else {
+                    object.insert(key.to_string(), serde_json::Value::String(value));
+                }
+            }
+        } else {
+            let mut object = serde_json::Map::new();
+            object.insert(
+                "label".to_string(),
+                serde_json::Value::String(label.to_string()),
+            );
+            for (key, value) in values {
+                if !value.trim().is_empty() {
+                    object.insert(key.to_string(), serde_json::Value::String(value));
+                }
+            }
+            if object.len() > 1 {
+                rows.push(serde_json::Value::Object(object));
+            }
+        }
+    }
+    changed.then(|| serde_json::Value::Array(rows))
+}
+
+fn optional_pending_categories_property(
+    properties: &HashMap<u32, MapiValue>,
+) -> Option<serde_json::Value> {
+    let value = properties.get(&PID_NAME_KEYWORDS_TAG)?;
+    let values = match value {
+        MapiValue::String(value) => vec![value.trim().to_string()],
+        MapiValue::MultiString(values) => values
+            .iter()
+            .map(|value| value.trim().to_string())
+            .collect(),
+        _ => return None,
+    };
+    Some(serde_json::Value::Array(
+        values
+            .into_iter()
+            .filter(|value| !value.is_empty())
+            .map(serde_json::Value::String)
+            .collect(),
+    ))
+}
+
+fn optional_pending_multi_string_property(
+    properties: &HashMap<u32, MapiValue>,
+    tag: u32,
+) -> Option<Vec<String>> {
+    match properties.get(&tag)? {
+        MapiValue::String(value) => Some(vec![value.trim().to_string()]),
+        MapiValue::MultiString(values) => Some(
+            values
+                .iter()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
+fn optional_pending_contact_date_property(
+    properties: &HashMap<u32, MapiValue>,
+    tags: &[u32],
+) -> Option<Option<String>> {
+    let value = tags.iter().find_map(|tag| properties.get(tag))?;
+    let filetime = match value {
+        MapiValue::I64(value) if *value >= 0 => *value as u64,
+        MapiValue::U64(value) => *value,
+        _ => return None,
+    };
+    // Contact birthdays and anniversaries can predate the Unix epoch. The
+    // general FILETIME formatter only accepts post-1970 values, whereas the
+    // MAPI date properties use the full FILETIME range.
+    let unix_seconds = (filetime / 10_000_000) as i64 - 11_644_473_600;
+    let (year, month, day) = civil_from_days(unix_seconds.div_euclid(86_400));
+    Some(Some(format!("{year:04}-{month:02}-{day:02}")))
+}
+
 pub(in crate::mapi) fn reject_unsupported_mapi_contact_properties(
     properties: &HashMap<u32, MapiValue>,
 ) -> Result<()> {
@@ -670,12 +987,44 @@ pub(in crate::mapi) fn reject_unsupported_mapi_contact_properties(
                 | PID_TAG_MOBILE_TELEPHONE_NUMBER_W
                 | PID_TAG_BUSINESS_TELEPHONE_NUMBER_W
                 | PID_TAG_HOME_TELEPHONE_NUMBER_W
+                | PID_TAG_HOME2_TELEPHONE_NUMBER_W
+                | PID_TAG_OTHER_TELEPHONE_NUMBER_W
+                | PID_TAG_ASSISTANT_TELEPHONE_NUMBER_W
+                | PID_TAG_ASSISTANT_W
                 | PID_TAG_PRIMARY_TELEPHONE_NUMBER_W
+                | PID_TAG_BUSINESS2_TELEPHONE_NUMBER_W
+                | PID_TAG_BUSINESS2_TELEPHONE_NUMBERS_W
                 | PID_TAG_COMPANY_NAME_W
                 | PID_TAG_DEPARTMENT_NAME_W
+                | PID_TAG_BIRTHDAY
+                | PID_TAG_WEDDING_ANNIVERSARY
+                | PID_TAG_SPOUSE_NAME_W
+                | PID_TAG_CHILDRENS_NAMES_W
                 | PID_TAG_PERSONAL_HOME_PAGE_W
                 | PID_TAG_BUSINESS_HOME_PAGE_W
                 | PID_TAG_BODY_W
+                | PID_NAME_KEYWORDS_TAG
+                | PID_LID_HAS_PICTURE_TAG
+                | PID_LID_BIRTHDAY_LOCAL_TAG
+                | PID_LID_WEDDING_ANNIVERSARY_LOCAL_TAG
+                | PID_LID_WORK_ADDRESS_STREET_W_TAG
+                | PID_LID_WORK_ADDRESS_CITY_W_TAG
+                | PID_LID_WORK_ADDRESS_STATE_W_TAG
+                | PID_LID_WORK_ADDRESS_POSTAL_CODE_W_TAG
+                | PID_LID_WORK_ADDRESS_COUNTRY_W_TAG
+                | PID_LID_WORK_ADDRESS_PO_BOX_W_TAG
+                | PID_TAG_HOME_ADDRESS_STREET_W
+                | PID_TAG_HOME_ADDRESS_CITY_W
+                | PID_TAG_HOME_ADDRESS_STATE_W
+                | PID_TAG_HOME_ADDRESS_POSTAL_CODE_W
+                | PID_TAG_HOME_ADDRESS_COUNTRY_W
+                | PID_TAG_HOME_ADDRESS_PO_BOX_W
+                | PID_TAG_OTHER_ADDRESS_STREET_W
+                | PID_TAG_OTHER_ADDRESS_CITY_W
+                | PID_TAG_OTHER_ADDRESS_STATE_W
+                | PID_TAG_OTHER_ADDRESS_POSTAL_CODE_W
+                | PID_TAG_OTHER_ADDRESS_COUNTRY_W
+                | PID_TAG_OTHER_ADDRESS_PO_BOX_W
                 | PID_LID_EMAIL1_ADDRESS_TYPE_W_TAG
                 | PID_LID_EMAIL1_DISPLAY_NAME_W_TAG
                 | PID_LID_EMAIL1_EMAIL_ADDRESS_W_TAG
@@ -735,6 +1084,44 @@ pub(in crate::mapi) fn contact_input_from_mapi_with_deletions(
                     &["home"],
                 ));
             }
+            PID_TAG_HOME2_TELEPHONE_NUMBER_W => {
+                input.phones_json = Some(remove_labeled_contact_values(
+                    input.phones_json.unwrap_or_default(),
+                    "phone",
+                    &["home2"],
+                ));
+            }
+            PID_TAG_OTHER_TELEPHONE_NUMBER_W => {
+                input.phones_json = Some(remove_labeled_contact_values(
+                    input.phones_json.unwrap_or_default(),
+                    "phone",
+                    &["other"],
+                ));
+            }
+            PID_TAG_BUSINESS2_TELEPHONE_NUMBER_W | PID_TAG_BUSINESS2_TELEPHONE_NUMBERS_W => {
+                input.phones_json = Some(remove_labeled_contact_values(
+                    input.phones_json.unwrap_or_default(),
+                    "phone",
+                    &["work2", "business2"],
+                ));
+            }
+            PID_TAG_ASSISTANT_TELEPHONE_NUMBER_W => input.assistant_phone = Some(String::new()),
+            PID_TAG_ASSISTANT_W => input.assistant_name = Some(String::new()),
+            PID_TAG_SPOUSE_NAME_W => input.spouse = Some(String::new()),
+            PID_TAG_CHILDRENS_NAMES_W => {
+                input.children_json = Some(serde_json::Value::Array(Vec::new()))
+            }
+            PID_NAME_KEYWORDS_TAG => {
+                input.categories_json = Some(serde_json::Value::Array(Vec::new()))
+            }
+            PID_TAG_BIRTHDAY | PID_LID_BIRTHDAY_LOCAL_TAG => input.birthday = Some(None),
+            PID_TAG_WEDDING_ANNIVERSARY | PID_LID_WEDDING_ANNIVERSARY_LOCAL_TAG => {
+                input.anniversary = Some(None)
+            }
+            PID_LID_HAS_PICTURE_TAG => {
+                input.photo_data = Some(None);
+                input.photo_content_type = Some(None);
+            }
             PID_TAG_PRIMARY_TELEPHONE_NUMBER_W => input.phone.clear(),
             PID_TAG_COMPANY_NAME_W => input.organization_name.clear(),
             PID_TAG_DEPARTMENT_NAME_W => input.team.clear(),
@@ -781,6 +1168,31 @@ pub(in crate::mapi) fn contact_input_from_mapi_with_deletions(
                     2,
                 ));
             }
+            PID_LID_WORK_ADDRESS_STREET_W_TAG
+            | PID_LID_WORK_ADDRESS_CITY_W_TAG
+            | PID_LID_WORK_ADDRESS_STATE_W_TAG
+            | PID_LID_WORK_ADDRESS_POSTAL_CODE_W_TAG
+            | PID_LID_WORK_ADDRESS_COUNTRY_W_TAG
+            | PID_LID_WORK_ADDRESS_PO_BOX_W_TAG
+            | PID_TAG_HOME_ADDRESS_STREET_W
+            | PID_TAG_HOME_ADDRESS_CITY_W
+            | PID_TAG_HOME_ADDRESS_STATE_W
+            | PID_TAG_HOME_ADDRESS_POSTAL_CODE_W
+            | PID_TAG_HOME_ADDRESS_COUNTRY_W
+            | PID_TAG_HOME_ADDRESS_PO_BOX_W
+            | PID_TAG_OTHER_ADDRESS_STREET_W
+            | PID_TAG_OTHER_ADDRESS_CITY_W
+            | PID_TAG_OTHER_ADDRESS_STATE_W
+            | PID_TAG_OTHER_ADDRESS_POSTAL_CODE_W
+            | PID_TAG_OTHER_ADDRESS_COUNTRY_W
+            | PID_TAG_OTHER_ADDRESS_PO_BOX_W => {
+                input.addresses_json = Some(remove_contact_address_property(
+                    input
+                        .addresses_json
+                        .unwrap_or_else(|| existing.addresses_json.clone()),
+                    canonical_property_storage_tag(*property_tag),
+                ));
+            }
             _ => bail!("MAPI Contact property {property_tag:#010X} cannot be cleared"),
         }
     }
@@ -819,6 +1231,47 @@ fn remove_contact_email_index(value: serde_json::Value, index: usize) -> serde_j
     if let Some(position) = email_positions.nth(index) {
         rows.remove(position);
     }
+    serde_json::Value::Array(rows)
+}
+
+fn remove_contact_address_property(
+    value: serde_json::Value,
+    property_tag: u32,
+) -> serde_json::Value {
+    let (label, key) = match property_tag {
+        PID_LID_WORK_ADDRESS_STREET_W_TAG => ("work", "street"),
+        PID_LID_WORK_ADDRESS_CITY_W_TAG => ("work", "city"),
+        PID_LID_WORK_ADDRESS_STATE_W_TAG => ("work", "state"),
+        PID_LID_WORK_ADDRESS_POSTAL_CODE_W_TAG => ("work", "postalCode"),
+        PID_LID_WORK_ADDRESS_COUNTRY_W_TAG => ("work", "country"),
+        PID_LID_WORK_ADDRESS_PO_BOX_W_TAG => ("work", "postOfficeBox"),
+        PID_TAG_HOME_ADDRESS_STREET_W => ("home", "street"),
+        PID_TAG_HOME_ADDRESS_CITY_W => ("home", "city"),
+        PID_TAG_HOME_ADDRESS_STATE_W => ("home", "state"),
+        PID_TAG_HOME_ADDRESS_POSTAL_CODE_W => ("home", "postalCode"),
+        PID_TAG_HOME_ADDRESS_COUNTRY_W => ("home", "country"),
+        PID_TAG_HOME_ADDRESS_PO_BOX_W => ("home", "postOfficeBox"),
+        PID_TAG_OTHER_ADDRESS_STREET_W => ("other", "street"),
+        PID_TAG_OTHER_ADDRESS_CITY_W => ("other", "city"),
+        PID_TAG_OTHER_ADDRESS_STATE_W => ("other", "state"),
+        PID_TAG_OTHER_ADDRESS_POSTAL_CODE_W => ("other", "postalCode"),
+        PID_TAG_OTHER_ADDRESS_COUNTRY_W => ("other", "country"),
+        PID_TAG_OTHER_ADDRESS_PO_BOX_W => ("other", "postOfficeBox"),
+        _ => return value,
+    };
+    let mut rows = value.as_array().cloned().unwrap_or_default();
+    for address in &mut rows {
+        let matches_label = address
+            .get("label")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|current| current.eq_ignore_ascii_case(label));
+        if matches_label {
+            if let Some(object) = address.as_object_mut() {
+                object.remove(key);
+            }
+        }
+    }
+    rows.retain(|address| address.as_object().is_some_and(|object| object.len() > 1));
     serde_json::Value::Array(rows)
 }
 

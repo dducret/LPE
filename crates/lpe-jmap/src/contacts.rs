@@ -1,5 +1,7 @@
 use anyhow::{anyhow, bail, Result};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use lpe_domain::normalization;
+use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest};
 use lpe_storage::{
     AccessibleContact, AuthenticatedAccount, CollaborationCollection, ContactNameFields,
     ContactSourceFields, RecipientSuggestion, UpsertClientContactInput,
@@ -337,7 +339,12 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         if let Some(create) = arguments.create {
             for (creation_id, value) in create {
-                match parse_contact_input(None, account_id, value) {
+                match parse_contact_input(None, account_id, value).and_then(
+                    |(collection_id, input)| {
+                        self.validate_contact_photo(&input)?;
+                        Ok((collection_id, input))
+                    },
+                ) {
                     Ok((collection_id, input)) => match self
                         .store
                         .create_accessible_contact(account_id, collection_id.as_deref(), input)
@@ -366,14 +373,19 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         .await
                         .map(|input| (contact_id, input))
                     {
-                        Ok((contact_id, input)) => match self
-                            .store
-                            .update_accessible_contact(account_id, contact_id, input)
-                            .await
-                        {
-                            Ok(_) => {
-                                updated.insert(id, Value::Object(Map::new()));
-                            }
+                        Ok((contact_id, input)) => match self.validate_contact_photo(&input) {
+                            Ok(()) => match self
+                                .store
+                                .update_accessible_contact(account_id, contact_id, input)
+                                .await
+                            {
+                                Ok(_) => {
+                                    updated.insert(id, Value::Object(Map::new()));
+                                }
+                                Err(error) => {
+                                    not_updated.insert(id, set_error(&error.to_string()));
+                                }
+                            },
                             Err(error) => {
                                 not_updated.insert(id, set_error(&error.to_string()));
                             }
@@ -496,6 +508,35 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         apply_jmap_property_patch(&mut patched, object)?;
         parse_contact_input(Some(contact_id), account_id, patched).map(|(_, input)| input)
     }
+
+    fn validate_contact_photo(&self, input: &UpsertClientContactInput) -> Result<()> {
+        let Some(Some(photo_data)) = input.photo_data.as_ref() else {
+            return Ok(());
+        };
+        let photo_data = photo_data.trim();
+        if photo_data.is_empty() {
+            return Ok(());
+        }
+        let bytes = BASE64
+            .decode(photo_data)
+            .map_err(|_| anyhow!("contact photo must contain base64 data"))?;
+        let outcome = self.validator.validate_bytes(
+            ValidationRequest {
+                ingress_context: IngressContext::JmapUpload,
+                declared_mime: input.photo_content_type.clone().flatten(),
+                filename: Some("contact-photo".to_string()),
+                expected_kind: ExpectedKind::Any,
+            },
+            &bytes,
+        )?;
+        if outcome.policy_decision != PolicyDecision::Accept {
+            bail!(
+                "JMAP contact photo blocked by Magika validation: {}",
+                outcome.reason
+            );
+        }
+        Ok(())
+    }
 }
 
 fn address_book_properties(properties: Option<Vec<String>>) -> HashSet<String> {
@@ -555,6 +596,13 @@ fn contact_properties(properties: Option<Vec<String>>) -> HashSet<String> {
                 "phones".to_string(),
                 "addresses".to_string(),
                 "onlineServices".to_string(),
+                "photo".to_string(),
+                "categories".to_string(),
+                "birthday".to_string(),
+                "anniversary".to_string(),
+                "children".to_string(),
+                "spouse".to_string(),
+                "assistant".to_string(),
                 "organizations".to_string(),
                 "titles".to_string(),
                 "notes".to_string(),
@@ -613,6 +661,43 @@ fn contact_to_value(contact: &AccessibleContact, properties: &HashSet<String>) -
             &mut object,
             "onlineServices",
             contact_array_to_named_object(&contact.urls_json, "url", "uri"),
+        );
+    }
+    if properties.contains("photo") && contact.photo_data.is_some() {
+        object.insert(
+            "photo".to_string(),
+            json!({"data": contact.photo_data, "contentType": contact.photo_content_type}),
+        );
+    }
+    insert_non_empty_array(
+        &mut object,
+        "categories",
+        &contact.categories_json,
+        properties,
+    );
+    insert_non_empty_string(
+        &mut object,
+        "birthday",
+        contact.birthday.as_deref(),
+        properties,
+    );
+    insert_non_empty_string(
+        &mut object,
+        "anniversary",
+        contact.anniversary.as_deref(),
+        properties,
+    );
+    insert_non_empty_array(&mut object, "children", &contact.children_json, properties);
+    insert_non_empty_string(&mut object, "spouse", Some(&contact.spouse), properties);
+    if properties.contains("assistant")
+        && (!contact.assistant_name.is_empty() || !contact.assistant_phone.is_empty())
+    {
+        object.insert(
+            "assistant".to_string(),
+            json!({
+                "name": contact.assistant_name,
+                "phone": contact.assistant_phone,
+            }),
         );
     }
     if properties.contains("organizations")
@@ -689,6 +774,28 @@ fn recipient_suggestion_to_value(suggestion: &RecipientSuggestion) -> Value {
 fn insert_non_empty_object(object: &mut Map<String, Value>, key: &str, value: Value) {
     if value.as_object().is_some_and(|object| !object.is_empty()) {
         object.insert(key.to_string(), value);
+    }
+}
+
+fn insert_non_empty_array(
+    object: &mut Map<String, Value>,
+    key: &str,
+    value: &Value,
+    properties: &HashSet<String>,
+) {
+    if properties.contains(key) && value.as_array().is_some_and(|items| !items.is_empty()) {
+        object.insert(key.to_string(), value.clone());
+    }
+}
+
+fn insert_non_empty_string(
+    object: &mut Map<String, Value>,
+    key: &str,
+    value: Option<&str>,
+    properties: &HashSet<String>,
+) {
+    if properties.contains(key) && value.is_some_and(|value| !value.is_empty()) {
+        object.insert(key.to_string(), Value::String(value.unwrap().to_string()));
     }
 }
 
@@ -838,6 +945,18 @@ fn parse_contact_input(
                 "uri",
                 "url",
             )?),
+            photo_data: parse_contact_photo_field(object.get("photo"), "data")?,
+            photo_content_type: parse_contact_photo_field(object.get("photo"), "contentType")?,
+            categories_json: parse_contact_string_array_field(
+                object.get("categories"),
+                "categories",
+            )?,
+            birthday: parse_contact_date_field(object.get("birthday"), "birthday")?,
+            anniversary: parse_contact_date_field(object.get("anniversary"), "anniversary")?,
+            children_json: parse_contact_string_array_field(object.get("children"), "children")?,
+            spouse: parse_contact_string_field(object.get("spouse"), "spouse")?,
+            assistant_name: parse_contact_assistant_field(object.get("assistant"), "name")?,
+            assistant_phone: parse_contact_assistant_field(object.get("assistant"), "phone")?,
             organization_name: parse_contact_organization_name(object.get("organizations"))?,
             job_title: parse_contact_job_title(object.get("titles"))?,
             raw_vcard: object
@@ -866,7 +985,8 @@ fn reject_unknown_contact_properties(object: &Map<String, Value>) -> Result<()> 
     for key in object.keys() {
         match key.as_str() {
             "id" | "uid" | "kind" | "name" | "emails" | "phones" | "addresses"
-            | "onlineServices" | "urls" | "organizations" | "titles" | "notes"
+            | "onlineServices" | "urls" | "photo" | "categories" | "birthday" | "anniversary"
+            | "children" | "spouse" | "assistant" | "organizations" | "titles" | "notes"
             | "addressBookIds" | "rawVCard" | "source" => {}
             _ => bail!("unsupported contact card property: {key}"),
         }
@@ -940,6 +1060,110 @@ fn contact_object_string(object: &Map<String, Value>, key: &str) -> String {
         .map(str::trim)
         .unwrap_or_default()
         .to_string()
+}
+
+fn parse_contact_photo_field(value: Option<&Value>, key: &str) -> Result<Option<Option<String>>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(Some(None));
+    }
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("photo must be an object or null"))?;
+    Ok(Some(
+        object
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+    ))
+}
+
+fn parse_contact_string_array_field(value: Option<&Value>, name: &str) -> Result<Option<Value>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(Some(Value::Array(Vec::new())));
+    }
+    let items = value
+        .as_array()
+        .ok_or_else(|| anyhow!("{name} must be an array"))?;
+    if items.iter().any(|item| item.as_str().is_none()) {
+        bail!("{name} entries must be strings");
+    }
+    Ok(Some(Value::Array(
+        items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| Value::String(value.to_string()))
+            .collect(),
+    )))
+}
+
+fn parse_contact_date_field(value: Option<&Value>, name: &str) -> Result<Option<Option<String>>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(Some(None));
+    }
+    let value = value
+        .as_str()
+        .ok_or_else(|| anyhow!("{name} must be a YYYY-MM-DD string or null"))?
+        .trim();
+    if value.len() != 10
+        || !value.as_bytes().get(4).is_some_and(|value| *value == b'-')
+        || !value.as_bytes().get(7).is_some_and(|value| *value == b'-')
+        || !value
+            .bytes()
+            .enumerate()
+            .all(|(index, value)| index == 4 || index == 7 || value.is_ascii_digit())
+    {
+        bail!("{name} must be a YYYY-MM-DD string or null");
+    }
+    Ok(Some(Some(value.to_string())))
+}
+
+fn parse_contact_string_field(value: Option<&Value>, name: &str) -> Result<Option<String>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(Some(String::new()));
+    }
+    Ok(Some(
+        value
+            .as_str()
+            .ok_or_else(|| anyhow!("{name} must be a string or null"))?
+            .trim()
+            .to_string(),
+    ))
+}
+
+fn parse_contact_assistant_field(value: Option<&Value>, key: &str) -> Result<Option<String>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(Some(String::new()));
+    }
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("assistant must be an object or null"))?;
+    Ok(Some(
+        object
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default()
+            .to_string(),
+    ))
 }
 
 fn parse_contact_email(value: Option<&Value>) -> Result<String> {

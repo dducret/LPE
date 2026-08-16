@@ -9416,6 +9416,15 @@ impl ExchangeStore for FakeStore {
             job_title: input.contact.job_title,
             raw_vcard: input.contact.raw_vcard,
             source: input.contact.source,
+            photo_data: input.contact.photo_data.flatten(),
+            photo_content_type: input.contact.photo_content_type.flatten(),
+            categories_json: input.contact.categories_json.unwrap_or_default(),
+            birthday: input.contact.birthday.flatten(),
+            anniversary: input.contact.anniversary.flatten(),
+            children_json: input.contact.children_json.unwrap_or_default(),
+            spouse: input.contact.spouse.unwrap_or_default(),
+            assistant_name: input.contact.assistant_name.unwrap_or_default(),
+            assistant_phone: input.contact.assistant_phone.unwrap_or_default(),
         };
         let source_key = imported_identity
             .as_ref()
@@ -9953,6 +9962,15 @@ impl ExchangeStore for FakeStore {
             job_title: input.job_title,
             raw_vcard: input.raw_vcard,
             source: input.source,
+            photo_data: input.photo_data.flatten(),
+            photo_content_type: input.photo_content_type.flatten(),
+            categories_json: input.categories_json.unwrap_or_default(),
+            birthday: input.birthday.flatten(),
+            anniversary: input.anniversary.flatten(),
+            children_json: input.children_json.unwrap_or_default(),
+            spouse: input.spouse.unwrap_or_default(),
+            assistant_name: input.assistant_name.unwrap_or_default(),
+            assistant_phone: input.assistant_phone.unwrap_or_default(),
         };
         self.contact_versions.lock().unwrap().insert(contact.id, 1);
         self.contacts.lock().unwrap().push(contact.clone());
@@ -9988,6 +10006,33 @@ impl ExchangeStore for FakeStore {
         }
         if let Some(value) = input.urls_json {
             contact.urls_json = value;
+        }
+        if let Some(value) = input.photo_data {
+            contact.photo_data = value;
+        }
+        if let Some(value) = input.photo_content_type {
+            contact.photo_content_type = value;
+        }
+        if let Some(value) = input.categories_json {
+            contact.categories_json = value;
+        }
+        if let Some(value) = input.birthday {
+            contact.birthday = value;
+        }
+        if let Some(value) = input.anniversary {
+            contact.anniversary = value;
+        }
+        if let Some(value) = input.children_json {
+            contact.children_json = value;
+        }
+        if let Some(value) = input.spouse {
+            contact.spouse = value;
+        }
+        if let Some(value) = input.assistant_name {
+            contact.assistant_name = value;
+        }
+        if let Some(value) = input.assistant_phone {
+            contact.assistant_phone = value;
         }
         contact.organization_name = input.organization_name;
         contact.job_title = input.job_title;

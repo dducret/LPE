@@ -1,5 +1,5 @@
 import React from "react";
-import { blankContact, blankDraft, blankEvent, blankJournalEntry, blankNote, blankTask, countFolders, filterContacts, filterJournalEntries, filterMessages, filterNotes, filterTasks, quoteMessage } from "./client-helpers";
+import { blankContact, blankDraft, blankEvent, blankJournalEntry, blankNote, blankTask, countFolders, filterContacts, filterJournalEntries, filterMessages, filterNotes, filterTasks, normalizedContactDraft, quoteMessage } from "./client-helpers";
 import type { ClientCopy } from "./i18n";
 import type {
   ClientIdentity,
@@ -835,7 +835,7 @@ export function useClientWorkspace(
         authToken,
         {
           method: currentContact ? "PATCH" : "POST",
-          body: JSON.stringify(currentContact ? contactForm : { collectionId: contactBook, ...contactForm })
+          body: JSON.stringify(currentContact ? normalizedContactDraft(contactForm) : { collectionId: contactBook, ...normalizedContactDraft(contactForm) })
         }
       );
       await loadWorkspace();

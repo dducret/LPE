@@ -1,4 +1,4 @@
-import type { ContactBookId, ContactDraft, ContactItem, EventDraft, EventItem, Folder, JournalEntryDraft, JournalEntryItem, Message, MessageDraft, NoteDraft, NoteItem, SystemFolder, TaskDraft, TaskItem } from "./client-types";
+import type { ContactBookId, ContactDraft, ContactItem, ContactValue, EventDraft, EventItem, Folder, JournalEntryDraft, JournalEntryItem, Message, MessageDraft, NoteDraft, NoteItem, SystemFolder, TaskDraft, TaskItem } from "./client-types";
 
 export const blankDraft = (mailboxAccountId = ""): MessageDraft => ({
   mailboxAccountId,
@@ -16,8 +16,45 @@ export const blankContact = (contact?: ContactItem): ContactDraft => ({
   email: contact?.email ?? "",
   phone: contact?.phone ?? "",
   team: contact?.team ?? "",
-  notes: contact?.notes ?? ""
+  notes: contact?.notes ?? "",
+  emailsJson: contact?.emailsJson ?? [],
+  phonesJson: contact?.phonesJson ?? [],
+  addressesJson: contact?.addressesJson ?? [],
+  urlsJson: contact?.urlsJson ?? [],
+  photoData: contact?.photoData ?? null,
+  photoContentType: contact?.photoContentType ?? null,
+  categoriesJson: contact?.categoriesJson ?? [],
+  birthday: contact?.birthday ?? null,
+  anniversary: contact?.anniversary ?? null,
+  childrenJson: contact?.childrenJson ?? [],
+  spouse: contact?.spouse ?? "",
+  assistantName: contact?.assistantName ?? "",
+  assistantPhone: contact?.assistantPhone ?? ""
 });
+
+export function contactValue(values: ContactValue[], key: string, label: string, fallbackFirst = false): string {
+  const matching = values.find((value) => value.label === label) ?? (fallbackFirst ? values[0] : undefined);
+  const value = matching?.[key] ?? (key === "address" ? matching?.full : key === "url" ? matching?.href : undefined);
+  return typeof value === "string" ? value : "";
+}
+
+export function setContactValue(values: ContactValue[], key: string, label: string, value: string, fallbackFirst = false): ContactValue[] {
+  const index = values.findIndex((item) => item.label === label);
+  const target = index >= 0 ? index : (fallbackFirst && values.length ? 0 : -1);
+  if (target >= 0) {
+    if (!value.trim()) return values.filter((_, itemIndex) => itemIndex !== target);
+    return values.map((item, itemIndex) => itemIndex === target ? { ...item, [key]: value, label } : item);
+  }
+  return value.trim() ? [...values, { [key]: value, label }] : values;
+}
+
+export function normalizedContactDraft(contact: ContactDraft): ContactDraft {
+  return {
+    ...contact,
+    emailsJson: setContactValue(contact.emailsJson, "email", "work", contact.email, true),
+    phonesJson: setContactValue(contact.phonesJson, "phone", "work", contact.phone, true)
+  };
+}
 
 export const blankEvent = (event?: EventItem): EventDraft => ({
   date: event?.date ?? new Date().toISOString().slice(0, 10),
@@ -98,7 +135,7 @@ export function filterContacts(contacts: ContactItem[], contactBook: ContactBook
   const needle = query.trim().toLowerCase();
   return contacts.filter((item) =>
     item.addressBookId === contactBook &&
-    [item.name, item.role, item.email, item.phone, item.team, item.notes].join(" ").toLowerCase().includes(needle)
+    [item.name, item.role, item.email, item.phone, item.team, item.notes, item.birthday, item.anniversary, item.spouse, item.assistantName, item.assistantPhone, ...item.categoriesJson, ...item.childrenJson, JSON.stringify(item.emailsJson), JSON.stringify(item.phonesJson), JSON.stringify(item.addressesJson), JSON.stringify(item.urlsJson)].join(" ").toLowerCase().includes(needle)
   );
 }
 

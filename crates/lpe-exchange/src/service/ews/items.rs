@@ -462,12 +462,14 @@ where
                 }
             }
             if let Some((contact_id, existing, update_request)) = contact_update {
+                let input = parse_update_contact_input(principal, &existing, update_request);
+                validate_contact_photo(&self.validator, &input)?;
                 let updated = self
                     .store
                     .update_accessible_contact(
                         principal.account_id,
                         contact_id,
-                        parse_update_contact_input(principal, &existing, update_request),
+                        input,
                     )
                     .await?;
                 let change_keys =
@@ -585,13 +587,11 @@ where
             }
             if element_content(request, "Contact").is_some() {
                 let collection_id = requested_collection_id_in(request, "SavedItemFolderId");
+                let input = parse_create_contact_input(principal, request)?;
+                validate_contact_photo(&self.validator, &input)?;
                 let contact = self
                     .store
-                    .create_accessible_contact(
-                        principal.account_id,
-                        collection_id,
-                        parse_create_contact_input(principal, request)?,
-                    )
+                    .create_accessible_contact(principal.account_id, collection_id, input)
                     .await?;
                 let change_keys = contact_change_keys(
                     &self.store,

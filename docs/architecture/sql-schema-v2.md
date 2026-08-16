@@ -926,15 +926,15 @@ compatible. They do not replace canonical mail or collaboration tables.
 
 ## Implementation Notes
 
-- `schema.sql` creates the fresh `0.5.2-sql` baseline.
+- `schema.sql` creates the fresh `0.5.3-sql` baseline.
 - `schema.sql` is the dense canonical DDL definition and is the documented
   source-size exception. Before adding another schema-contract family, split
   `schema_contract.rs` into feature-scoped checks (core ownership, mail and
   collaboration, and MAPI cache/identity) while retaining one central public
   contract runner.
-- New `0.5.2` installations start from an empty SQL database initialized by
+- New `0.5.3` test installations start from an empty SQL database initialized by
   `init-schema.sh`. There is no in-place schema upgrade path to this baseline.
-  `update-lpe.sh` accepts only the exact canonical `0.5.2-sql` label with its
+  `update-lpe.sh` accepts only the exact canonical `0.5.3-sql` label with its
   required canonical physical shape and rejects every other label or incomplete
   same-label database before stopping LPE or changing the database.
 - The `0.5.0` and `0.5.1` SQL update artifacts remain preserved as historical

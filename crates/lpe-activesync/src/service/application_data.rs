@@ -5,9 +5,12 @@ use lpe_storage::{
     CalendarParticipantMetadata, CalendarParticipantsMetadata, ContactNameFields,
     JmapEmailFollowupUpdate, UpsertClientContactInput, UpsertClientEventInput,
 };
+use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::{message::field_text, wbxml::WbxmlNode};
+use crate::{
+    message::field_text, service::mime_validation::decode_contact_picture, wbxml::WbxmlNode,
+};
 pub(super) fn mail_flag_update(flag: &WbxmlNode) -> Result<JmapEmailFollowupUpdate> {
     if flag.children.is_empty() {
         return Ok(JmapEmailFollowupUpdate {
@@ -108,12 +111,48 @@ pub(super) fn parse_contact_input(
         .or_else(|| (!derived_name.is_empty()).then_some(derived_name))
         .or_else(|| existing.map(|contact| contact.name.clone()))
         .unwrap_or_default();
+    let emails_json = contact_labeled_values(
+        existing.map(|contact| &contact.emails_json),
+        existing.map(|contact| contact.email.as_str()),
+        "email",
+        "work",
+        application_data,
+        &[
+            ("Email1Address", "work"),
+            ("Email2Address", "email2"),
+            ("Email3Address", "email3"),
+        ],
+    );
+    let phones_json = contact_labeled_values(
+        existing.map(|contact| &contact.phones_json),
+        existing.map(|contact| contact.phone.as_str()),
+        "phone",
+        "mobile",
+        application_data,
+        &[
+            ("MobilePhoneNumber", "mobile"),
+            ("BusinessPhoneNumber", "work"),
+            ("Business2PhoneNumber", "work2"),
+            ("HomePhoneNumber", "home"),
+            ("Home2PhoneNumber", "home2"),
+        ],
+    );
     let email = field_text(application_data, "Email1Address")
+        .or_else(|| {
+            emails_json
+                .as_ref()
+                .and_then(|value| first_contact_value(value, "email"))
+        })
         .or_else(|| existing.map(|contact| contact.email.clone()))
         .unwrap_or_default();
     let phone = field_text(application_data, "MobilePhoneNumber")
         .or_else(|| field_text(application_data, "BusinessPhoneNumber"))
         .or_else(|| field_text(application_data, "HomePhoneNumber"))
+        .or_else(|| {
+            phones_json
+                .as_ref()
+                .and_then(|value| first_contact_value(value, "phone"))
+        })
         .or_else(|| existing.map(|contact| contact.phone.clone()))
         .unwrap_or_default();
     let notes = body_text(application_data)
@@ -122,6 +161,7 @@ pub(super) fn parse_contact_input(
     let company_name = field_text(application_data, "CompanyName");
     let job_title =
         field_text(application_data, "JobTitle").or_else(|| field_text(application_data, "Title"));
+    let picture = contact_picture(application_data)?;
 
     Ok(UpsertClientContactInput {
         id,
@@ -139,6 +179,21 @@ pub(super) fn parse_contact_input(
             .unwrap_or_default(),
         notes,
         structured_name,
+        emails_json,
+        phones_json,
+        addresses_json: contact_addresses(application_data, existing),
+        urls_json: contact_url(application_data, existing),
+        photo_data: picture.as_ref().map(|(data, _)| data.clone()),
+        photo_content_type: picture
+            .as_ref()
+            .map(|(_, content_type)| content_type.clone()),
+        categories_json: contact_text_collection(application_data, "Categories", "Category"),
+        birthday: contact_date(application_data, "Birthday")?,
+        anniversary: contact_date(application_data, "Anniversary")?,
+        children_json: contact_text_collection(application_data, "Children", "Child"),
+        spouse: field_if_present(application_data, "Spouse"),
+        assistant_name: field_if_present(application_data, "AssistantName"),
+        assistant_phone: field_if_present(application_data, "AssistantPhoneNumber"),
         organization_name: company_name
             .or_else(|| existing.map(|contact| contact.organization_name.clone()))
             .unwrap_or_default(),
@@ -147,6 +202,259 @@ pub(super) fn parse_contact_input(
             .unwrap_or_default(),
         ..Default::default()
     })
+}
+
+fn contact_labeled_values(
+    existing: Option<&Value>,
+    fallback: Option<&str>,
+    key: &str,
+    fallback_label: &str,
+    application_data: &WbxmlNode,
+    fields: &[(&str, &str)],
+) -> Option<Value> {
+    if !fields
+        .iter()
+        .any(|(field, _)| application_data.child(field).is_some())
+    {
+        return None;
+    }
+    let mut values = existing
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if values.is_empty() {
+        if let Some(fallback) = fallback.filter(|value| !value.trim().is_empty()) {
+            values.push(contact_labeled_value(key, fallback_label, fallback.trim()));
+        }
+    }
+    for (field, label) in fields {
+        let Some(node) = application_data.child(field) else {
+            continue;
+        };
+        let value = node.text_value().trim();
+        if let Some(entry) = values.iter_mut().find(|entry| {
+            entry
+                .get("label")
+                .and_then(Value::as_str)
+                .is_some_and(|current| current.eq_ignore_ascii_case(label))
+        }) {
+            if let Some(entry) = entry.as_object_mut() {
+                entry.insert("label".to_string(), Value::String((*label).to_string()));
+                if value.is_empty() {
+                    entry.remove(key);
+                } else {
+                    entry.insert(key.to_string(), Value::String(value.to_string()));
+                }
+            }
+        } else if !value.is_empty() {
+            values.push(contact_labeled_value(key, label, value));
+        }
+    }
+    values.retain(|entry| {
+        entry
+            .get(key)
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+    });
+    Some(Value::Array(values))
+}
+
+fn contact_labeled_value(key: &str, label: &str, value: &str) -> Value {
+    let mut entry = serde_json::Map::new();
+    entry.insert("label".to_string(), Value::String(label.to_string()));
+    entry.insert(key.to_string(), Value::String(value.to_string()));
+    Value::Object(entry)
+}
+
+fn first_contact_value(value: &Value, key: &str) -> Option<String> {
+    value
+        .as_array()?
+        .iter()
+        .find_map(|entry| entry.get(key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn contact_addresses(
+    application_data: &WbxmlNode,
+    existing: Option<&lpe_storage::ClientContact>,
+) -> Option<Value> {
+    const ADDRESS_FIELDS: [(&str, [(&str, &str); 5]); 3] = [
+        (
+            "work",
+            [
+                ("BusinessAddressStreet", "street"),
+                ("BusinessAddressCity", "city"),
+                ("BusinessAddressState", "state"),
+                ("BusinessAddressCountry", "country"),
+                ("BusinessAddressPostalCode", "postalCode"),
+            ],
+        ),
+        (
+            "home",
+            [
+                ("HomeAddressStreet", "street"),
+                ("HomeAddressCity", "city"),
+                ("HomeAddressState", "state"),
+                ("HomeAddressCountry", "country"),
+                ("HomeAddressPostalCode", "postalCode"),
+            ],
+        ),
+        (
+            "other",
+            [
+                ("OtherAddressStreet", "street"),
+                ("OtherAddressCity", "city"),
+                ("OtherAddressState", "state"),
+                ("OtherAddressCountry", "country"),
+                ("OtherAddressPostalCode", "postalCode"),
+            ],
+        ),
+    ];
+    if !ADDRESS_FIELDS.iter().any(|(_, fields)| {
+        fields
+            .iter()
+            .any(|(field, _)| application_data.child(field).is_some())
+    }) {
+        return None;
+    }
+    let mut addresses = existing
+        .map(|contact| &contact.addresses_json)
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for (label, fields) in ADDRESS_FIELDS {
+        if !fields
+            .iter()
+            .any(|(field, _)| application_data.child(field).is_some())
+        {
+            continue;
+        }
+        let position = addresses.iter().position(|entry| {
+            entry
+                .get("label")
+                .and_then(Value::as_str)
+                .is_some_and(|current| current.eq_ignore_ascii_case(label))
+        });
+        let mut address = position
+            .and_then(|index| addresses[index].as_object().cloned())
+            .unwrap_or_default();
+        address.insert("label".to_string(), Value::String(label.to_string()));
+        for (field, key) in fields {
+            let Some(node) = application_data.child(field) else {
+                continue;
+            };
+            let value = node.text_value().trim();
+            if value.is_empty() {
+                address.remove(key);
+            } else {
+                address.insert(key.to_string(), Value::String(value.to_string()));
+            }
+        }
+        let address = Value::Object(address);
+        if address.as_object().is_some_and(|object| object.len() == 1) {
+            if let Some(index) = position {
+                addresses.remove(index);
+            }
+        } else if let Some(index) = position {
+            addresses[index] = address;
+        } else {
+            addresses.push(address);
+        }
+    }
+    Some(Value::Array(addresses))
+}
+
+fn contact_url(
+    application_data: &WbxmlNode,
+    existing: Option<&lpe_storage::ClientContact>,
+) -> Option<Value> {
+    let node = application_data.child("WebPage")?;
+    let mut urls = existing
+        .map(|contact| &contact.urls_json)
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let value = node.text_value().trim();
+    if let Some(entry) = urls.first_mut().and_then(Value::as_object_mut) {
+        if value.is_empty() {
+            entry.remove("url");
+            entry.remove("href");
+        } else {
+            entry.insert("url".to_string(), Value::String(value.to_string()));
+        }
+    } else if !value.is_empty() {
+        urls.insert(0, json!({"url": value}));
+    }
+    urls.retain(|entry| {
+        entry
+            .get("url")
+            .or_else(|| entry.get("href"))
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+    });
+    Some(Value::Array(urls))
+}
+
+fn contact_picture(
+    application_data: &WbxmlNode,
+) -> Result<Option<(Option<String>, Option<String>)>> {
+    let Some((data, _, content_type)) = decode_contact_picture(application_data)? else {
+        return Ok(None);
+    };
+    if data.is_empty() {
+        return Ok(Some((None, None)));
+    }
+    Ok(Some((Some(data), Some(content_type))))
+}
+
+fn contact_text_collection(
+    application_data: &WbxmlNode,
+    container: &str,
+    item: &str,
+) -> Option<Value> {
+    application_data.child(container).map(|collection| {
+        Value::Array(
+            collection
+                .children_named(item)
+                .iter()
+                .map(|node| node.text_value().trim())
+                .filter(|value| !value.is_empty())
+                .map(|value| Value::String(value.to_string()))
+                .collect(),
+        )
+    })
+}
+
+fn contact_date(application_data: &WbxmlNode, field: &str) -> Result<Option<Option<String>>> {
+    let Some(node) = application_data.child(field) else {
+        return Ok(None);
+    };
+    let value = node.text_value().trim();
+    if value.is_empty() {
+        return Ok(Some(None));
+    }
+    let date = value
+        .trim_end_matches('Z')
+        .split('T')
+        .next()
+        .unwrap_or_default();
+    if date.len() != 8 || !date.bytes().all(|byte| byte.is_ascii_digit()) {
+        bail!("invalid ActiveSync contact {field}");
+    }
+    Ok(Some(Some(format!(
+        "{}-{}-{}",
+        &date[0..4],
+        &date[4..6],
+        &date[6..8]
+    ))))
+}
+
+fn field_if_present(application_data: &WbxmlNode, field: &str) -> Option<String> {
+    application_data
+        .child(field)
+        .map(|node| node.text_value().trim().to_string())
 }
 
 pub(super) fn parse_event_input(
@@ -479,6 +787,15 @@ mod tests {
             phone: "+1 555 0100".to_string(),
             addresses_json: json!([{"full": "1 Example Way"}]),
             urls_json: json!([{"url": "https://example.test"}]),
+            photo_data: Some("iVBORw0KGgo=".to_string()),
+            photo_content_type: Some("image/png".to_string()),
+            categories_json: json!(["VIP"]),
+            birthday: Some("1984-05-12".to_string()),
+            anniversary: Some("2010-06-04".to_string()),
+            children_json: json!(["Taylor Example"]),
+            spouse: "Alex Example".to_string(),
+            assistant_name: "Chris Helper".to_string(),
+            assistant_phone: "+1 555 0190".to_string(),
             raw_vcard: Some("BEGIN:VCARD\nEND:VCARD".to_string()),
             source: ContactSourceFields {
                 import_source: "carddav".to_string(),
@@ -502,8 +819,34 @@ mod tests {
         assert_eq!(input.name, "Ada Updated");
         assert_eq!(input.addresses_json, None);
         assert_eq!(input.urls_json, None);
+        assert_eq!(input.photo_data, None);
+        assert_eq!(input.photo_content_type, None);
+        assert_eq!(input.categories_json, None);
+        assert_eq!(input.birthday, None);
+        assert_eq!(input.anniversary, None);
+        assert_eq!(input.children_json, None);
+        assert_eq!(input.spouse, None);
+        assert_eq!(input.assistant_name, None);
+        assert_eq!(input.assistant_phone, None);
         assert_eq!(input.raw_vcard, None);
         assert!(!input.raw_vcard_is_explicit);
         assert!(!input.source_is_explicit);
+    }
+
+    #[test]
+    fn activesync_contact_picture_maps_base64_payload_and_content_type() {
+        let mut application_data = WbxmlNode::new(1, "ApplicationData");
+        application_data.push(WbxmlNode::with_text(1, "FileAs", "Ada Example"));
+        application_data.push(WbxmlNode::with_text(1, "Email1Address", "ada@example.test"));
+        application_data.push(WbxmlNode::with_text(1, "Picture", "iVBORw0KGgo="));
+
+        let input =
+            parse_contact_input(uuid::Uuid::from_u128(2), None, None, &application_data).unwrap();
+
+        assert_eq!(input.photo_data, Some(Some("iVBORw0KGgo=".to_string())));
+        assert_eq!(
+            input.photo_content_type,
+            Some(Some("image/png".to_string()))
+        );
     }
 }

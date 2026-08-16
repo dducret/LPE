@@ -15,7 +15,7 @@ use crate::mapi_store_identity::{
 };
 use crate::workspace::{
     contact_array_json, contact_emails_json, contact_phones_json, contact_primary_email,
-    contact_source_payload_json,
+    contact_source_payload_json, contact_string_array_json,
 };
 use crate::{
     AccessibleContact, CanonicalChangeCategory, ContactNameFields, ContactSourceFields, Storage,
@@ -441,6 +441,15 @@ impl Storage {
             phones_json: normalized.phones_json,
             addresses_json: normalized.addresses_json,
             urls_json: normalized.urls_json,
+            photo_data: normalized.photo_data,
+            photo_content_type: normalized.photo_content_type,
+            categories_json: normalized.categories_json,
+            birthday: normalized.birthday,
+            anniversary: normalized.anniversary,
+            children_json: normalized.children_json,
+            spouse: normalized.spouse,
+            assistant_name: normalized.assistant_name,
+            assistant_phone: normalized.assistant_phone,
             organization_name: normalized.organization_name,
             job_title: normalized.job_title,
             raw_vcard: normalized.raw_vcard,
@@ -664,6 +673,15 @@ struct NormalizedContact {
     phones_json: Value,
     addresses_json: Value,
     urls_json: Value,
+    photo_data: Option<String>,
+    photo_content_type: Option<String>,
+    categories_json: Value,
+    birthday: Option<String>,
+    anniversary: Option<String>,
+    children_json: Value,
+    spouse: String,
+    assistant_name: String,
+    assistant_phone: String,
     organization_name: String,
     job_title: String,
     raw_vcard: Option<String>,
@@ -691,6 +709,9 @@ impl NormalizedContact {
             .to_string();
         let addresses_json = contact_array_json(input.addresses_json.clone())?;
         let urls_json = contact_array_json(input.urls_json.clone())?;
+        let categories_json =
+            contact_string_array_json(input.categories_json.clone(), "categories")?;
+        let children_json = contact_string_array_json(input.children_json.clone(), "children")?;
         let source_payload_json =
             contact_source_payload_json(input.source.source_payload_json.clone())?;
         let team = input.team.trim().to_string();
@@ -720,6 +741,46 @@ impl NormalizedContact {
             phones_json,
             addresses_json,
             urls_json,
+            photo_data: input
+                .photo_data
+                .clone()
+                .flatten()
+                .filter(|value| !value.trim().is_empty()),
+            photo_content_type: input
+                .photo_content_type
+                .clone()
+                .flatten()
+                .filter(|value| !value.trim().is_empty()),
+            categories_json,
+            birthday: input
+                .birthday
+                .clone()
+                .flatten()
+                .filter(|value| !value.trim().is_empty()),
+            anniversary: input
+                .anniversary
+                .clone()
+                .flatten()
+                .filter(|value| !value.trim().is_empty()),
+            children_json,
+            spouse: input
+                .spouse
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+            assistant_name: input
+                .assistant_name
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+            assistant_phone: input
+                .assistant_phone
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
             organization_name,
             job_title: input.job_title.trim().to_string(),
             raw_vcard: input.raw_vcard.clone(),
@@ -1405,7 +1466,8 @@ async fn insert_contact_in_tx(
             display_name, name_prefix, given_name, middle_name, family_name, name_suffix,
             nickname, phonetic_given_name, phonetic_family_name, job_title, role,
             organization_name, organization_unit, emails_json, phones_json, addresses_json,
-            urls_json, notes, raw_vcard, import_source, source_uid, source_etag,
+            urls_json, photo_data, photo_content_type, categories_json, birthday, anniversary,
+            children_json, spouse, assistant_name, assistant_phone, notes, raw_vcard, import_source, source_uid, source_etag,
             source_payload_json, updated_at
         )
         VALUES (
@@ -1413,11 +1475,11 @@ async fn insert_contact_in_tx(
             $5, $6, $7, $8, $9, $10,
             $11, $12, $13, $14, $15,
             $16, $17, $18, $19, $20,
-            $21, $22, $23, 'mapi', $24, $25,
-            $26,
+            $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, 'mapi', $32, $33,
+            $34,
             TIMESTAMPTZ '1601-01-01 00:00:00+00'
-                + ($27 / 10000000) * INTERVAL '1 second'
-                + (($27 / 10) % 1000000) * INTERVAL '1 microsecond'
+                + ($35 / 10000000) * INTERVAL '1 second'
+                + (($35 / 10) % 1000000) * INTERVAL '1 microsecond'
         )
         "#,
     )
@@ -1442,6 +1504,15 @@ async fn insert_contact_in_tx(
     .bind(&contact.phones_json)
     .bind(&contact.addresses_json)
     .bind(&contact.urls_json)
+    .bind(contact.photo_data.as_deref())
+    .bind(contact.photo_content_type.as_deref())
+    .bind(&contact.categories_json)
+    .bind(contact.birthday.as_deref())
+    .bind(contact.anniversary.as_deref())
+    .bind(&contact.children_json)
+    .bind(&contact.spouse)
+    .bind(&contact.assistant_name)
+    .bind(&contact.assistant_phone)
     .bind(&contact.notes)
     .bind(contact.raw_vcard.as_deref())
     .bind(contact.source_uid.as_deref())
@@ -1486,15 +1557,24 @@ async fn update_contact_in_tx(
             phones_json = $19,
             addresses_json = $20,
             urls_json = $21,
-            notes = $22,
-            raw_vcard = $23,
-            import_source = CASE WHEN $24 THEN import_source ELSE 'mapi' END,
-            source_uid = $25,
-            source_etag = $26,
-            source_payload_json = $27,
+            photo_data = $22,
+            photo_content_type = $23,
+            categories_json = $24,
+            birthday = $25,
+            anniversary = $26,
+            children_json = $27,
+            spouse = $28,
+            assistant_name = $29,
+            assistant_phone = $30,
+            notes = $31,
+            raw_vcard = $32,
+            import_source = CASE WHEN $33 THEN import_source ELSE 'mapi' END,
+            source_uid = $34,
+            source_etag = $35,
+            source_payload_json = $36,
             updated_at = TIMESTAMPTZ '1601-01-01 00:00:00+00'
-                + ($28 / 10000000) * INTERVAL '1 second'
-                + (($28 / 10) % 1000000) * INTERVAL '1 microsecond'
+                + ($37 / 10000000) * INTERVAL '1 second'
+                + (($37 / 10) % 1000000) * INTERVAL '1 microsecond'
         WHERE tenant_id = $1
           AND owner_account_id = $2
           AND contact_book_id = $3
@@ -1522,6 +1602,15 @@ async fn update_contact_in_tx(
     .bind(&contact.phones_json)
     .bind(&contact.addresses_json)
     .bind(&contact.urls_json)
+    .bind(contact.photo_data.as_deref())
+    .bind(contact.photo_content_type.as_deref())
+    .bind(&contact.categories_json)
+    .bind(contact.birthday.as_deref())
+    .bind(contact.anniversary.as_deref())
+    .bind(&contact.children_json)
+    .bind(&contact.spouse)
+    .bind(&contact.assistant_name)
+    .bind(&contact.assistant_phone)
     .bind(&contact.notes)
     .bind(contact.raw_vcard.as_deref())
     .bind(preserve_import_source)

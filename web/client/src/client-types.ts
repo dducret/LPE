@@ -59,7 +59,22 @@ export type ContactItem = {
   phone: string;
   team: string;
   notes: string;
+  emailsJson: ContactValue[];
+  phonesJson: ContactValue[];
+  addressesJson: ContactValue[];
+  urlsJson: ContactValue[];
+  photoData: string | null;
+  photoContentType: string | null;
+  categoriesJson: string[];
+  birthday: string | null;
+  anniversary: string | null;
+  childrenJson: string[];
+  spouse: string;
+  assistantName: string;
+  assistantPhone: string;
 };
+
+export type ContactValue = Record<string, string | boolean | null | undefined>;
 
 export type MessageDraft = {
   mailboxAccountId: string;

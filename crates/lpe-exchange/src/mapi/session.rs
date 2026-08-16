@@ -1077,6 +1077,7 @@ impl MapiSession {
         self.message_handle_generations.remove(&handle);
         self.pending_message_recipient_replacements.remove(&handle);
         self.pending_message_attachments.remove(&handle);
+        self.pending_contact_photo_attachments.remove(&handle);
         self.pending_attachment_parent_messages.remove(&handle);
         self.pending_event_attachment_transactions.remove(&handle);
         self.pending_embedded_message_ids.remove(&handle);

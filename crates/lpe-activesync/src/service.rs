@@ -53,7 +53,7 @@ use application_data::{mail_flag_update, parse_contact_input, parse_event_input}
 use body_preferences::{
     collection_body_preference, collection_deletes_as_moves, fetch_body_preference,
 };
-use mime_validation::validate_mime_attachments;
+use mime_validation::{validate_contact_picture, validate_mime_attachments};
 use provisioning::{header_policy_key, policy_required_response};
 use sync_helpers::{
     completed_sync_state, decode_sync_state, has_client_commands, hierarchy_generation,
@@ -1191,6 +1191,13 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     let application_data = command
                         .child("ApplicationData")
                         .ok_or_else(|| anyhow!("contact add command is missing ApplicationData"))?;
+                    if validate_contact_picture(application_data).is_err() {
+                        let mut add = WbxmlNode::new(0, "Add");
+                        add.push(WbxmlNode::with_text(0, "ClientId", client_id));
+                        add.push(WbxmlNode::with_text(0, "Status", "6"));
+                        responses.push(add);
+                        continue;
+                    }
                     let created = self
                         .store
                         .upsert_client_contact(parse_contact_input(
@@ -1225,6 +1232,13 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     let application_data = command.child("ApplicationData").ok_or_else(|| {
                         anyhow!("contact change command is missing ApplicationData")
                     })?;
+                    if validate_contact_picture(application_data).is_err() {
+                        let mut change = WbxmlNode::new(0, "Change");
+                        change.push(WbxmlNode::with_text(0, "ServerId", server_id));
+                        change.push(WbxmlNode::with_text(0, "Status", "6"));
+                        responses.push(change);
+                        continue;
+                    }
                     self.store
                         .upsert_client_contact(parse_contact_input(
                             principal.account_id,

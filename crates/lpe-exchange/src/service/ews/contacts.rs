@@ -1,5 +1,30 @@
 use super::super::*;
 
+pub(in crate::service) fn validate_contact_photo<V: Detector>(
+    validator: &Validator<V>,
+    input: &UpsertClientContactInput,
+) -> Result<()> {
+    let Some(Some(photo_data)) = input.photo_data.as_ref() else {
+        return Ok(());
+    };
+    let photo_bytes = BASE64_STANDARD
+        .decode(photo_data.trim().as_bytes())
+        .map_err(|_| anyhow!("Contact Photo must be valid base64"))?;
+    let outcome = validator.validate_bytes(
+        ValidationRequest {
+            ingress_context: IngressContext::ExchangeAttachment,
+            declared_mime: input.photo_content_type.clone().flatten(),
+            filename: Some("contact-photo.jpg".to_string()),
+            expected_kind: ExpectedKind::Any,
+        },
+        &photo_bytes,
+    )?;
+    if outcome.policy_decision != PolicyDecision::Accept {
+        bail!("{}", outcome.reason);
+    }
+    Ok(())
+}
+
 pub(in crate::service) fn contact_change_key(contact: &AccessibleContact, version: &str) -> String {
     versioned_change_key("contact", &contact.id.to_string(), version)
 }
@@ -29,6 +54,11 @@ pub(in crate::service) fn contact_item_xml_with_change_key(
     let email_entries = ews_contact_email_entries_xml(contact);
     let phone_entries = ews_contact_phone_entries_xml(contact);
     let physical_addresses = ews_contact_physical_addresses_xml(contact);
+    let categories = ews_contact_string_array_xml("Categories", &contact.categories_json);
+    let children = contact_string_values(&contact.children_json)
+        .into_iter()
+        .map(|value| format!("<t:String>{}</t:String>", escape_xml(&value)))
+        .collect::<String>();
     let business_home_page = ews_contact_url_by_label(contact, &["work", "business"])
         .map(|value| {
             format!(
@@ -45,6 +75,19 @@ pub(in crate::service) fn contact_item_xml_with_change_key(
             )
         })
         .unwrap_or_default();
+    let birthday = ews_contact_date_xml("Birthday", contact.birthday.as_deref());
+    let anniversary = ews_contact_date_xml("WeddingAnniversary", contact.anniversary.as_deref());
+    let photo = contact
+        .photo_data
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| {
+            format!(
+                "<t:Photo>{}</t:Photo><t:HasPicture>true</t:HasPicture>",
+                escape_xml(value)
+            )
+        })
+        .unwrap_or_else(|| "<t:HasPicture>false</t:HasPicture>".to_string());
     format!(
         concat!(
             "<t:Contact>",
@@ -67,6 +110,13 @@ pub(in crate::service) fn contact_item_xml_with_change_key(
             "{physical_addresses}",
             "{business_home_page}",
             "{personal_home_page}",
+            "{categories}",
+            "{birthday}",
+            "{anniversary}",
+            "<t:Children>{children}</t:Children>",
+            "<t:SpouseName>{spouse}</t:SpouseName>",
+            "<t:AssistantName>{assistant_name}</t:AssistantName>",
+            "{photo}",
             "<t:Body BodyType=\"Text\">{notes}</t:Body>",
             "</t:Contact>"
         ),
@@ -88,6 +138,13 @@ pub(in crate::service) fn contact_item_xml_with_change_key(
         physical_addresses = physical_addresses,
         business_home_page = business_home_page,
         personal_home_page = personal_home_page,
+        categories = categories,
+        birthday = birthday,
+        anniversary = anniversary,
+        children = children,
+        spouse = escape_xml(&contact.spouse),
+        assistant_name = escape_xml(&contact.assistant_name),
+        photo = photo,
         notes = escape_xml(&contact.notes),
     )
 }
@@ -179,6 +236,17 @@ pub(in crate::service) fn parse_create_contact_input(
         phones_json: Some(ews_contact_phones_json(contact)),
         addresses_json: Some(ews_contact_addresses_json(contact)),
         urls_json: Some(ews_contact_urls_json(contact)),
+        photo_data: Some(element_text(contact, "Photo")),
+        photo_content_type: Some(element_text(contact, "Photo").map(|_| "image/jpeg".to_string())),
+        categories_json: Some(ews_contact_string_array(contact, "Categories")),
+        birthday: Some(ews_contact_date(contact, "Birthday")),
+        anniversary: Some(ews_contact_date(contact, "WeddingAnniversary")),
+        children_json: Some(ews_contact_string_array(contact, "Children")),
+        spouse: Some(element_text(contact, "SpouseName").unwrap_or_default()),
+        assistant_name: Some(element_text(contact, "AssistantName").unwrap_or_default()),
+        assistant_phone: Some(
+            contact_entry_value(contact, "PhoneNumbers", "AssistantPhone").unwrap_or_default(),
+        ),
         organization_name: element_text(contact, "CompanyName").unwrap_or_default(),
         job_title: element_text(contact, "JobTitle").unwrap_or_default(),
         ..Default::default()
@@ -308,6 +376,56 @@ pub(in crate::service) fn parse_update_contact_input(
             || element_text(contact, "BusinessHomePage").is_some()
             || element_text(contact, "PersonalHomePage").is_some())
         .then(|| ews_updated_contact_urls_json(request, contact, existing)),
+        photo_data: if field_deleted(request, "contacts:Photo") {
+            Some(None)
+        } else {
+            element_text(contact, "Photo").map(Some)
+        },
+        photo_content_type: if field_deleted(request, "contacts:Photo") {
+            Some(None)
+        } else {
+            element_text(contact, "Photo").map(|_| Some("image/jpeg".to_string()))
+        },
+        categories_json: ews_updated_contact_string_array(
+            request,
+            contact,
+            "item:Categories",
+            "Categories",
+            &existing.categories_json,
+        ),
+        birthday: ews_updated_contact_date(
+            request,
+            contact,
+            "contacts:Birthday",
+            "Birthday",
+            &existing.birthday,
+        ),
+        anniversary: ews_updated_contact_date(
+            request,
+            contact,
+            "contacts:WeddingAnniversary",
+            "WeddingAnniversary",
+            &existing.anniversary,
+        ),
+        children_json: ews_updated_contact_string_array(
+            request,
+            contact,
+            "contacts:Children",
+            "Children",
+            &existing.children_json,
+        ),
+        spouse: ews_optional_contact_text(request, contact, "contacts:SpouseName", "SpouseName"),
+        assistant_name: ews_optional_contact_text(
+            request,
+            contact,
+            "contacts:AssistantName",
+            "AssistantName",
+        ),
+        assistant_phone: if field_deleted(request, "contacts:PhoneNumber:AssistantPhone") {
+            Some(String::new())
+        } else {
+            contact_entry_value(contact, "PhoneNumbers", "AssistantPhone")
+        },
         organization_name: deleted_or_updated_text(
             request,
             contact,
@@ -358,6 +476,122 @@ fn ews_contact_email_entries_xml(contact: &AccessibleContact) -> String {
     entries.join("")
 }
 
+fn ews_contact_string_array_xml(element: &str, values: &serde_json::Value) -> String {
+    let values = contact_string_values(values)
+        .into_iter()
+        .map(|value| format!("<t:String>{}</t:String>", escape_xml(&value)))
+        .collect::<String>();
+    if values.is_empty() {
+        String::new()
+    } else {
+        format!("<t:{element}>{values}</t:{element}>")
+    }
+}
+
+fn ews_contact_date_xml(element: &str, value: Option<&str>) -> String {
+    value
+        .filter(|value| value.len() == 10)
+        .map(|value| format!("<t:{element}>{value}T00:00:00Z</t:{element}>"))
+        .unwrap_or_default()
+}
+
+fn ews_contact_string_array(contact: &str, element: &str) -> serde_json::Value {
+    serde_json::Value::Array(
+        ews_contact_element_values(contact, element)
+            .into_iter()
+            .map(serde_json::Value::String)
+            .collect(),
+    )
+}
+
+fn ews_updated_contact_string_array(
+    request: &str,
+    contact: &str,
+    field_uri: &str,
+    element: &str,
+    existing: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    if field_deleted(request, field_uri) {
+        Some(serde_json::Value::Array(Vec::new()))
+    } else if element_content(contact, element).is_some() {
+        Some(ews_contact_string_array(contact, element))
+    } else {
+        let _ = existing;
+        None
+    }
+}
+
+fn ews_contact_date(contact: &str, element: &str) -> Option<String> {
+    element_text(contact, element).and_then(|value| {
+        let date = value.get(..10)?;
+        date.chars()
+            .enumerate()
+            .all(|(index, character)| {
+                matches!(index, 4 | 7) && character == '-'
+                    || !matches!(index, 4 | 7) && character.is_ascii_digit()
+            })
+            .then(|| date.to_string())
+    })
+}
+
+fn ews_updated_contact_date(
+    request: &str,
+    contact: &str,
+    field_uri: &str,
+    element: &str,
+    _existing: &Option<String>,
+) -> Option<Option<String>> {
+    if field_deleted(request, field_uri) {
+        Some(None)
+    } else {
+        ews_contact_date(contact, element).map(Some)
+    }
+}
+
+fn ews_optional_contact_text(
+    request: &str,
+    contact: &str,
+    field_uri: &str,
+    element: &str,
+) -> Option<String> {
+    if field_deleted(request, field_uri) {
+        Some(String::new())
+    } else {
+        element_text(contact, element)
+    }
+}
+
+fn ews_contact_element_values(contact: &str, element: &str) -> Vec<String> {
+    let Some(content) = element_content(contact, element) else {
+        return Vec::new();
+    };
+    let mut rest = content;
+    let mut values = Vec::new();
+    while let Some(value) = element_text(rest, "String") {
+        values.push(value);
+        let Some(closing) = rest.find("</") else {
+            break;
+        };
+        let Some(end) = rest[closing..].find('>') else {
+            break;
+        };
+        rest = &rest[closing + end + 1..];
+    }
+    values
+}
+
+fn contact_string_values(values: &serde_json::Value) -> Vec<String> {
+    values
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
 fn ews_contact_phone_entries_xml(contact: &AccessibleContact) -> String {
     let labels = [
         ("mobile", "MobilePhone"),
@@ -382,6 +616,12 @@ fn ews_contact_phone_entries_xml(contact: &AccessibleContact) -> String {
         entries.push(format!(
             "<t:Entry Key=\"MobilePhone\">{}</t:Entry>",
             escape_xml(&contact.phone)
+        ));
+    }
+    if !contact.assistant_phone.trim().is_empty() {
+        entries.push(format!(
+            "<t:Entry Key=\"AssistantPhone\">{}</t:Entry>",
+            escape_xml(&contact.assistant_phone)
         ));
     }
     entries.join("")
@@ -887,5 +1127,62 @@ mod contact_update_tests {
         assert_eq!(input.raw_vcard, None);
         assert!(!input.raw_vcard_is_explicit);
         assert!(!input.source_is_explicit);
+    }
+
+    #[test]
+    fn contact_rich_fields_project_and_parse_through_ews() {
+        let request = concat!(
+            "<m:CreateItem><t:Contact><t:DisplayName>Ada</t:DisplayName>",
+            "<t:EmailAddress>ada@example.test</t:EmailAddress>",
+            "<t:Categories><t:String>Friends</t:String><t:String>VIP</t:String></t:Categories>",
+            "<t:Birthday>1815-12-10T00:00:00Z</t:Birthday>",
+            "<t:WeddingAnniversary>1835-07-08T00:00:00Z</t:WeddingAnniversary>",
+            "<t:Children><t:String>Byron</t:String></t:Children>",
+            "<t:SpouseName>William</t:SpouseName><t:AssistantName>Charles</t:AssistantName>",
+            "<t:PhoneNumbers><t:Entry Key=\"AssistantPhone\">+44 20 5555</t:Entry></t:PhoneNumbers>",
+            "<t:Photo>/9j/4AAQ</t:Photo></t:Contact></m:CreateItem>"
+        );
+        let input = parse_create_contact_input(&principal(), request).unwrap();
+
+        assert_eq!(
+            input.categories_json,
+            Some(serde_json::json!(["Friends", "VIP"]))
+        );
+        assert_eq!(input.birthday, Some(Some("1815-12-10".to_string())));
+        assert_eq!(input.anniversary, Some(Some("1835-07-08".to_string())));
+        assert_eq!(input.children_json, Some(serde_json::json!(["Byron"])));
+        assert_eq!(input.spouse, Some("William".to_string()));
+        assert_eq!(input.assistant_name, Some("Charles".to_string()));
+        assert_eq!(input.assistant_phone, Some("+44 20 5555".to_string()));
+        assert_eq!(input.photo_data, Some(Some("/9j/4AAQ".to_string())));
+
+        let contact = AccessibleContact {
+            id: Uuid::from_u128(4),
+            name: "Ada".to_string(),
+            email: "ada@example.test".to_string(),
+            categories_json: serde_json::json!(["Friends", "VIP"]),
+            birthday: Some("1815-12-10".to_string()),
+            anniversary: Some("1835-07-08".to_string()),
+            children_json: serde_json::json!(["Byron"]),
+            spouse: "William".to_string(),
+            assistant_name: "Charles".to_string(),
+            assistant_phone: "+44 20 5555".to_string(),
+            photo_data: Some("/9j/4AAQ".to_string()),
+            photo_content_type: Some("image/jpeg".to_string()),
+            ..AccessibleContact::default()
+        };
+        let xml = contact_item_xml_with_change_key(&contact, "version");
+        for expected in [
+            "<t:Categories><t:String>Friends</t:String><t:String>VIP</t:String></t:Categories>",
+            "<t:Birthday>1815-12-10T00:00:00Z</t:Birthday>",
+            "<t:WeddingAnniversary>1835-07-08T00:00:00Z</t:WeddingAnniversary>",
+            "<t:Children><t:String>Byron</t:String></t:Children>",
+            "<t:SpouseName>William</t:SpouseName>",
+            "<t:AssistantName>Charles</t:AssistantName>",
+            "<t:Entry Key=\"AssistantPhone\">+44 20 5555</t:Entry>",
+            "<t:Photo>/9j/4AAQ</t:Photo><t:HasPicture>true</t:HasPicture>",
+        ] {
+            assert!(xml.contains(expected), "missing {expected}: {xml}");
+        }
     }
 }

@@ -342,6 +342,115 @@ async fn mapi_over_http_outlook_contact_create_resolves_named_email_addresses() 
 }
 
 #[tokio::test]
+async fn mapi_over_http_contact_photo_attachment_commits_with_contact_and_reopens() {
+    // [MS-OXOCNTC] section 2.2.1.8: the bytes are an attachment marked with
+    // PidTagAttachmentContactPhoto. SaveChangesAttachment stages it; the
+    // following SaveChangesMessage commits the canonical Contact atomically.
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        ..Default::default()
+    };
+    let contacts = store.contacts.clone();
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
+            .await
+            .unwrap();
+    let service =
+        ExchangeService::new_with_validator(store, Validator::new(FakeDetector::png(), 0.8));
+    let (mut headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
+
+    let photo_bytes = b"\x89PNG-contact-photo";
+    let mut attachment_properties = Vec::new();
+    append_mapi_bool_property(&mut attachment_properties, 0x7FFF_000B, true);
+    append_mapi_utf16_property(&mut attachment_properties, 0x370E_001F, "image/png");
+    append_mapi_utf16_property(&mut attachment_properties, 0x3707_001F, "ContactPhoto.png");
+    append_mapi_binary_property(&mut attachment_properties, 0x3701_0102, photo_bytes);
+    let rops =
+        crate::mapi::identity::with_current_mapi_identity_codec(identity_codec.clone(), async {
+            let mut rops = Vec::new();
+            append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(15));
+            rops.extend_from_slice(&[0x23, 0x00, 0x01, 0x02]); // RopCreateAttachment
+            append_rop_set_properties(&mut rops, 2, 4, &attachment_properties);
+            rops.extend_from_slice(&[0x25, 0x00, 0x01, 0x02, 0x00]); // RopSaveChangesAttachment
+            append_rop_save_changes_message(&mut rops, 1, 1);
+            rops
+        })
+        .await;
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &headers,
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(
+        !response_rops
+            .windows(4)
+            .any(|window| window == 0x8004_0102u32.to_le_bytes()),
+        "contact photo save failed: {response_rops:02x?}"
+    );
+    assert!(
+        contains_bytes(&response_rops, &[0x25, 0x01, 0, 0, 0, 0]),
+        "RopSaveChangesAttachment failed: {response_rops:02x?}"
+    );
+    let contact_mapi_id = saved_message_id_from_response(&response_rops, 1).unwrap();
+    let stored = contacts.lock().unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(
+        stored[0].photo_data.as_deref(),
+        Some("iVBORy1jb250YWN0LXBob3Rv")
+    );
+    assert_eq!(stored[0].photo_content_type.as_deref(), Some("image/png"));
+    drop(stored);
+
+    renew_mapi_request_id(&mut headers);
+    let reopen_rops =
+        crate::mapi::identity::with_current_mapi_identity_codec(identity_codec, async {
+            let mut rops = Vec::new();
+            append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(15));
+            append_rop_open_message_with_flags(
+                &mut rops,
+                1,
+                2,
+                test_mapi_folder_id(15),
+                contact_mapi_id,
+                0,
+            );
+            rops.extend_from_slice(&[0x22, 0x00, 0x02, 0x03, 0x00]); // RopOpenAttachment
+            rops.extend_from_slice(&0u32.to_le_bytes());
+            append_rop_get_properties_specific(&mut rops, 3, &[0x3701_0102, 0x7FFF_000B]);
+            rops
+        })
+        .await;
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &headers,
+            &execute_body(&rop_buffer(
+                &reopen_rops,
+                &[logon_handle, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(
+        contains_bytes(&response_rops, photo_bytes),
+        "photo bytes did not reopen: {response_rops:02x?}"
+    );
+    assert!(
+        contains_bytes(&response_rops, &[0x01]),
+        "contact-photo marker did not reopen: {response_rops:02x?}"
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_replays_outlook_contact_sync_import_then_save() {
     // Outlook trace 202607201648, requests :256 and :259.
     // [MS-OXCFXICS] sections 2.2.3.2.4.2.1, 3.3.4.3.3.2.2.1, and

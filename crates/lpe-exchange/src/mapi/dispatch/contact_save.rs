@@ -1,5 +1,6 @@
 use super::*;
 use crate::store::{MapiContactCreateOutcome, MapiIdentityRecord};
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use lpe_storage::{MapiContactImportConflict, MapiContactImportObjectDeleted};
 
 #[allow(clippy::too_many_arguments)]
@@ -33,12 +34,13 @@ pub(super) async fn save_pending_contact<S: ExchangeStore>(
         ));
         return;
     }
-    let input = contact_input_from_mapi(
+    let mut input = contact_input_from_mapi(
         principal.account_id,
         None,
         &default_contact_for_mapping(principal.account_id, &folder.collection.id),
         &properties,
     );
+    apply_staged_contact_photo(&mut input, session, handle);
     let create_input = MapiContactCreateInput {
         principal_account_id: principal.account_id,
         collection_id: folder.collection.id.clone(),
@@ -64,6 +66,7 @@ pub(super) async fn save_pending_contact<S: ExchangeStore>(
                 last_modification_time: created.version.last_modification_time,
             };
             snapshot.remember_created_contact(folder_id, created.contact, identity);
+            session.pending_contact_photo_attachments.remove(&handle);
             remember_saved_contact_handle(
                 session,
                 handle,
@@ -167,7 +170,7 @@ pub(super) async fn save_existing_contact<S: ExchangeStore>(
     }
     let disposition =
         save_disposition(request).expect("SaveFlags were validated before Contact save");
-    let commit_input = match staged_contact_commit_input(
+    let mut commit_input = match staged_contact_commit_input(
         principal,
         &contact,
         &transaction,
@@ -183,6 +186,7 @@ pub(super) async fn save_existing_contact<S: ExchangeStore>(
             return;
         }
     };
+    apply_staged_contact_photo(&mut commit_input.contact, session, handle);
     match store.commit_mapi_contact_update(commit_input).await {
         Ok(lpe_storage::MapiContactCommitOutcome::Saved(saved)) => {
             let identity = MapiIdentityRecord {
@@ -206,6 +210,7 @@ pub(super) async fn save_existing_contact<S: ExchangeStore>(
                 identity,
                 saved.version.canonical_modseq,
             );
+            session.pending_contact_photo_attachments.remove(&handle);
             remember_saved_contact_handle(
                 session,
                 handle,
@@ -247,6 +252,18 @@ pub(super) async fn save_existing_contact<S: ExchangeStore>(
             0x8000_4005,
         )),
     }
+}
+
+fn apply_staged_contact_photo(
+    input: &mut lpe_storage::UpsertClientContactInput,
+    session: &MapiSession,
+    handle: u32,
+) {
+    let Some(photo) = session.pending_contact_photo_attachments.get(&handle) else {
+        return;
+    };
+    input.photo_data = Some(Some(BASE64_STANDARD.encode(&photo.blob_bytes)));
+    input.photo_content_type = Some(Some(photo.media_type.clone()));
 }
 
 fn remember_saved_contact_handle(

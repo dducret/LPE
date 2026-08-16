@@ -266,6 +266,7 @@ fn contact_input(account_id: Uuid, contact_id: Uuid, name: &str) -> UpsertClient
             source_payload_json: json!({"categories": ["Équipe", "Genève"]}),
         },
         source_is_explicit: true,
+        ..Default::default()
     }
 }
 

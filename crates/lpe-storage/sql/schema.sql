@@ -18,7 +18,7 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE TABLE schema_metadata (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton = TRUE),
-    schema_version TEXT NOT NULL CHECK (schema_version = '0.5.2-sql'),
+    schema_version TEXT NOT NULL CHECK (schema_version = '0.5.3-sql'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -2681,6 +2681,15 @@ CREATE TABLE contacts (
     phones_json JSONB NOT NULL DEFAULT '[]'::jsonb,
     addresses_json JSONB NOT NULL DEFAULT '[]'::jsonb,
     urls_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    photo_data TEXT,
+    photo_content_type TEXT,
+    categories_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    birthday TEXT,
+    anniversary TEXT,
+    children_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    spouse TEXT NOT NULL DEFAULT '',
+    assistant_name TEXT NOT NULL DEFAULT '',
+    assistant_phone TEXT NOT NULL DEFAULT '',
     notes TEXT NOT NULL DEFAULT '',
     raw_vcard TEXT,
     import_source TEXT NOT NULL DEFAULT 'local' CHECK (import_source IN ('local', 'jmap', 'dav', 'ews', 'mapi', 'activesync', 'import')),
@@ -2696,6 +2705,10 @@ CREATE TABLE contacts (
     CHECK (jsonb_typeof(phones_json) = 'array'),
     CHECK (jsonb_typeof(addresses_json) = 'array'),
     CHECK (jsonb_typeof(urls_json) = 'array'),
+    CHECK (jsonb_typeof(categories_json) = 'array'),
+    CHECK (jsonb_typeof(children_json) = 'array'),
+    CHECK (birthday IS NULL OR birthday ~ '^\\d{4}-\\d{2}-\\d{2}$'),
+    CHECK (anniversary IS NULL OR anniversary ~ '^\\d{4}-\\d{2}-\\d{2}$'),
     CHECK (jsonb_typeof(source_payload_json) = 'object'),
     FOREIGN KEY (tenant_id, owner_account_id, contact_book_id)
         REFERENCES contact_books (tenant_id, owner_account_id, id)
@@ -3873,6 +3886,6 @@ SELECT
 FROM mail_search_documents msd;
 
 INSERT INTO schema_metadata (singleton, schema_version)
-VALUES (TRUE, '0.5.2-sql');
+VALUES (TRUE, '0.5.3-sql');
 
 COMMIT;

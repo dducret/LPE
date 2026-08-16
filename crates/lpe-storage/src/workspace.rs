@@ -121,6 +121,15 @@ pub struct ClientContact {
     pub phones_json: Value,
     pub addresses_json: Value,
     pub urls_json: Value,
+    pub photo_data: Option<String>,
+    pub photo_content_type: Option<String>,
+    pub categories_json: Value,
+    pub birthday: Option<String>,
+    pub anniversary: Option<String>,
+    pub children_json: Value,
+    pub spouse: String,
+    pub assistant_name: String,
+    pub assistant_phone: String,
     pub organization_name: String,
     pub job_title: String,
     pub raw_vcard: Option<String>,
@@ -143,6 +152,15 @@ impl Default for ClientContact {
             phones_json: Value::Array(Vec::new()),
             addresses_json: Value::Array(Vec::new()),
             urls_json: Value::Array(Vec::new()),
+            photo_data: None,
+            photo_content_type: None,
+            categories_json: Value::Array(Vec::new()),
+            birthday: None,
+            anniversary: None,
+            children_json: Value::Array(Vec::new()),
+            spouse: String::new(),
+            assistant_name: String::new(),
+            assistant_phone: String::new(),
             organization_name: String::new(),
             job_title: String::new(),
             raw_vcard: None,
@@ -186,6 +204,24 @@ pub struct UpsertClientContactInput {
     pub addresses_json: Option<Value>,
     #[serde(default)]
     pub urls_json: Option<Value>,
+    #[serde(default)]
+    pub photo_data: Option<Option<String>>,
+    #[serde(default)]
+    pub photo_content_type: Option<Option<String>>,
+    #[serde(default)]
+    pub categories_json: Option<Value>,
+    #[serde(default)]
+    pub birthday: Option<Option<String>>,
+    #[serde(default)]
+    pub anniversary: Option<Option<String>>,
+    #[serde(default)]
+    pub children_json: Option<Value>,
+    #[serde(default)]
+    pub spouse: Option<String>,
+    #[serde(default)]
+    pub assistant_name: Option<String>,
+    #[serde(default)]
+    pub assistant_phone: Option<String>,
     #[serde(default)]
     pub organization_name: String,
     #[serde(default)]
@@ -270,6 +306,9 @@ impl Storage {
         let phones_json = contact_phones_json(&input)?;
         let addresses_json = contact_array_json(input.addresses_json.clone())?;
         let urls_json = contact_array_json(input.urls_json.clone())?;
+        let categories_json =
+            contact_string_array_json(input.categories_json.clone(), "categories")?;
+        let children_json = contact_string_array_json(input.children_json.clone(), "children")?;
         let source_payload_json =
             contact_source_payload_json(input.source.source_payload_json.clone())?;
 
@@ -282,6 +321,8 @@ impl Storage {
                 &phones_json,
                 &addresses_json,
                 &urls_json,
+                &categories_json,
+                &children_json,
                 &source_payload_json,
             ) {
                 return Ok(existing);
@@ -305,7 +346,8 @@ impl Storage {
                 display_name, name_prefix, given_name, middle_name, family_name, name_suffix,
                 nickname, phonetic_given_name, phonetic_family_name, job_title, role,
                 organization_name, organization_unit, emails_json, phones_json, addresses_json,
-                urls_json, notes, raw_vcard, import_source, source_uid, source_etag,
+                urls_json, photo_data, photo_content_type, categories_json, birthday, anniversary,
+                children_json, spouse, assistant_name, assistant_phone, notes, raw_vcard, import_source, source_uid, source_etag,
                 source_payload_json
             )
             VALUES (
@@ -313,8 +355,8 @@ impl Storage {
                 $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15,
                 $16, $17, $18, $19, $20,
-                $21, $22, $23, $24, $25, $26,
-                $27
+                $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35,
+                $36
             )
             ON CONFLICT (id) DO UPDATE SET
                 contact_book_id = EXCLUDED.contact_book_id,
@@ -336,6 +378,15 @@ impl Storage {
                 phones_json = EXCLUDED.phones_json,
                 addresses_json = EXCLUDED.addresses_json,
                 urls_json = EXCLUDED.urls_json,
+                photo_data = EXCLUDED.photo_data,
+                photo_content_type = EXCLUDED.photo_content_type,
+                categories_json = EXCLUDED.categories_json,
+                birthday = EXCLUDED.birthday,
+                anniversary = EXCLUDED.anniversary,
+                children_json = EXCLUDED.children_json,
+                spouse = EXCLUDED.spouse,
+                assistant_name = EXCLUDED.assistant_name,
+                assistant_phone = EXCLUDED.assistant_phone,
                 notes = EXCLUDED.notes,
                 raw_vcard = EXCLUDED.raw_vcard,
                 import_source = EXCLUDED.import_source,
@@ -347,7 +398,7 @@ impl Storage {
               AND contacts.owner_account_id = EXCLUDED.owner_account_id
             RETURNING
                 id,
-                $28::text AS address_book_id,
+                $37::text AS address_book_id,
                 display_name AS name,
                 role,
                 COALESCE(emails_json->0->>'email', '') AS email,
@@ -366,6 +417,15 @@ impl Storage {
                 phones_json,
                 addresses_json,
                 urls_json,
+                photo_data,
+                photo_content_type,
+                categories_json,
+                birthday,
+                anniversary,
+                children_json,
+                spouse,
+                assistant_name,
+                assistant_phone,
                 organization_name,
                 job_title,
                 raw_vcard,
@@ -401,6 +461,15 @@ impl Storage {
         .bind(phones_json)
         .bind(addresses_json)
         .bind(urls_json)
+        .bind(input.photo_data.flatten().map(|value| value.trim().to_string()).filter(|value| !value.is_empty()))
+        .bind(input.photo_content_type.flatten().map(|value| value.trim().to_string()).filter(|value| !value.is_empty()))
+        .bind(categories_json)
+        .bind(input.birthday.flatten().map(|value| value.trim().to_string()).filter(|value| !value.is_empty()))
+        .bind(input.anniversary.flatten().map(|value| value.trim().to_string()).filter(|value| !value.is_empty()))
+        .bind(children_json)
+        .bind(input.spouse.as_deref().unwrap_or_default().trim())
+        .bind(input.assistant_name.as_deref().unwrap_or_default().trim())
+        .bind(input.assistant_phone.as_deref().unwrap_or_default().trim())
         .bind(input.notes.trim())
         .bind(input.raw_vcard.as_deref())
         .bind(if input.source.import_source.trim().is_empty() {
@@ -817,6 +886,15 @@ impl Storage {
                 contacts.phones_json,
                 contacts.addresses_json,
                 contacts.urls_json,
+                contacts.photo_data,
+                contacts.photo_content_type,
+                contacts.categories_json,
+                contacts.birthday,
+                contacts.anniversary,
+                contacts.children_json,
+                contacts.spouse,
+                contacts.assistant_name,
+                contacts.assistant_phone,
                 contacts.organization_name,
                 contacts.job_title,
                 contacts.raw_vcard,
@@ -879,6 +957,15 @@ impl Storage {
                 contacts.phones_json,
                 contacts.addresses_json,
                 contacts.urls_json,
+                contacts.photo_data,
+                contacts.photo_content_type,
+                contacts.categories_json,
+                contacts.birthday,
+                contacts.anniversary,
+                contacts.children_json,
+                contacts.spouse,
+                contacts.assistant_name,
+                contacts.assistant_phone,
                 contacts.organization_name,
                 contacts.job_title,
                 contacts.raw_vcard,
@@ -1017,6 +1104,25 @@ pub(crate) fn contact_array_json(value: Option<Value>) -> Result<Value> {
     }
 }
 
+pub(crate) fn contact_string_array_json(value: Option<Value>, name: &str) -> Result<Value> {
+    let value = contact_array_json(value)?;
+    let Some(items) = value.as_array() else {
+        bail!("{name} must be an array");
+    };
+    if items.iter().any(|item| item.as_str().is_none()) {
+        bail!("{name} entries must be strings");
+    }
+    Ok(Value::Array(
+        items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| Value::String(value.to_string()))
+            .collect(),
+    ))
+}
+
 pub(crate) fn contact_source_payload_json(value: Value) -> Result<Value> {
     match value {
         Value::Object(_) => Ok(value),
@@ -1046,6 +1152,8 @@ fn contact_update_is_unchanged(
     phones_json: &Value,
     addresses_json: &Value,
     urls_json: &Value,
+    categories_json: &Value,
+    children_json: &Value,
     source_payload_json: &Value,
 ) -> bool {
     existing.address_book_id == client_address_book_id_for_role(contact_book_role)
@@ -1065,6 +1173,35 @@ fn contact_update_is_unchanged(
         && existing.phones_json == *phones_json
         && existing.addresses_json == *addresses_json
         && existing.urls_json == *urls_json
+        && existing.photo_data
+            == input
+                .photo_data
+                .clone()
+                .flatten()
+                .filter(|value| !value.trim().is_empty())
+        && existing.photo_content_type
+            == input
+                .photo_content_type
+                .clone()
+                .flatten()
+                .filter(|value| !value.trim().is_empty())
+        && existing.categories_json == *categories_json
+        && existing.birthday
+            == input
+                .birthday
+                .clone()
+                .flatten()
+                .filter(|value| !value.trim().is_empty())
+        && existing.anniversary
+            == input
+                .anniversary
+                .clone()
+                .flatten()
+                .filter(|value| !value.trim().is_empty())
+        && existing.children_json == *children_json
+        && existing.spouse == input.spouse.as_deref().unwrap_or_default().trim()
+        && existing.assistant_name == input.assistant_name.as_deref().unwrap_or_default().trim()
+        && existing.assistant_phone == input.assistant_phone.as_deref().unwrap_or_default().trim()
         && existing.organization_name
             == if input.organization_name.trim().is_empty() {
                 input.team.trim()
@@ -1158,6 +1295,33 @@ fn merge_contact_update_input(
     }
     if input.urls_json.is_none() {
         input.urls_json = Some(existing.urls_json.clone());
+    }
+    if input.photo_data.is_none() {
+        input.photo_data = Some(existing.photo_data.clone());
+    }
+    if input.photo_content_type.is_none() {
+        input.photo_content_type = Some(existing.photo_content_type.clone());
+    }
+    if input.categories_json.is_none() {
+        input.categories_json = Some(existing.categories_json.clone());
+    }
+    if input.birthday.is_none() {
+        input.birthday = Some(existing.birthday.clone());
+    }
+    if input.anniversary.is_none() {
+        input.anniversary = Some(existing.anniversary.clone());
+    }
+    if input.children_json.is_none() {
+        input.children_json = Some(existing.children_json.clone());
+    }
+    if input.spouse.is_none() {
+        input.spouse = Some(existing.spouse.clone());
+    }
+    if input.assistant_name.is_none() {
+        input.assistant_name = Some(existing.assistant_name.clone());
+    }
+    if input.assistant_phone.is_none() {
+        input.assistant_phone = Some(existing.assistant_phone.clone());
     }
     if !input.raw_vcard_is_explicit {
         input.raw_vcard = existing.raw_vcard.clone();
@@ -1260,6 +1424,15 @@ fn map_contact(row: ClientContactRow) -> ClientContact {
         phones_json: row.phones_json,
         addresses_json: row.addresses_json,
         urls_json: row.urls_json,
+        photo_data: row.photo_data,
+        photo_content_type: row.photo_content_type,
+        categories_json: row.categories_json,
+        birthday: row.birthday,
+        anniversary: row.anniversary,
+        children_json: row.children_json,
+        spouse: row.spouse,
+        assistant_name: row.assistant_name,
+        assistant_phone: row.assistant_phone,
         organization_name: row.organization_name,
         job_title: row.job_title,
         raw_vcard: row.raw_vcard,

@@ -46,7 +46,7 @@ The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI ove
   - maps calendar `MoveToDeletedItems` to the canonical deleted-items lifecycle,
     permits contact deletion only as canonical hard deletion, and rejects other
     unsupported contact/calendar EWS delete modes before mutation
-  - contact updates preserve canonical rich fields, vCard/source metadata, and unsupported structured arrays when an EWS request omits them; explicit delete/update instructions clear only the addressed fields
+  - contact updates preserve canonical rich fields (photos, three postal addresses, categories, birthdays, anniversaries, children, spouse, assistant details, web pages, and secondary email/phone slots), vCard/source metadata, and unsupported structured arrays when an EWS request omits them; explicit delete/update instructions clear only the addressed fields
   - treats Outlook-visible Suggested Contacts as the canonical `contact_books.role = 'suggested_contacts'` folder containing durable `contacts`
   - does not expose private `recipient_suggestions` rows as contacts, directory entries, shared contact grants, search results, or AI-facing data
   - uses canonical submission for sending
@@ -56,7 +56,7 @@ The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI ove
 - MAPI rules:
   - `EMSMDB` maps mailbox synchronization to canonical mailbox state
   - `NSPI` maps address-book behavior to canonical account/contact visibility
-  - contact property updates merge into canonical contacts and do not erase rich contact fields, vCard/source metadata, or structured arrays that the MAPI property set did not address
+  - contact property updates merge into canonical contacts and do not erase rich contact fields (including photos, postal addresses, categories, dates, family/assistant details, web pages, and secondary email/phone slots), vCard/source metadata, or structured arrays that the MAPI property set did not address
   - existing Contact Message handles stage supported property sets and clears
     independently. A successful `RopSaveChangesMessage` atomically commits the
     canonical merge, identity/version successor, and sync-visible change; a

@@ -3,6 +3,8 @@ use axum::{
     http::{HeaderMap, StatusCode},
     Json,
 };
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest, Validator};
 use lpe_storage::{
     AccessibleContact, AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent,
     ClientNote, ClientReminder, ClientTask, ClientTaskList, ClientWorkspace,
@@ -628,6 +630,7 @@ pub(crate) async fn upsert_client_contact(
     let contact_id = request.id;
     let collection_id = request.collection_id.clone();
     let input = contact_input_from_request(account.account_id, request);
+    validate_contact_photo(&input).map_err(bad_request_error)?;
     let contact = if let Some(contact_id) = contact_id {
         storage
             .update_accessible_contact(account.account_id, contact_id, input)
@@ -706,6 +709,14 @@ pub(crate) async fn patch_client_contact(
         crate::types::PatchField::Null => None,
         crate::types::PatchField::Value(value) => Some(value),
     };
+    let photo_data = patch_contact_optional_string(request.photo_data, existing.photo_data.clone());
+    let photo_content_type = patch_contact_optional_string(
+        request.photo_content_type,
+        existing.photo_content_type.clone(),
+    );
+    let birthday = patch_contact_optional_string(request.birthday, existing.birthday.clone());
+    let anniversary =
+        patch_contact_optional_string(request.anniversary, existing.anniversary.clone());
     let input = UpsertClientContactInput {
         id: Some(contact_id),
         account_id: account.account_id,
@@ -720,6 +731,15 @@ pub(crate) async fn patch_client_contact(
         phones_json: Some(request.phones_json.unwrap_or(existing.phones_json)),
         addresses_json: Some(request.addresses_json.unwrap_or(existing.addresses_json)),
         urls_json: Some(request.urls_json.unwrap_or(existing.urls_json)),
+        photo_data,
+        photo_content_type,
+        categories_json: Some(request.categories_json.unwrap_or(existing.categories_json)),
+        birthday,
+        anniversary,
+        children_json: Some(request.children_json.unwrap_or(existing.children_json)),
+        spouse: Some(request.spouse.unwrap_or(existing.spouse)),
+        assistant_name: Some(request.assistant_name.unwrap_or(existing.assistant_name)),
+        assistant_phone: Some(request.assistant_phone.unwrap_or(existing.assistant_phone)),
         organization_name: request
             .organization_name
             .unwrap_or(existing.organization_name),
@@ -729,6 +749,7 @@ pub(crate) async fn patch_client_contact(
         source_is_explicit: request.source.is_some(),
         source: request.source.unwrap_or(existing.source),
     };
+    validate_contact_photo(&input).map_err(bad_request_error)?;
     let contact = storage
         .update_accessible_contact(account.account_id, contact_id, input)
         .await
@@ -801,6 +822,15 @@ fn contact_input_from_request(
         phones_json: request.phones_json,
         addresses_json: request.addresses_json,
         urls_json: request.urls_json,
+        photo_data: Some(request.photo_data),
+        photo_content_type: Some(request.photo_content_type),
+        categories_json: request.categories_json,
+        birthday: Some(request.birthday),
+        anniversary: Some(request.anniversary),
+        children_json: request.children_json,
+        spouse: request.spouse,
+        assistant_name: request.assistant_name,
+        assistant_phone: request.assistant_phone,
         organization_name: request.organization_name,
         job_title: request.job_title,
         raw_vcard_is_explicit: request.raw_vcard.is_some(),
@@ -808,6 +838,46 @@ fn contact_input_from_request(
         source_is_explicit: request.source.is_some(),
         source: request.source.unwrap_or_default(),
     }
+}
+
+fn patch_contact_optional_string(
+    field: crate::types::PatchField<String>,
+    existing: Option<String>,
+) -> Option<Option<String>> {
+    Some(match field {
+        crate::types::PatchField::Missing => existing,
+        crate::types::PatchField::Null => None,
+        crate::types::PatchField::Value(value) => Some(value),
+    })
+}
+
+fn validate_contact_photo(input: &UpsertClientContactInput) -> anyhow::Result<()> {
+    let Some(Some(photo_data)) = input.photo_data.as_ref() else {
+        return Ok(());
+    };
+    let photo_data = photo_data.trim();
+    if photo_data.is_empty() {
+        return Ok(());
+    }
+    let bytes = BASE64
+        .decode(photo_data)
+        .map_err(|_| anyhow::anyhow!("contact photo must contain base64 data"))?;
+    let outcome = Validator::from_env().validate_bytes(
+        ValidationRequest {
+            ingress_context: IngressContext::AttachmentParsing,
+            declared_mime: input.photo_content_type.clone().flatten(),
+            filename: Some("contact-photo".to_string()),
+            expected_kind: ExpectedKind::Any,
+        },
+        &bytes,
+    )?;
+    if outcome.policy_decision != PolicyDecision::Accept {
+        anyhow::bail!(
+            "client contact photo blocked by Magika validation: {}",
+            outcome.reason
+        );
+    }
+    Ok(())
 }
 
 fn client_contact_from_accessible(contact: AccessibleContact) -> ClientContact {
@@ -825,6 +895,15 @@ fn client_contact_from_accessible(contact: AccessibleContact) -> ClientContact {
         phones_json: contact.phones_json,
         addresses_json: contact.addresses_json,
         urls_json: contact.urls_json,
+        photo_data: contact.photo_data,
+        photo_content_type: contact.photo_content_type,
+        categories_json: contact.categories_json,
+        birthday: contact.birthday,
+        anniversary: contact.anniversary,
+        children_json: contact.children_json,
+        spouse: contact.spouse,
+        assistant_name: contact.assistant_name,
+        assistant_phone: contact.assistant_phone,
         organization_name: contact.organization_name,
         job_title: contact.job_title,
         raw_vcard: contact.raw_vcard,

@@ -154,10 +154,11 @@
     absolute yearly recurrences with optional interval, count, or until date
   - ActiveSync attendee name, email, required/optional type, and response
     status map to canonical attendee metadata when present
-  - unsupported contact fields include contact photos, postal addresses,
-    categories, birthdays, anniversaries, children, spouse, assistant, web
-    page, and secondary email/phone slots until the canonical contact API
-    exposes those fields
+  - contact `ApplicationData` also maps `Picture`, `BusinessAddress*`,
+    `HomeAddress*`, `OtherAddress*`, `Categories`, `Birthday`, `Anniversary`,
+    `Children`, `Spouse`, `AssistantName`, `AssistantPhoneNumber`, `WebPage`,
+    `Email2Address`, `Email3Address`, and second work/home phone slots onto
+    the canonical rich contact fields
   - unsupported calendar fields include binary Windows time-zone conversion,
     all-day events, reminders, busy/sensitivity status, categories, recurrence
     exceptions, deleted occurrences, online meeting links, proposed new times,
@@ -179,4 +180,4 @@
 | Body preferences | text, stored sanitized HTML, canonical MIME blob with truncation |
 | Attachments | common MIME attachment parsing and canonical `FileReference` retrieval |
 | Long poll | canonical-change-aware `Ping` long polling against persisted sync state |
-| Unsupported | full Exchange server semantics, client `SMTP`, ActiveSync task class, non-canonical outbound logic, legacy `GetAttachment`, multipart `ItemOperations` responses, non-draft mail edits through `Sync`, contact photos/postal addresses/categories, binary Windows time-zone conversion, calendar recurrence exceptions/all-day/reminders/busy status/client-originated organizer changes |
+| Unsupported | full Exchange server semantics, client `SMTP`, ActiveSync task class, non-canonical outbound logic, legacy `GetAttachment`, multipart `ItemOperations` responses, non-draft mail edits through `Sync`, binary Windows time-zone conversion, calendar recurrence exceptions/all-day/reminders/busy status/client-originated organizer changes |

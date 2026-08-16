@@ -65,6 +65,7 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) pending_message_recipient_replacements: HashMap<u32, Vec<PendingRecipient>>,
     pub(in crate::mapi) pending_message_attachments:
         HashMap<u32, Vec<(u32, AttachmentUploadInput)>>,
+    pub(in crate::mapi) pending_contact_photo_attachments: HashMap<u32, AttachmentUploadInput>,
     pub(in crate::mapi) pending_attachment_parent_messages: HashMap<u32, u32>,
     pub(in crate::mapi) pending_event_attachment_transactions:
         HashMap<u32, MapiEventAttachmentChanges>,

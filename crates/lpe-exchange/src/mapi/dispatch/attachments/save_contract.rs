@@ -54,6 +54,15 @@ pub(super) fn save_attachment_parent_handle(
             folder_id: parent_folder_id,
             ..
         } => *parent_folder_id == folder_id && message_id == 0,
+        MapiObject::Contact {
+            folder_id: parent_folder_id,
+            contact_id,
+            ..
+        } => *parent_folder_id == folder_id && *contact_id == message_id,
+        MapiObject::PendingContact {
+            folder_id: parent_folder_id,
+            ..
+        } => *parent_folder_id == folder_id && message_id == 0,
         _ => false,
     };
     is_containing_message

@@ -1019,8 +1019,16 @@ impl ActiveSyncStore for FakeStore {
         &'a self,
         input: UpsertClientContactInput,
     ) -> StoreFuture<'a, ClientContact> {
+        let id = input.id.unwrap_or_else(Uuid::new_v4);
+        let existing = self
+            .contacts
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|entry| entry.id == id)
+            .cloned();
         let contact = ClientContact {
-            id: input.id.unwrap_or_else(Uuid::new_v4),
+            id,
             address_book_id: "default".to_string(),
             name: input.name,
             role: input.role,
@@ -1029,18 +1037,80 @@ impl ActiveSyncStore for FakeStore {
             team: input.team,
             notes: input.notes,
             structured_name: input.structured_name,
-            emails_json: input
-                .emails_json
-                .unwrap_or_else(|| serde_json::Value::Array(Vec::new())),
-            phones_json: input
-                .phones_json
-                .unwrap_or_else(|| serde_json::Value::Array(Vec::new())),
-            addresses_json: input
-                .addresses_json
-                .unwrap_or_else(|| serde_json::Value::Array(Vec::new())),
-            urls_json: input
-                .urls_json
-                .unwrap_or_else(|| serde_json::Value::Array(Vec::new())),
+            emails_json: input.emails_json.unwrap_or_else(|| {
+                existing
+                    .as_ref()
+                    .map(|contact| contact.emails_json.clone())
+                    .unwrap_or_else(|| serde_json::Value::Array(Vec::new()))
+            }),
+            phones_json: input.phones_json.unwrap_or_else(|| {
+                existing
+                    .as_ref()
+                    .map(|contact| contact.phones_json.clone())
+                    .unwrap_or_else(|| serde_json::Value::Array(Vec::new()))
+            }),
+            addresses_json: input.addresses_json.unwrap_or_else(|| {
+                existing
+                    .as_ref()
+                    .map(|contact| contact.addresses_json.clone())
+                    .unwrap_or_else(|| serde_json::Value::Array(Vec::new()))
+            }),
+            urls_json: input.urls_json.unwrap_or_else(|| {
+                existing
+                    .as_ref()
+                    .map(|contact| contact.urls_json.clone())
+                    .unwrap_or_else(|| serde_json::Value::Array(Vec::new()))
+            }),
+            photo_data: input.photo_data.unwrap_or_else(|| {
+                existing
+                    .as_ref()
+                    .and_then(|contact| contact.photo_data.clone())
+            }),
+            photo_content_type: input.photo_content_type.unwrap_or_else(|| {
+                existing
+                    .as_ref()
+                    .and_then(|contact| contact.photo_content_type.clone())
+            }),
+            categories_json: input.categories_json.unwrap_or_else(|| {
+                existing
+                    .as_ref()
+                    .map(|contact| contact.categories_json.clone())
+                    .unwrap_or_else(|| serde_json::Value::Array(Vec::new()))
+            }),
+            birthday: input.birthday.unwrap_or_else(|| {
+                existing
+                    .as_ref()
+                    .and_then(|contact| contact.birthday.clone())
+            }),
+            anniversary: input.anniversary.unwrap_or_else(|| {
+                existing
+                    .as_ref()
+                    .and_then(|contact| contact.anniversary.clone())
+            }),
+            children_json: input.children_json.unwrap_or_else(|| {
+                existing
+                    .as_ref()
+                    .map(|contact| contact.children_json.clone())
+                    .unwrap_or_else(|| serde_json::Value::Array(Vec::new()))
+            }),
+            spouse: input.spouse.unwrap_or_else(|| {
+                existing
+                    .as_ref()
+                    .map(|contact| contact.spouse.clone())
+                    .unwrap_or_default()
+            }),
+            assistant_name: input.assistant_name.unwrap_or_else(|| {
+                existing
+                    .as_ref()
+                    .map(|contact| contact.assistant_name.clone())
+                    .unwrap_or_default()
+            }),
+            assistant_phone: input.assistant_phone.unwrap_or_else(|| {
+                existing
+                    .as_ref()
+                    .map(|contact| contact.assistant_phone.clone())
+                    .unwrap_or_default()
+            }),
             organization_name: input.organization_name,
             job_title: input.job_title,
             raw_vcard: input.raw_vcard,
@@ -5781,6 +5851,53 @@ async fn sync_contact_create_update_delete_round_trips_canonical_fields() {
     ));
     add_app.push(WbxmlNode::with_text(1, "CompanyName", "Example Co"));
     add_app.push(WbxmlNode::with_text(1, "JobTitle", "Operations Lead"));
+    add_app.push(WbxmlNode::with_text(
+        1,
+        "Email2Address",
+        "bob.home@example.test",
+    ));
+    add_app.push(WbxmlNode::with_text(
+        1,
+        "Business2PhoneNumber",
+        "+1 555 0101",
+    ));
+    add_app.push(WbxmlNode::with_text(1, "HomePhoneNumber", "+1 555 0102"));
+    add_app.push(WbxmlNode::with_text(1, "Home2PhoneNumber", "+1 555 0103"));
+    add_app.push(WbxmlNode::with_text(
+        1,
+        "BusinessAddressStreet",
+        "1 Example Way",
+    ));
+    add_app.push(WbxmlNode::with_text(1, "BusinessAddressCity", "Geneva"));
+    add_app.push(WbxmlNode::with_text(
+        1,
+        "BusinessAddressCountry",
+        "Switzerland",
+    ));
+    add_app.push(WbxmlNode::with_text(1, "BusinessAddressPostalCode", "1201"));
+    add_app.push(WbxmlNode::with_text(1, "HomeAddressStreet", "2 Home Way"));
+    add_app.push(WbxmlNode::with_text(1, "OtherAddressCity", "Paris"));
+    add_app.push(WbxmlNode::with_text(
+        1,
+        "WebPage",
+        "https://example.test/bob",
+    ));
+    add_app.push(WbxmlNode::with_text(1, "Birthday", "19840512T000000Z"));
+    add_app.push(WbxmlNode::with_text(1, "Anniversary", "20100604T000000Z"));
+    add_app.push(WbxmlNode::with_text(1, "Spouse", "Alex Example"));
+    add_app.push(WbxmlNode::with_text(1, "AssistantName", "Chris Helper"));
+    add_app.push(WbxmlNode::with_text(
+        1,
+        "AssistantPhoneNumber",
+        "+1 555 0190",
+    ));
+    let mut categories = WbxmlNode::new(1, "Categories");
+    categories.push(WbxmlNode::with_text(1, "Category", "VIP"));
+    categories.push(WbxmlNode::with_text(1, "Category", "Lab"));
+    add_app.push(categories);
+    let mut children = WbxmlNode::new(1, "Children");
+    children.push(WbxmlNode::with_text(1, "Child", "Taylor Example"));
+    add_app.push(children);
     let mut add_body = WbxmlNode::new(17, "Body");
     add_body.push(WbxmlNode::with_text(17, "Data", "Met at the mobile lab"));
     add_app.push(add_body);
@@ -5809,6 +5926,38 @@ async fn sync_contact_create_update_delete_round_trips_canonical_fields() {
         assert_eq!(contacts[0].team, "Example Co");
         assert_eq!(contacts[0].role, "Operations Lead");
         assert_eq!(contacts[0].notes, "Met at the mobile lab");
+        assert_eq!(contacts[0].birthday.as_deref(), Some("1984-05-12"));
+        assert_eq!(contacts[0].anniversary.as_deref(), Some("2010-06-04"));
+        assert_eq!(contacts[0].spouse, "Alex Example");
+        assert_eq!(contacts[0].assistant_name, "Chris Helper");
+        assert_eq!(contacts[0].assistant_phone, "+1 555 0190");
+        assert_eq!(
+            contacts[0].categories_json,
+            serde_json::json!(["VIP", "Lab"])
+        );
+        assert_eq!(
+            contacts[0].children_json,
+            serde_json::json!(["Taylor Example"])
+        );
+        assert!(contacts[0]
+            .emails_json
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["label"] == "email2" && entry["email"] == "bob.home@example.test"));
+        assert!(contacts[0]
+            .phones_json
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["label"] == "work2" && entry["phone"] == "+1 555 0101"));
+        assert!(contacts[0]
+            .addresses_json
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["label"] == "work" && entry["street"] == "1 Example Way"));
+        assert_eq!(contacts[0].urls_json[0]["url"], "https://example.test/bob");
     }
 
     let add_key = collection_sync_key(&add_response, "contacts");
@@ -5834,6 +5983,11 @@ async fn sync_contact_create_update_delete_round_trips_canonical_fields() {
         assert_eq!(contacts[0].phone, "+1 555 0199");
         assert_eq!(contacts[0].team, "LPE");
         assert_eq!(contacts[0].role, "Operations Lead");
+        assert_eq!(contacts[0].birthday.as_deref(), Some("1984-05-12"));
+        assert_eq!(
+            contacts[0].categories_json,
+            serde_json::json!(["VIP", "Lab"])
+        );
     }
 
     let change_key = collection_sync_key(&change_response, "contacts");
@@ -5964,6 +6118,29 @@ async fn sync_contact_and_calendar_projection_includes_supported_application_dat
             phone: "+49 30 1234".to_string(),
             team: "LPE".to_string(),
             notes: "Prefers mobile mail".to_string(),
+            emails_json: serde_json::json!([
+                {"label": "work", "email": "carol@example.test"},
+                {"label": "email2", "email": "carol.home@example.test"}
+            ]),
+            phones_json: serde_json::json!([
+                {"label": "mobile", "phone": "+49 30 1234"},
+                {"label": "work2", "phone": "+49 30 1235"},
+                {"label": "assistant", "phone": "+49 30 1236"}
+            ]),
+            addresses_json: serde_json::json!([
+                {"label": "work", "street": "1 LPE Way", "city": "Berlin", "country": "Germany", "postalCode": "10115"},
+                {"label": "home", "street": "2 Home Way", "state": "BE"}
+            ]),
+            urls_json: serde_json::json!([{"url": "https://example.test/carol"}]),
+            photo_data: Some("iVBORw0KGgo=".to_string()),
+            photo_content_type: Some("image/png".to_string()),
+            categories_json: serde_json::json!(["VIP", "Lab"]),
+            birthday: Some("1984-05-12".to_string()),
+            anniversary: Some("2010-06-04".to_string()),
+            children_json: serde_json::json!(["Taylor Example"]),
+            spouse: "Alex Example".to_string(),
+            assistant_name: "Chris Helper".to_string(),
+            assistant_phone: "+49 30 1236".to_string(),
             ..Default::default()
         }])),
         events: Arc::new(Mutex::new(vec![ClientEvent {
@@ -6021,6 +6198,62 @@ async fn sync_contact_and_calendar_projection_includes_supported_application_dat
             .unwrap()
             .text_value(),
         "Prefers mobile mail"
+    );
+    assert_eq!(
+        contact_app.child("Email2Address").unwrap().text_value(),
+        "carol.home@example.test"
+    );
+    assert_eq!(
+        contact_app
+            .child("BusinessAddressStreet")
+            .unwrap()
+            .text_value(),
+        "1 LPE Way"
+    );
+    assert_eq!(
+        contact_app.child("HomeAddressStreet").unwrap().text_value(),
+        "2 Home Way"
+    );
+    assert_eq!(
+        contact_app.child("WebPage").unwrap().text_value(),
+        "https://example.test/carol"
+    );
+    assert_eq!(
+        contact_app.child("Birthday").unwrap().text_value(),
+        "19840512T000000Z"
+    );
+    assert_eq!(
+        contact_app.child("Anniversary").unwrap().text_value(),
+        "20100604T000000Z"
+    );
+    assert_eq!(
+        contact_app.child("Spouse").unwrap().text_value(),
+        "Alex Example"
+    );
+    assert_eq!(
+        contact_app.child("AssistantName").unwrap().text_value(),
+        "Chris Helper"
+    );
+    assert_eq!(
+        contact_app.child("Picture").unwrap().text_value(),
+        "iVBORw0KGgo="
+    );
+    assert_eq!(
+        contact_app
+            .child("Categories")
+            .unwrap()
+            .children_named("Category")
+            .len(),
+        2
+    );
+    assert_eq!(
+        contact_app
+            .child("Children")
+            .unwrap()
+            .child("Child")
+            .unwrap()
+            .text_value(),
+        "Taylor Example"
     );
 
     let calendar_prime = sync_collection(&service, "calendar", "0", "dev-calendar").await;

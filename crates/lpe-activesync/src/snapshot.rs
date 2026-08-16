@@ -211,11 +211,110 @@ pub(crate) fn contact_application_data(contact: &ClientContact) -> Value {
     push_text(&mut children, 1, "FileAs", &contact.name);
     push_text(&mut children, 1, "FirstName", &first_name);
     push_text(&mut children, 1, "LastName", &last_name);
-    push_text(&mut children, 1, "Email1Address", &contact.email);
-    push_text(&mut children, 1, "MobilePhoneNumber", &contact.phone);
-    push_text(&mut children, 1, "BusinessPhoneNumber", &contact.phone);
+    push_text(
+        &mut children,
+        1,
+        "Email1Address",
+        &contact_labeled_or_primary(&contact.emails_json, "email", "work", &contact.email),
+    );
+    push_text(
+        &mut children,
+        1,
+        "Email2Address",
+        &contact_labeled_value(&contact.emails_json, "email", "email2"),
+    );
+    push_text(
+        &mut children,
+        1,
+        "Email3Address",
+        &contact_labeled_value(&contact.emails_json, "email", "email3"),
+    );
+    push_text(
+        &mut children,
+        1,
+        "MobilePhoneNumber",
+        &contact_labeled_or_primary(&contact.phones_json, "phone", "mobile", &contact.phone),
+    );
+    push_text(
+        &mut children,
+        1,
+        "BusinessPhoneNumber",
+        &contact_labeled_value(&contact.phones_json, "phone", "work"),
+    );
+    push_text(
+        &mut children,
+        1,
+        "Business2PhoneNumber",
+        &contact_labeled_value(&contact.phones_json, "phone", "work2"),
+    );
+    push_text(
+        &mut children,
+        1,
+        "HomePhoneNumber",
+        &contact_labeled_value(&contact.phones_json, "phone", "home"),
+    );
+    push_text(
+        &mut children,
+        1,
+        "Home2PhoneNumber",
+        &contact_labeled_value(&contact.phones_json, "phone", "home2"),
+    );
     push_text(&mut children, 1, "CompanyName", company_name);
     push_text(&mut children, 1, "JobTitle", job_title);
+    push_contact_address(&mut children, contact, "work", "Business");
+    push_contact_address(&mut children, contact, "home", "Home");
+    push_contact_address(&mut children, contact, "other", "Other");
+    push_text(
+        &mut children,
+        1,
+        "WebPage",
+        &contact_first_value(&contact.urls_json, "url")
+            .or_else(|| contact_first_value(&contact.urls_json, "href"))
+            .unwrap_or_default(),
+    );
+    if let Some(birthday) = contact_date_to_activesync(contact.birthday.as_deref()) {
+        push_text(&mut children, 1, "Birthday", &birthday);
+    }
+    if let Some(anniversary) = contact_date_to_activesync(contact.anniversary.as_deref()) {
+        push_text(&mut children, 1, "Anniversary", &anniversary);
+    }
+    push_text(&mut children, 1, "Spouse", &contact.spouse);
+    push_text(&mut children, 1, "AssistantName", &contact.assistant_name);
+    push_text(
+        &mut children,
+        1,
+        "AssistantPhoneNumber",
+        &contact.assistant_phone,
+    );
+    if let Some(categories) = contact
+        .categories_json
+        .as_array()
+        .filter(|items| !items.is_empty())
+    {
+        children.push(json!({
+            "page": 1,
+            "name": "Categories",
+            "children": categories.iter().filter_map(Value::as_str).filter(|value| !value.trim().is_empty()).map(|value| json!({"page": 1, "name": "Category", "text": value})).collect::<Vec<_>>(),
+        }));
+    }
+    if let Some(children_values) = contact
+        .children_json
+        .as_array()
+        .filter(|items| !items.is_empty())
+    {
+        children.push(json!({
+            "page": 1,
+            "name": "Children",
+            "children": children_values.iter().filter_map(Value::as_str).filter(|value| !value.trim().is_empty()).map(|value| json!({"page": 1, "name": "Child", "text": value})).collect::<Vec<_>>(),
+        }));
+    }
+    if let Some(picture) = contact
+        .photo_data
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        push_text(&mut children, 1, "Picture", picture);
+    }
     push_body(&mut children, &contact.notes);
 
     json!({
@@ -223,6 +322,91 @@ pub(crate) fn contact_application_data(contact: &ClientContact) -> Value {
         "name": "ApplicationData",
         "children": children
     })
+}
+
+fn contact_labeled_value(value: &Value, key: &str, label: &str) -> String {
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|entry| {
+            entry
+                .get("label")
+                .and_then(Value::as_str)
+                .is_some_and(|current| current.eq_ignore_ascii_case(label))
+        })
+        .and_then(|entry| entry.get(key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn contact_first_value(value: &Value, key: &str) -> Option<String> {
+    value
+        .as_array()?
+        .iter()
+        .find_map(|entry| entry.get(key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn contact_labeled_or_primary(value: &Value, key: &str, label: &str, fallback: &str) -> String {
+    let labeled = contact_labeled_value(value, key, label);
+    if labeled.is_empty() {
+        contact_first_value(value, key).unwrap_or_else(|| fallback.to_string())
+    } else {
+        labeled
+    }
+}
+
+fn push_contact_address(
+    children: &mut Vec<Value>,
+    contact: &ClientContact,
+    label: &str,
+    prefix: &str,
+) {
+    let Some(address) = contact.addresses_json.as_array().and_then(|addresses| {
+        addresses.iter().find(|entry| {
+            entry
+                .get("label")
+                .and_then(Value::as_str)
+                .is_some_and(|current| current.eq_ignore_ascii_case(label))
+        })
+    }) else {
+        return;
+    };
+    for (key, suffix) in [
+        ("street", "Street"),
+        ("city", "City"),
+        ("state", "State"),
+        ("country", "Country"),
+        ("postalCode", "PostalCode"),
+    ] {
+        let value = address.get(key).and_then(Value::as_str).unwrap_or_default();
+        push_text(children, 1, &format!("{prefix}Address{suffix}"), value);
+    }
+}
+
+fn contact_date_to_activesync(value: Option<&str>) -> Option<String> {
+    let date = value?.trim();
+    let parts = date.split('-').collect::<Vec<_>>();
+    let [year, month, day] = parts.as_slice() else {
+        return None;
+    };
+    if year.len() != 4
+        || month.len() != 2
+        || day.len() != 2
+        || !year
+            .bytes()
+            .chain(month.bytes())
+            .chain(day.bytes())
+            .all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    Some(format!("{year}{month}{day}T000000Z"))
 }
 
 pub(crate) fn calendar_application_data(event: &ClientEvent) -> Value {

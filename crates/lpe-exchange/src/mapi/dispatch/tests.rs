@@ -3729,6 +3729,7 @@ pub(super) fn test_mapi_session() -> MapiSession {
         message_handle_generations: HashMap::new(),
         pending_message_recipient_replacements: HashMap::new(),
         pending_message_attachments: HashMap::new(),
+        pending_contact_photo_attachments: HashMap::new(),
         pending_attachment_parent_messages: HashMap::new(),
         pending_event_attachment_transactions: HashMap::new(),
         pending_attachment_deletions: HashSet::new(),

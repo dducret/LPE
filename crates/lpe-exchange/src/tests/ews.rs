@@ -7097,6 +7097,43 @@ async fn create_delete_contact_round_trips_through_sync_folder_items() {
 }
 
 #[tokio::test]
+async fn create_contact_rejects_magika_blocked_photo_before_persistence() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        ..Default::default()
+    };
+    let contacts = store.contacts.clone();
+    let service =
+        ExchangeService::new_with_validator(store, Validator::new(FakeDetector::executable(), 0.8));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope><s:Body><m:CreateItem>
+              <m:SavedItemFolderId><t:FolderId Id="default"/></m:SavedItemFolderId>
+              <m:Items><t:Contact>
+                <t:DisplayName>Blocked Photo</t:DisplayName>
+                <t:EmailAddresses><t:Entry Key="EmailAddress1">blocked@example.test</t:Entry></t:EmailAddresses>
+                <t:Photo>aGVsbG8=</t:Photo>
+              </t:Contact></m:Items>
+            </m:CreateItem></s:Body></s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateItemResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(contacts.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn create_contact_syncs_from_current_empty_rca_sync_state() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
