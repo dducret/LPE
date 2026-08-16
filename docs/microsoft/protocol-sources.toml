@@ -2480,6 +2480,9 @@ sections = [
   "2.2.4.16 t:TargetFolderIdType",
   "2.2.5.1 t:FolderClassType",
   "3.1 ExchangeServicePortType Server Details",
+  "3.1.4.2 CreateFolder Operation",
+  "3.1.4.4 DeleteFolder Operation",
+  "3.1.4.6 GetFolder Operation",
 ]
 
 [[protocol]]

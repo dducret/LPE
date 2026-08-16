@@ -95,7 +95,11 @@ pub(in crate::service) fn ews_error_code_or(
     error: &anyhow::Error,
     fallback: &'static str,
 ) -> &'static str {
-    if error.to_string().contains("access is not granted") {
+    if error.to_string().contains("access is not granted")
+        || error
+            .to_string()
+            .contains("structural changes require tree owner access")
+    {
         "ErrorAccessDenied"
     } else if error.to_string().contains("stale EWS ChangeKey") {
         "ErrorIrresolvableConflict"

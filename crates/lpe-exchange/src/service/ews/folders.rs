@@ -1,4 +1,5 @@
 use super::super::*;
+use super::folder_requests::{requested_find_folder_parent, FindFolderParent};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::service) enum FolderKind {
@@ -18,59 +19,82 @@ where
     pub(in crate::service) async fn find_folder(
         &self,
         principal: &AccountPrincipal,
+        request: &str,
     ) -> Result<String> {
+        let parent = requested_find_folder_parent(request)?;
         let mut folders = String::new();
-        for mailbox in self
+        let mailboxes = self
             .store
             .fetch_jmap_mailboxes(principal.account_id)
-            .await?
-        {
-            folders.push_str(&mailbox_folder_xml(&mailbox));
-        }
-        for collection in self
-            .store
-            .fetch_accessible_contact_collections(principal.account_id)
-            .await?
-        {
-            folders.push_str(
-                &self
-                    .collection_folder_xml(&collection, CONTACTS_FOLDER_ID, "Contacts")
-                    .await?,
-            );
-        }
-        for collection in self
-            .store
-            .fetch_accessible_calendar_collections(principal.account_id)
-            .await?
-        {
-            folders.push_str(
-                &self
-                    .collection_folder_xml(&collection, CALENDAR_FOLDER_ID, "Calendar")
-                    .await?,
-            );
-        }
-        for collection in self
-            .store
-            .fetch_accessible_task_collections(principal.account_id)
-            .await?
-        {
-            folders.push_str(
-                &self
-                    .collection_folder_xml(&collection, TASKS_FOLDER_ID, "Task")
-                    .await?,
-            );
-        }
-        for tree in self
-            .store
-            .fetch_public_folder_trees(principal.account_id)
-            .await?
-        {
-            if let Some(root_folder_id) = tree.root_folder_id {
-                let folder = self
-                    .store
-                    .fetch_public_folder(principal.account_id, root_folder_id)
+            .await?;
+        match parent {
+            None => {
+                for mailbox in &mailboxes {
+                    folders.push_str(&mailbox_folder_xml(mailbox));
+                }
+                self.append_collection_folders(principal, &mut folders, None)
                     .await?;
-                folders.push_str(&public_folder_xml(&folder, None, 0, 0));
+                for folder in self.public_folder_tree_folders(principal).await? {
+                    folders.push_str(&self.public_folder_projection(principal, &folder).await?);
+                }
+            }
+            Some(FindFolderParent::Root) => {
+                for mailbox in mailboxes
+                    .iter()
+                    .filter(|mailbox| mailbox.parent_id.is_none())
+                {
+                    folders.push_str(&mailbox_folder_xml(mailbox));
+                }
+                self.append_collection_folders(principal, &mut folders, None)
+                    .await?;
+                for folder in self
+                    .public_folder_tree_folders(principal)
+                    .await?
+                    .into_iter()
+                    .filter(|folder| folder.parent_folder_id.is_none())
+                {
+                    folders.push_str(&self.public_folder_projection(principal, &folder).await?);
+                }
+            }
+            Some(FindFolderParent::Mailbox(parent_id)) => {
+                if !mailboxes.iter().any(|mailbox| mailbox.id == parent_id) {
+                    bail!("requested mailbox folder is not exposed by EWS");
+                }
+                for mailbox in mailboxes
+                    .iter()
+                    .filter(|mailbox| mailbox.parent_id == Some(parent_id))
+                {
+                    folders.push_str(&mailbox_folder_xml(mailbox));
+                }
+            }
+            Some(FindFolderParent::MailboxRole(role)) => {
+                let parent_id = mailboxes
+                    .iter()
+                    .find(|mailbox| mailbox.role == role)
+                    .map(|mailbox| mailbox.id)
+                    .ok_or_else(|| anyhow!("requested mailbox folder is not exposed by EWS"))?;
+                for mailbox in mailboxes
+                    .iter()
+                    .filter(|mailbox| mailbox.parent_id == Some(parent_id))
+                {
+                    folders.push_str(&mailbox_folder_xml(mailbox));
+                }
+            }
+            Some(FindFolderParent::PublicFolder(parent_id)) => {
+                self.store
+                    .fetch_public_folder(principal.account_id, parent_id)
+                    .await?;
+                for folder in self
+                    .store
+                    .fetch_public_folder_children(principal.account_id, parent_id)
+                    .await?
+                {
+                    folders.push_str(&self.public_folder_projection(principal, &folder).await?);
+                }
+            }
+            Some(FindFolderParent::Collection(kind)) => {
+                self.append_collection_folders(principal, &mut folders, Some(kind))
+                    .await?;
             }
         }
 
@@ -89,6 +113,105 @@ where
             ),
             folders = folders,
             count = count_folder_elements(&folders),
+        ))
+    }
+
+    async fn append_collection_folders(
+        &self,
+        principal: &AccountPrincipal,
+        folders: &mut String,
+        only_kind: Option<FolderKind>,
+    ) -> Result<()> {
+        if only_kind.is_none() || only_kind == Some(FolderKind::Contacts) {
+            for collection in self
+                .store
+                .fetch_accessible_contact_collections(principal.account_id)
+                .await?
+            {
+                folders.push_str(
+                    &self
+                        .collection_folder_xml(&collection, CONTACTS_FOLDER_ID, "Contacts")
+                        .await?,
+                );
+            }
+        }
+        if only_kind.is_none() || only_kind == Some(FolderKind::Calendar) {
+            for collection in self
+                .store
+                .fetch_accessible_calendar_collections(principal.account_id)
+                .await?
+            {
+                folders.push_str(
+                    &self
+                        .collection_folder_xml(&collection, CALENDAR_FOLDER_ID, "Calendar")
+                        .await?,
+                );
+            }
+        }
+        if only_kind.is_none() || only_kind == Some(FolderKind::Tasks) {
+            for collection in self
+                .store
+                .fetch_accessible_task_collections(principal.account_id)
+                .await?
+            {
+                folders.push_str(
+                    &self
+                        .collection_folder_xml(&collection, TASKS_FOLDER_ID, "Task")
+                        .await?,
+                );
+            }
+        }
+        Ok(())
+    }
+
+    async fn public_folder_tree_folders(
+        &self,
+        principal: &AccountPrincipal,
+    ) -> Result<Vec<PublicFolder>> {
+        let mut folders = Vec::new();
+        for tree in self
+            .store
+            .fetch_public_folder_trees(principal.account_id)
+            .await?
+        {
+            if let Some(root_folder_id) = tree.root_folder_id {
+                folders.push(
+                    self.store
+                        .fetch_public_folder(principal.account_id, root_folder_id)
+                        .await?,
+                );
+            }
+        }
+        let mut index = 0;
+        while let Some(folder) = folders.get(index) {
+            folders.extend(
+                self.store
+                    .fetch_public_folder_children(principal.account_id, folder.id)
+                    .await?,
+            );
+            index += 1;
+        }
+        Ok(folders)
+    }
+
+    async fn public_folder_projection(
+        &self,
+        principal: &AccountPrincipal,
+        folder: &PublicFolder,
+    ) -> Result<String> {
+        let children = self
+            .store
+            .fetch_public_folder_children(principal.account_id, folder.id)
+            .await?;
+        let items = self
+            .store
+            .fetch_public_folder_items(principal.account_id, folder.id)
+            .await?;
+        Ok(public_folder_xml(
+            folder,
+            folder.parent_folder_id,
+            children.len(),
+            items.len(),
         ))
     }
 
@@ -146,23 +269,13 @@ where
                     .await?,
             ));
         }
-        for tree in self
-            .store
-            .fetch_public_folder_trees(principal.account_id)
-            .await?
-        {
-            if let Some(root_folder_id) = tree.root_folder_id {
-                let folder = self
-                    .store
-                    .fetch_public_folder(principal.account_id, root_folder_id)
-                    .await?;
-                let id = format!("public-folder:{root_folder_id}");
-                folders.push(HierarchySyncFolder::new(
-                    format!("public-folder|{id}"),
-                    id,
-                    public_folder_xml(&folder, None, 0, 0),
-                ));
-            }
+        for folder in self.public_folder_tree_folders(principal).await? {
+            let id = format!("public-folder:{}", folder.id);
+            folders.push(HierarchySyncFolder::new(
+                format!("public-folder|{id}"),
+                id,
+                self.public_folder_projection(principal, &folder).await?,
+            ));
         }
         let previous = requested_sync_state(request)
             .map(|state| hierarchy_sync_state_items(&state))
@@ -272,6 +385,13 @@ where
         let mailbox_ids = self
             .requested_mailbox_folder_ids(principal, request)
             .await?;
+        let public_folder_ids = requested_public_folder_ids(request);
+        if !mailbox_ids.is_empty() && !public_folder_ids.is_empty() {
+            return Ok(get_folder_error_response(
+                "ErrorFolderNotFound",
+                "folder ids must use one supported folder family",
+            ));
+        }
         if !mailbox_ids.is_empty() {
             let mailboxes = self
                 .store
@@ -292,7 +412,6 @@ where
             return Ok(get_folder_success_response(folders));
         }
 
-        let public_folder_ids = requested_public_folder_ids(request);
         if !public_folder_ids.is_empty() {
             let mut folders = String::new();
             for folder_id in public_folder_ids {
@@ -300,20 +419,7 @@ where
                     .store
                     .fetch_public_folder(principal.account_id, folder_id)
                     .await?;
-                let children = self
-                    .store
-                    .fetch_public_folder_children(principal.account_id, folder_id)
-                    .await?;
-                let items = self
-                    .store
-                    .fetch_public_folder_items(principal.account_id, folder_id)
-                    .await?;
-                folders.push_str(&public_folder_xml(
-                    &folder,
-                    folder.parent_folder_id,
-                    children.len(),
-                    items.len(),
-                ));
+                folders.push_str(&self.public_folder_projection(principal, &folder).await?);
             }
             return Ok(get_folder_success_response(folders));
         }
@@ -327,6 +433,7 @@ where
         }
 
         let mut folders = String::new();
+        let requested_collection = requested_collection_id(request);
         for kind in requested {
             match kind {
                 FolderKind::Root => {
@@ -335,11 +442,22 @@ where
                     ));
                 }
                 FolderKind::Contacts => {
-                    for collection in self
+                    let collections = self
                         .store
                         .fetch_accessible_contact_collections(principal.account_id)
                         .await?
-                    {
+                        .into_iter()
+                        .filter(|collection| {
+                            requested_collection.map_or(true, |id| collection.id == id)
+                        })
+                        .collect::<Vec<_>>();
+                    if requested_collection.is_some() && collections.is_empty() {
+                        return Ok(get_folder_error_response(
+                            "ErrorFolderNotFound",
+                            "requested contact collection is not exposed by EWS",
+                        ));
+                    }
+                    for collection in collections {
                         folders.push_str(
                             &self
                                 .collection_folder_xml(&collection, CONTACTS_FOLDER_ID, "Contacts")
@@ -348,11 +466,22 @@ where
                     }
                 }
                 FolderKind::Calendar => {
-                    for collection in self
+                    let collections = self
                         .store
                         .fetch_accessible_calendar_collections(principal.account_id)
                         .await?
-                    {
+                        .into_iter()
+                        .filter(|collection| {
+                            requested_collection.map_or(true, |id| collection.id == id)
+                        })
+                        .collect::<Vec<_>>();
+                    if requested_collection.is_some() && collections.is_empty() {
+                        return Ok(get_folder_error_response(
+                            "ErrorFolderNotFound",
+                            "requested calendar collection is not exposed by EWS",
+                        ));
+                    }
+                    for collection in collections {
                         folders.push_str(
                             &self
                                 .collection_folder_xml(&collection, CALENDAR_FOLDER_ID, "Calendar")
@@ -361,11 +490,22 @@ where
                     }
                 }
                 FolderKind::Tasks => {
-                    for collection in self
+                    let collections = self
                         .store
                         .fetch_accessible_task_collections(principal.account_id)
                         .await?
-                    {
+                        .into_iter()
+                        .filter(|collection| {
+                            requested_collection.map_or(true, |id| collection.id == id)
+                        })
+                        .collect::<Vec<_>>();
+                    if requested_collection.is_some() && collections.is_empty() {
+                        return Ok(get_folder_error_response(
+                            "ErrorFolderNotFound",
+                            "requested task collection is not exposed by EWS",
+                        ));
+                    }
+                    for collection in collections {
                         folders.push_str(
                             &self
                                 .collection_folder_xml(&collection, TASKS_FOLDER_ID, "Task")
@@ -393,20 +533,7 @@ where
                             .store
                             .fetch_public_folder(principal.account_id, folder_id)
                             .await?;
-                        let children = self
-                            .store
-                            .fetch_public_folder_children(principal.account_id, folder_id)
-                            .await?;
-                        let items = self
-                            .store
-                            .fetch_public_folder_items(principal.account_id, folder_id)
-                            .await?;
-                        folders.push_str(&public_folder_xml(
-                            &folder,
-                            folder.parent_folder_id,
-                            children.len(),
-                            items.len(),
-                        ));
+                        folders.push_str(&self.public_folder_projection(principal, &folder).await?);
                     }
                 }
             }
@@ -511,140 +638,6 @@ fn hierarchy_sync_state_items(sync_state: &str) -> HashMap<String, String> {
         .collect()
 }
 
-pub(in crate::service) fn requested_folder_kind(request: &str) -> Option<FolderKind> {
-    if let Some(kind) =
-        requested_sync_state(request).and_then(|state| sync_state_folder_kind(&state))
-    {
-        return Some(kind);
-    }
-    if request.contains("DistinguishedFolderId Id=\"msgfolderroot\"")
-        || request.contains("DistinguishedFolderId Id='msgfolderroot'")
-        || request.contains("DistinguishedFolderId Id=\"root\"")
-        || request.contains("DistinguishedFolderId Id='root'")
-        || request.contains("FolderId Id=\"msgfolderroot\"")
-        || request.contains("FolderId Id='msgfolderroot'")
-        || request.contains("FolderId Id=\"root\"")
-        || request.contains("FolderId Id='root'")
-    {
-        return Some(FolderKind::Root);
-    }
-    if request.contains("DistinguishedFolderId Id=\"calendar\"")
-        || request.contains("DistinguishedFolderId Id='calendar'")
-        || request.contains("FolderId Id=\"calendar\"")
-        || request.contains("FolderId Id='calendar'")
-    {
-        return Some(FolderKind::Calendar);
-    }
-    if request.contains("DistinguishedFolderId Id=\"contacts\"")
-        || request.contains("DistinguishedFolderId Id='contacts'")
-        || request.contains("FolderId Id=\"contacts\"")
-        || request.contains("FolderId Id='contacts'")
-    {
-        return Some(FolderKind::Contacts);
-    }
-    if request.contains("DistinguishedFolderId Id=\"tasks\"")
-        || request.contains("DistinguishedFolderId Id='tasks'")
-        || request.contains("FolderId Id=\"tasks\"")
-        || request.contains("FolderId Id='tasks'")
-    {
-        return Some(FolderKind::Tasks);
-    }
-    if request.contains("public-folder:") {
-        return Some(FolderKind::PublicFolders);
-    }
-    if request.contains("mailbox:") || !requested_mailbox_folder_ids(request).is_empty() {
-        return Some(FolderKind::Mailbox);
-    }
-    if requested_mailbox_role(request).is_some() {
-        return Some(FolderKind::Mailbox);
-    }
-    requested_collection_id(request).and_then(|id| {
-        if id.starts_with("shared-calendar-") {
-            Some(FolderKind::Calendar)
-        } else if id.starts_with("shared-contacts-") {
-            Some(FolderKind::Contacts)
-        } else if id.starts_with("shared-tasks-") {
-            Some(FolderKind::Tasks)
-        } else if id.starts_with("public-folder:") {
-            Some(FolderKind::PublicFolders)
-        } else if id.starts_with("mailbox:") || Uuid::parse_str(id).is_ok() {
-            Some(FolderKind::Mailbox)
-        } else if id == "msgfolderroot" || id == "root" {
-            Some(FolderKind::Root)
-        } else {
-            None
-        }
-    })
-}
-
-fn sync_state_folder_kind(sync_state: &str) -> Option<FolderKind> {
-    if sync_state.starts_with("contacts:") {
-        Some(FolderKind::Contacts)
-    } else if sync_state.starts_with("calendar:") {
-        Some(FolderKind::Calendar)
-    } else if sync_state.starts_with("tasks:") {
-        Some(FolderKind::Tasks)
-    } else if sync_state.starts_with("mailbox:") {
-        Some(FolderKind::Mailbox)
-    } else if sync_state.starts_with("public-folder:") {
-        Some(FolderKind::PublicFolders)
-    } else if sync_state.starts_with("root:") {
-        Some(FolderKind::Root)
-    } else {
-        None
-    }
-}
-
-pub(in crate::service) fn requested_folder_kinds(request: &str) -> Vec<FolderKind> {
-    let mut kinds = Vec::new();
-    if request.contains("DistinguishedFolderId Id=\"msgfolderroot\"")
-        || request.contains("DistinguishedFolderId Id='msgfolderroot'")
-        || request.contains("DistinguishedFolderId Id=\"root\"")
-        || request.contains("DistinguishedFolderId Id='root'")
-        || request.contains("FolderId Id=\"msgfolderroot\"")
-        || request.contains("FolderId Id='msgfolderroot'")
-        || request.contains("FolderId Id=\"root\"")
-        || request.contains("FolderId Id='root'")
-    {
-        kinds.push(FolderKind::Root);
-    }
-    if request.contains("DistinguishedFolderId Id=\"contacts\"")
-        || request.contains("DistinguishedFolderId Id='contacts'")
-        || request.contains("FolderId Id=\"contacts\"")
-        || request.contains("FolderId Id='contacts'")
-        || request.contains("shared-contacts-")
-    {
-        kinds.push(FolderKind::Contacts);
-    }
-    if request.contains("DistinguishedFolderId Id=\"calendar\"")
-        || request.contains("DistinguishedFolderId Id='calendar'")
-        || request.contains("FolderId Id=\"calendar\"")
-        || request.contains("FolderId Id='calendar'")
-        || request.contains("shared-calendar-")
-    {
-        kinds.push(FolderKind::Calendar);
-    }
-    if request.contains("DistinguishedFolderId Id=\"tasks\"")
-        || request.contains("DistinguishedFolderId Id='tasks'")
-        || request.contains("FolderId Id=\"tasks\"")
-        || request.contains("FolderId Id='tasks'")
-        || request.contains("shared-tasks-")
-    {
-        kinds.push(FolderKind::Tasks);
-    }
-    if request.contains("public-folder:") {
-        kinds.push(FolderKind::PublicFolders);
-    }
-    if request.contains("mailbox:") || !requested_mailbox_folder_ids(request).is_empty() {
-        kinds.push(FolderKind::Mailbox);
-    }
-    if requested_mailbox_role(request).is_some() {
-        kinds.push(FolderKind::Mailbox);
-    }
-    kinds.dedup();
-    kinds
-}
-
 pub(in crate::service) fn mailbox_by_id(
     mailboxes: &[JmapMailbox],
     mailbox_id: Uuid,
@@ -702,7 +695,7 @@ pub(in crate::service) fn create_public_folder_success_response(folder: &PublicF
             "</m:ResponseMessages>",
             "</m:CreateFolderResponse>"
         ),
-        folder = public_folder_xml(folder, None, 0, 0),
+        folder = public_folder_xml(folder, folder.parent_folder_id, 0, 0),
     )
 }
 

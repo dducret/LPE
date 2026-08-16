@@ -886,6 +886,31 @@ async fn get_folder_returns_multiple_supported_folder_kinds() {
 }
 
 #[tokio::test]
+async fn get_folder_returns_only_the_requested_collaboration_collection() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        calendar_collections: Arc::new(Mutex::new(vec![
+            FakeStore::collection("shared-calendar-alice", "calendar", "Alice Calendar"),
+            FakeStore::collection("shared-calendar-bob", "calendar", "Bob Calendar"),
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetFolder><m:FolderIds><t:FolderId Id="shared-calendar-bob"/></m:FolderIds></m:GetFolder></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("Id=\"shared-calendar-bob\""));
+    assert!(!body.contains("Id=\"shared-calendar-alice\""));
+}
+
+#[tokio::test]
 async fn create_folder_uses_canonical_mailbox_store() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -920,6 +945,85 @@ async fn create_folder_uses_canonical_mailbox_store() {
     ));
     assert!(body.contains("<t:TotalCount>0</t:TotalCount>"));
     assert_eq!(created_mailboxes.lock().unwrap()[0].name, "RCA Sync");
+}
+
+#[tokio::test]
+// [MS-OXWSFOLD] section 3.1.4.2: CreateFolder uses the requested existing parent.
+async fn create_folder_uses_the_requested_custom_mailbox_parent() {
+    let parent_id = "44444444-4444-4444-4444-444444444444";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            parent_id, "custom", "Projects",
+        )])),
+        ..Default::default()
+    };
+    let created_mailboxes = store.created_mailboxes.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:CreateFolder><m:ParentFolderId><t:FolderId Id="mailbox:{parent_id}"/></m:ParentFolderId><m:Folders><t:Folder><t:DisplayName>Quarterly Reviews</t:DisplayName><t:FolderClass>IPF.Note</t:FolderClass></t:Folder></m:Folders></m:CreateFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains(&format!("<t:ParentFolderId Id=\"mailbox:{parent_id}\"")));
+    assert_eq!(
+        created_mailboxes.lock().unwrap()[0].parent_id,
+        Some(Uuid::parse_str(parent_id).unwrap())
+    );
+}
+
+#[tokio::test]
+async fn create_and_delete_folder_reject_unsupported_or_batch_shapes_without_mutation() {
+    let first_id = "44444444-4444-4444-4444-444444444444";
+    let second_id = "55555555-5555-5555-5555-555555555555";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(first_id, "custom", "First"),
+            FakeStore::mailbox(second_id, "custom", "Second"),
+        ])),
+        ..Default::default()
+    };
+    let created_mailboxes = store.created_mailboxes.clone();
+    let destroyed_mailboxes = store.destroyed_mailboxes.clone();
+    let service = ExchangeService::new(store);
+
+    for request in [
+        r#"<s:Envelope><s:Body><m:CreateFolder><m:ParentFolderId><t:DistinguishedFolderId Id="msgfolderroot"/></m:ParentFolderId><m:Folders><t:Folder><t:DisplayName>Inbox</t:DisplayName></t:Folder></m:Folders></m:CreateFolder></s:Body></s:Envelope>"#,
+        r#"<s:Envelope><s:Body><m:CreateFolder><m:ParentFolderId><t:FolderId Id="public-folder:not-a-uuid"/></m:ParentFolderId><m:Folders><t:Folder><t:DisplayName>Escape</t:DisplayName></t:Folder></m:Folders></m:CreateFolder></s:Body></s:Envelope>"#,
+        r#"<s:Envelope><s:Body><m:CreateFolder><m:ParentFolderId><t:DistinguishedFolderId Id="msgfolderroot"/></m:ParentFolderId><m:Folders><t:CalendarFolder><t:DisplayName>Calendar Copy</t:DisplayName></t:CalendarFolder></m:Folders></m:CreateFolder></s:Body></s:Envelope>"#,
+    ] {
+        let response = service
+            .handle(&bearer_headers(), request.as_bytes())
+            .await
+            .unwrap();
+        let body = response_text(response).await;
+        assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    }
+    assert!(created_mailboxes.lock().unwrap().is_empty());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:DeleteFolder DeleteType="HardDelete"><m:FolderIds><t:FolderId Id="mailbox:{first_id}"/><t:FolderId Id="mailbox:{second_id}"/></m:FolderIds></m:DeleteFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorFolderNotFound</m:ResponseCode>"));
+    assert!(destroyed_mailboxes.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -967,9 +1071,159 @@ async fn create_folder_uses_canonical_public_folder_store() {
 }
 
 #[tokio::test]
+// [MS-OXWSSRCH] section 3.1.4.1 and [MS-OXWSFOLD] sections 3.1.4.4 and 3.1.4.6.
+async fn public_child_folder_find_get_and_hierarchy_share_canonical_projection() {
+    let root_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    let child_id = "cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        public_folders: Arc::new(Mutex::new(vec![FakeStore::public_folder(
+            root_id,
+            None,
+            "Public Root",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let initial_response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderHierarchy /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let initial = response_text(initial_response).await;
+    let initial_state = test_xml_text(&initial, "SyncState").unwrap();
+
+    let create_response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:CreateFolder><m:ParentFolderId><t:FolderId Id="public-folder:{root_id}"/></m:ParentFolderId><m:Folders><t:Folder><t:DisplayName>Team Posts</t:DisplayName><t:FolderClass>IPF.Note</t:FolderClass></t:Folder></m:Folders></m:CreateFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    assert!(response_text(create_response)
+        .await
+        .contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+
+    let find_response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:FindFolder><m:ParentFolderIds><t:FolderId Id="public-folder:{root_id}"/></m:ParentFolderIds></m:FindFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let find = response_text(find_response).await;
+    assert!(find.contains(&format!("public-folder:{child_id}")));
+    let find_key = test_item_change_key(&find, &format!("public-folder:{child_id}"));
+    let find_rights = effective_rights_for_folder(&find, &format!("public-folder:{child_id}"));
+
+    let get_response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:GetFolder><m:FolderIds><t:FolderId Id="public-folder:{child_id}"/></m:FolderIds></m:GetFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let get = response_text(get_response).await;
+    assert_eq!(
+        test_item_change_key(&get, &format!("public-folder:{child_id}")),
+        find_key
+    );
+    assert_eq!(
+        effective_rights_for_folder(&get, &format!("public-folder:{child_id}")),
+        find_rights
+    );
+
+    let created_response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderHierarchy><m:SyncState>{initial_state}</m:SyncState></m:SyncFolderHierarchy></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let created = response_text(created_response).await;
+    assert_eq!(
+        created
+            .matches(&format!(
+                "<t:Create><t:Folder><t:FolderId Id=\"public-folder:{child_id}\""
+            ))
+            .count(),
+        1
+    );
+    let created_state = test_xml_text(&created, "SyncState").unwrap();
+
+    let no_change_response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderHierarchy><m:SyncState>{created_state}</m:SyncState></m:SyncFolderHierarchy></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    assert!(!response_text(no_change_response)
+        .await
+        .contains("<t:Create>"));
+
+    let delete_response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:DeleteFolder DeleteType="HardDelete"><m:FolderIds><t:FolderId Id="public-folder:{child_id}"/></m:FolderIds></m:DeleteFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    assert!(response_text(delete_response)
+        .await
+        .contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+
+    let deleted_response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderHierarchy><m:SyncState>{created_state}</m:SyncState></m:SyncFolderHierarchy></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let deleted = response_text(deleted_response).await;
+    assert_eq!(
+        deleted
+            .matches(&format!(
+                "<t:Delete><t:FolderId Id=\"public-folder:{child_id}\""
+            ))
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn delete_folder_uses_canonical_mailbox_destroy() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "44444444-4444-4444-4444-444444444444",
+            "custom",
+            "RCA Sync",
+        )])),
         ..Default::default()
     };
     let destroyed_mailboxes = store.destroyed_mailboxes.clone();
@@ -1110,7 +1364,7 @@ async fn create_folder_rejects_non_owner_public_folder_structural_change() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_text(response).await;
     assert!(body.contains("<m:CreateFolderResponse>"));
-    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("<m:ResponseCode>ErrorAccessDenied</m:ResponseCode>"));
     assert!(body.contains("public folder structural changes require tree owner access"));
 }
 
@@ -1256,7 +1510,7 @@ async fn delete_folder_rejects_non_owner_public_folder_structural_change() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_text(response).await;
     assert!(body.contains("<m:DeleteFolderResponse>"));
-    assert!(body.contains("<m:ResponseCode>ErrorFolderNotFound</m:ResponseCode>"));
+    assert!(body.contains("<m:ResponseCode>ErrorAccessDenied</m:ResponseCode>"));
     assert!(body.contains("public folder structural changes require tree owner access"));
     assert!(deleted_public_folders.lock().unwrap().is_empty());
     let folders = public_folders.lock().unwrap();

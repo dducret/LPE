@@ -10,10 +10,13 @@ use axum::{
     Router,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
-use lpe_domain::mail_format::{
-    format_mailbox_address, quote_header_parameter, sanitize_header_value, DisplayNamePolicy,
-};
 use lpe_domain::normalization;
+use lpe_domain::{
+    mail_format::{
+        format_mailbox_address, quote_header_parameter, sanitize_header_value, DisplayNamePolicy,
+    },
+    mailbox_name::MailboxNamePolicy,
+};
 use lpe_magika::{
     Detector, ExpectedKind, IngressContext, PolicyDecision, SystemDetector, ValidationRequest,
     Validator,
@@ -66,6 +69,7 @@ mod ews {
     pub(super) mod dispatch;
     pub(super) mod errors;
     pub(super) mod fields;
+    pub(super) mod folder_requests;
     pub(super) mod folders;
     pub(super) mod ids;
     pub(super) mod items;
@@ -114,6 +118,7 @@ use ews::contacts::*;
 use ews::diagnostics::*;
 pub(crate) use ews::errors::error_response;
 use ews::fields::*;
+use ews::folder_requests::*;
 use ews::folders::*;
 use ews::ids::*;
 use ews::mail::*;
@@ -387,19 +392,19 @@ where
 
     async fn create_folder(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
         let result = async {
-            let display_name = element_text(request, "DisplayName")
-                .ok_or_else(|| anyhow!("CreateFolder is missing DisplayName"))?;
-            if let Some(parent_folder_id) = requested_public_folder_ids(request).into_iter().next()
-            {
+            let input = parse_create_folder_request(request)?;
+            if MailboxNamePolicy::system_role_for_display_name(&input.display_name).is_some() {
+                bail!("CreateFolder cannot create protected system mailbox folders");
+            }
+            if let CreateFolderParent::PublicFolder(parent_folder_id) = input.parent {
                 let folder = self
                     .store
                     .create_public_folder_child(
                         CreatePublicFolderInput {
                             account_id: principal.account_id,
                             parent_folder_id,
-                            display_name: display_name.clone(),
-                            folder_class: element_text(request, "FolderClass")
-                                .unwrap_or_else(|| "IPF.Note".to_string()),
+                            display_name: input.display_name.clone(),
+                            folder_class: input.folder_class,
                             sort_order: 0,
                         },
                         AuditEntryInput {
@@ -411,13 +416,26 @@ where
                     .await?;
                 return Ok(create_public_folder_success_response(&folder));
             }
+            let CreateFolderParent::Mailbox(parent_id) = input.parent else {
+                unreachable!("CreateFolder parent was already classified")
+            };
+            if let Some(parent_id) = parent_id {
+                let parent = self
+                    .store
+                    .fetch_jmap_mailboxes(principal.account_id)
+                    .await?
+                    .into_iter()
+                    .find(|mailbox| mailbox.id == parent_id)
+                    .ok_or_else(|| anyhow!("CreateFolder parent mailbox was not found"))?;
+                ensure_custom_mailbox(&parent)?;
+            }
             let mailbox = self
                 .store
                 .create_jmap_mailbox(
                     JmapMailboxCreateInput {
                         account_id: principal.account_id,
-                        name: display_name.clone(),
-                        parent_id: None,
+                        name: input.display_name.clone(),
+                        parent_id,
                         sort_order: None,
                         is_subscribed: true,
                         copy_source_mailbox_id: None,
@@ -425,7 +443,7 @@ where
                     AuditEntryInput {
                         actor: principal.email.clone(),
                         action: "ews-create-folder".to_string(),
-                        subject: display_name,
+                        subject: input.display_name,
                     },
                 )
                 .await?;
@@ -435,7 +453,11 @@ where
         .await;
 
         Ok(result.unwrap_or_else(|error: anyhow::Error| {
-            operation_error_response("CreateFolder", "ErrorInvalidOperation", &error.to_string())
+            operation_error_response(
+                "CreateFolder",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )
         }))
     }
 
@@ -1038,9 +1060,8 @@ where
 
     async fn delete_folder(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
         let result = async {
-            let public_folder_ids = requested_public_folder_ids(request);
-            if !public_folder_ids.is_empty() {
-                for folder_id in public_folder_ids {
+            match parse_delete_folder_target(request)? {
+                FolderOperationTarget::PublicFolder(folder_id) => {
                     self.store
                         .delete_public_folder(
                             principal.account_id,
@@ -1053,37 +1074,38 @@ where
                         )
                         .await?;
                 }
-                return Ok(delete_folder_success_response());
+                FolderOperationTarget::Mailbox(folder_id) => {
+                    let mailbox = self
+                        .store
+                        .fetch_jmap_mailboxes(principal.account_id)
+                        .await?
+                        .into_iter()
+                        .find(|mailbox| mailbox.id == folder_id)
+                        .ok_or_else(|| anyhow!("mailbox folder not found"))?;
+                    ensure_custom_mailbox(&mailbox)?;
+                    self.store
+                        .destroy_jmap_mailbox(
+                            principal.account_id,
+                            folder_id,
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "ews-delete-folder".to_string(),
+                                subject: folder_id.to_string(),
+                            },
+                        )
+                        .await?;
+                }
             }
-            let folder_ids = requested_mailbox_folder_ids(request);
-            if folder_ids.is_empty() {
-                return Ok(operation_error_response(
-                    "DeleteFolder",
-                    "ErrorInvalidOperation",
-                    "DeleteFolder currently supports only mailbox or public folder ids.",
-                ));
-            }
-
-            for folder_id in folder_ids {
-                self.store
-                    .destroy_jmap_mailbox(
-                        principal.account_id,
-                        folder_id,
-                        AuditEntryInput {
-                            actor: principal.email.clone(),
-                            action: "ews-delete-folder".to_string(),
-                            subject: folder_id.to_string(),
-                        },
-                    )
-                    .await?;
-            }
-
             Ok(delete_folder_success_response())
         }
         .await;
 
         Ok(result.unwrap_or_else(|error: anyhow::Error| {
-            operation_error_response("DeleteFolder", "ErrorFolderNotFound", &error.to_string())
+            operation_error_response(
+                "DeleteFolder",
+                ews_error_code_or(&error, "ErrorFolderNotFound"),
+                &error.to_string(),
+            )
         }))
     }
 }

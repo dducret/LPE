@@ -21,8 +21,25 @@ where
 
         let payload = match operation.as_str() {
             "SyncFolderHierarchy" => self.sync_folder_hierarchy(&principal, &body).await?,
-            "FindFolder" => self.find_folder(&principal).await?,
-            "GetFolder" => self.get_folder(&principal, &body).await?,
+            "FindFolder" => self
+                .find_folder(&principal, &body)
+                .await
+                .unwrap_or_else(|error| {
+                    operation_error_response(
+                        "FindFolder",
+                        ews_error_code_or(&error, "ErrorFolderNotFound"),
+                        &error.to_string(),
+                    )
+                }),
+            "GetFolder" => self
+                .get_folder(&principal, &body)
+                .await
+                .unwrap_or_else(|error| {
+                    get_folder_error_response(
+                        ews_error_code_or(&error, "ErrorFolderNotFound"),
+                        &error.to_string(),
+                    )
+                }),
             "FindItem" => self
                 .find_item(&principal, &body)
                 .await
