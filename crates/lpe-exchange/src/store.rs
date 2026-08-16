@@ -7,20 +7,18 @@ use lpe_storage::{
     CollaborationGrantInput, CollaborationResourceKind, CollaborationRights, ConversationAction,
     CreatePublicFolderInput, DelegateFreeBusyMessageObject, JmapEmail, JmapEmailFollowupUpdate,
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, JournalEntry, MailboxDelegationGrantInput,
-    MailboxFolderDelegationGrantInput, MailboxRule, ManagedRetentionFolderCreateInput,
-    MapiContactCommitInput, MapiContactCommitOutcome, MapiContactCreateInput, MapiEventCommitInput,
-    MapiEventCommitOutcome, MapiEventCreateInput, MapiEventImportedMoveIdentity, MapiEventVersion,
-    MapiMessageImportedMoveIdentity, MapiMessageMoveResult, MapiStoreIdentity,
-    MoveAccessibleEventToDeletedItemsResult, PublicFolder, PublicFolderItem,
-    PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
-    PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree, RecoverableItem,
-    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput,
-    SenderDelegationRight, SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage,
-    SubmittedRecipientInput, UpdatePublicFolderInput, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
-    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
-    UpsertSearchFolderInput,
+    JmapMailboxUpdateInput, JournalEntry, MailboxFolderDelegationGrantInput, MailboxRule,
+    ManagedRetentionFolderCreateInput, MapiContactCommitInput, MapiContactCommitOutcome,
+    MapiContactCreateInput, MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCreateInput,
+    MapiEventImportedMoveIdentity, MapiEventVersion, MapiMessageImportedMoveIdentity,
+    MapiMessageMoveResult, MapiStoreIdentity, MoveAccessibleEventToDeletedItemsResult,
+    PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
+    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree,
+    RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument,
+    Storage, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    UpdatePublicFolderInput, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientNoteInput, UpsertClientTaskInput, UpsertConversationActionInput,
+    UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -329,6 +327,15 @@ pub trait ExchangeStore: AccountAuthStore {
         after_cursor: i64,
     ) -> StoreFuture<'a, MapiNotificationPoll>;
 
+    fn replay_ews_notification_events<'a>(
+        &'a self,
+        account_id: Uuid,
+        after_cursor: i64,
+        scope: &'a EwsNotificationFolderScope,
+        event_types: &'a [EwsNotificationEventType],
+        limit: usize,
+    ) -> StoreFuture<'a, EwsNotificationReplay>;
+
     fn fetch_ews_user_configuration<'a>(
         &'a self,
         account_id: Uuid,
@@ -503,18 +510,18 @@ pub trait ExchangeStore: AccountAuthStore {
         owner_account_id: Uuid,
     ) -> StoreFuture<'a, Vec<EwsDelegate>>;
 
-    fn upsert_ews_delegate<'a>(
+    fn apply_ews_delegate_batch<'a>(
         &'a self,
-        input: UpsertEwsDelegateInput,
+        inputs: &'a [UpsertEwsDelegateInput],
         audit: AuditEntryInput,
-    ) -> StoreFuture<'a, EwsDelegate>;
+    ) -> StoreFuture<'a, Vec<EwsDelegate>>;
 
-    fn remove_ews_delegate<'a>(
+    fn remove_ews_delegate_batch<'a>(
         &'a self,
         owner_account_id: Uuid,
-        grantee_account_id: Uuid,
+        grantee_account_ids: &'a [Uuid],
         audit: AuditEntryInput,
-    ) -> StoreFuture<'a, bool>;
+    ) -> StoreFuture<'a, ()>;
 
     fn fetch_address_book_entries<'a>(
         &'a self,
@@ -935,6 +942,15 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         account_id: Uuid,
         name: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
+
+    fn replace_active_sieve_script<'a>(
+        &'a self,
+        account_id: Uuid,
+        name: &'a str,
+        expected_content: Option<&'a str>,
+        replacement: Option<&'a str>,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, ()>;
 

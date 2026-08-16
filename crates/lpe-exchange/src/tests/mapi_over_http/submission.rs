@@ -1512,6 +1512,7 @@ async fn mapi_over_http_transport_send_opened_draft_preserves_canonical_attachme
                 file_name: "transport-inline.png".to_string(),
                 media_type: "image/png".to_string(),
                 blob_bytes: b"PNGDATA".to_vec(),
+                ..Default::default()
             },
         )]))),
         emails: Arc::new(Mutex::new(vec![draft])),
@@ -1860,6 +1861,7 @@ async fn mapi_over_http_submit_opened_draft_uses_source_draft_id() {
                 file_name: "draft.pdf".to_string(),
                 media_type: "application/pdf".to_string(),
                 blob_bytes: b"PDFDATA".to_vec(),
+                ..Default::default()
             },
         )]))),
         emails: Arc::new(Mutex::new(vec![draft])),

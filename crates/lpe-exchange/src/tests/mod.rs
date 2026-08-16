@@ -1,3 +1,4 @@
+use anyhow::bail;
 use argon2::password_hash::{rand_core::OsRng, PasswordHasher, SaltString};
 use axum::body::{to_bytes, Body};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
@@ -67,8 +68,9 @@ use crate::{
         EwsImGroup, EwsImGroupMember, EwsImList, EwsImMemberInput, EwsMailAppInstall,
         EwsMailAppManifest, EwsMailAppTokenEvent, EwsMessageTrackingEvent,
         EwsMessageTrackingReport, EwsMessageTrackingReportDetail, EwsNonIndexableReport,
-        EwsRetentionPolicyTag, EwsSearchableMailbox, EwsTransferEntry, EwsTransferJob,
-        EwsUnifiedMessagingCall, EwsUserConfiguration, EwsUserConfigurationKey,
+        EwsNotificationEventType, EwsNotificationFolderScope, EwsNotificationLogEvent,
+        EwsNotificationReplay, EwsRetentionPolicyTag, EwsSearchableMailbox, EwsTransferEntry,
+        EwsTransferJob, EwsUnifiedMessagingCall, EwsUserConfiguration, EwsUserConfigurationKey,
         ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry,
         ExchangeAddressBookEntryDetails, ExchangeAddressBookEntryKind, ExchangeStore,
         MapiCalendarPropertyValue, MapiCheckpointKind, MapiContactCreateOutcome,
@@ -4310,6 +4312,7 @@ struct FakeStore {
     mapi_notification_cursor: Arc<Mutex<Option<i64>>>,
     mapi_notification_polls: Arc<Mutex<Vec<MapiNotificationPoll>>>,
     mapi_notification_poll_after_cursors: Arc<Mutex<Vec<i64>>>,
+    ews_notification_replays: Arc<Mutex<Vec<EwsNotificationReplay>>>,
     mapi_mail_store_load_notification: Arc<Mutex<Option<(i64, MapiNotificationPoll)>>>,
     ews_user_configurations: Arc<Mutex<Vec<EwsUserConfiguration>>>,
     ews_delegates: Arc<Mutex<Vec<EwsDelegate>>>,
@@ -6716,61 +6719,82 @@ impl ExchangeStore for FakeStore {
         })
     }
 
-    fn upsert_ews_delegate<'a>(
+    fn apply_ews_delegate_batch<'a>(
         &'a self,
-        input: UpsertEwsDelegateInput,
+        inputs: &'a [UpsertEwsDelegateInput],
         _audit: lpe_storage::AuditEntryInput,
-    ) -> StoreFuture<'a, EwsDelegate> {
+    ) -> StoreFuture<'a, Vec<EwsDelegate>> {
         let principal = self.session.clone().unwrap_or_else(FakeStore::account);
-        let grantee = self
-            .directory_accounts
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|account| {
-                account.tenant_id == principal.tenant_id
-                    && account.email.eq_ignore_ascii_case(&input.grantee_email)
-            })
-            .cloned();
+        let directory = self.directory_accounts.lock().unwrap().clone();
+        let mut proposed = Vec::with_capacity(inputs.len());
         Box::pin(async move {
-            let Some(grantee) = grantee else {
-                anyhow::bail!("delegate account not found in tenant")
-            };
-            let delegate = EwsDelegate {
-                owner_account_id: input.owner_account_id,
-                grantee_account_id: grantee.account_id,
-                grantee_email: grantee.email.to_ascii_lowercase(),
-                grantee_display_name: grantee.display_name,
-                inbox_rights: input.inbox_rights,
-                calendar_rights: input.calendar_rights,
-                may_send_on_behalf: input.may_send_on_behalf,
-                may_send_as: false,
-                preferences: input.preferences,
-            };
+            if inputs.is_empty() {
+                anyhow::bail!("delegate batch is empty");
+            }
+            for input in inputs {
+                if input.owner_account_id != principal.account_id {
+                    anyhow::bail!("delegate owner is not authenticated");
+                }
+                let grantee = directory
+                    .iter()
+                    .find(|account| {
+                        account.tenant_id == principal.tenant_id
+                            && account.email.eq_ignore_ascii_case(&input.grantee_email)
+                    })
+                    .cloned()
+                    .ok_or_else(|| anyhow::anyhow!("delegate account not found in tenant"))?;
+                if grantee.account_id == principal.account_id {
+                    anyhow::bail!("self-delegation is not supported");
+                }
+                proposed.push(EwsDelegate {
+                    owner_account_id: input.owner_account_id,
+                    grantee_account_id: grantee.account_id,
+                    grantee_email: grantee.email.to_ascii_lowercase(),
+                    grantee_display_name: grantee.display_name,
+                    inbox_rights: input.inbox_rights.clone(),
+                    calendar_rights: input.calendar_rights.clone(),
+                    may_send_on_behalf: input.may_send_on_behalf,
+                    may_send_as: false,
+                    preferences: input.preferences.clone(),
+                });
+            }
             let mut delegates = self.ews_delegates.lock().unwrap();
-            delegates.retain(|existing| {
-                !(existing.owner_account_id == delegate.owner_account_id
-                    && existing.grantee_account_id == delegate.grantee_account_id)
-            });
-            delegates.push(delegate.clone());
-            Ok(delegate)
+            for delegate in &proposed {
+                delegates.retain(|existing| {
+                    !(existing.owner_account_id == delegate.owner_account_id
+                        && existing.grantee_account_id == delegate.grantee_account_id)
+                });
+            }
+            delegates.extend(proposed.clone());
+            Ok(proposed)
         })
     }
 
-    fn remove_ews_delegate<'a>(
+    fn remove_ews_delegate_batch<'a>(
         &'a self,
         owner_account_id: Uuid,
-        grantee_account_id: Uuid,
+        grantee_account_ids: &'a [Uuid],
         _audit: lpe_storage::AuditEntryInput,
-    ) -> StoreFuture<'a, bool> {
-        let mut delegates = self.ews_delegates.lock().unwrap();
-        let before = delegates.len();
-        delegates.retain(|delegate| {
-            !(delegate.owner_account_id == owner_account_id
-                && delegate.grantee_account_id == grantee_account_id)
-        });
-        let deleted = delegates.len() != before;
-        Box::pin(async move { Ok(deleted) })
+    ) -> StoreFuture<'a, ()> {
+        let current = self.ews_delegates.lock().unwrap().clone();
+        Box::pin(async move {
+            if grantee_account_ids.is_empty()
+                || grantee_account_ids.iter().any(|grantee_id| {
+                    !current.iter().any(|delegate| {
+                        delegate.owner_account_id == owner_account_id
+                            && delegate.grantee_account_id == *grantee_id
+                    })
+                })
+            {
+                anyhow::bail!("delegate was not found");
+            }
+            let mut delegates = self.ews_delegates.lock().unwrap();
+            delegates.retain(|delegate| {
+                delegate.owner_account_id != owner_account_id
+                    || !grantee_account_ids.contains(&delegate.grantee_account_id)
+            });
+            Ok(())
+        })
     }
 
     fn fetch_or_allocate_mapi_identities<'a>(
@@ -8321,6 +8345,61 @@ impl ExchangeStore for FakeStore {
                 events: Vec::new(),
             });
         Box::pin(async move { Ok(poll) })
+    }
+
+    fn replay_ews_notification_events<'a>(
+        &'a self,
+        _account_id: Uuid,
+        after_cursor: i64,
+        _scope: &'a EwsNotificationFolderScope,
+        _event_types: &'a [EwsNotificationEventType],
+        _limit: usize,
+    ) -> StoreFuture<'a, EwsNotificationReplay> {
+        let current_cursor = *self.mapi_notification_cursor.lock().unwrap();
+        let replay = (after_cursor > 0)
+            .then(|| self.ews_notification_replays.lock().unwrap().pop())
+            .flatten()
+            .or_else(|| {
+                (after_cursor > 0)
+                    .then(|| {
+                        let poll = self.mapi_notification_polls.lock().unwrap().pop()?;
+                        let events = poll
+                            .events
+                            .into_iter()
+                            .filter_map(|event| {
+                                Some(EwsNotificationLogEvent {
+                                    cursor: event.change_cursor()?,
+                                    mailbox_id: event.canonical_folder_id()?,
+                                    message_id: event.canonical_message_id()?,
+                                    change_kind: event.change_kind()?.to_string(),
+                                    modseq: 1,
+                                    created_at: "2026-08-16T00:00:00.000000Z".to_string(),
+                                })
+                            })
+                            .collect::<Vec<_>>();
+                        let next_cursor = events
+                            .last()
+                            .map(|event| event.cursor)
+                            .or(poll.cursor)
+                            .unwrap_or(after_cursor);
+                        Some(EwsNotificationReplay {
+                            expired: false,
+                            current_cursor: poll.cursor.or(current_cursor),
+                            next_cursor,
+                            more_events: false,
+                            events,
+                        })
+                    })
+                    .flatten()
+            })
+            .unwrap_or(EwsNotificationReplay {
+                expired: after_cursor > 0,
+                current_cursor,
+                next_cursor: after_cursor,
+                more_events: false,
+                events: Vec::new(),
+            });
+        Box::pin(async move { Ok(replay) })
     }
 
     fn fetch_address_book_entries<'a>(
@@ -10482,6 +10561,28 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(()) })
     }
 
+    fn replace_active_sieve_script<'a>(
+        &'a self,
+        account_id: Uuid,
+        _name: &'a str,
+        expected_content: Option<&'a str>,
+        replacement: Option<&'a str>,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        let active_sieve_script = self.active_sieve_script.clone();
+        Box::pin(async move {
+            if account_id != Self::account().account_id {
+                bail!("account not found");
+            }
+            let mut active = active_sieve_script.lock().unwrap();
+            if active.as_deref() != expected_content {
+                bail!("active sieve script changed concurrently or is not the expected generated script");
+            }
+            *active = replacement.map(str::to_string);
+            Ok(())
+        })
+    }
+
     fn set_active_sieve_script<'a>(
         &'a self,
         _account_id: Uuid,
@@ -12337,6 +12438,8 @@ impl ExchangeStore for FakeStore {
                 file_reference,
                 file_name: attachment.file_name,
                 media_type: attachment.media_type,
+                disposition: attachment.disposition,
+                content_id: attachment.content_id,
                 blob_bytes: attachment.blob_bytes,
             },
         );

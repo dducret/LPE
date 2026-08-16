@@ -7,6 +7,7 @@ use super::super::*;
 pub(in crate::service) struct ConvertIdSource {
     id: String,
     format: Option<String>,
+    element: &'static str,
 }
 
 #[derive(Debug, Clone)]
@@ -72,21 +73,24 @@ pub(in crate::service) fn versioned_change_key(kind: &str, id: &str, version: &s
     format!("ck-v1-{}", URL_SAFE_NO_PAD.encode(hasher.finalize()))
 }
 
-pub(in crate::service) fn requested_convert_ids(request: &str) -> Vec<ConvertIdSource> {
+pub(in crate::service) fn requested_convert_ids(request: &str) -> Result<Vec<ConvertIdSource>> {
+    let source_ids = element_content(request, "SourceIds")
+        .ok_or_else(|| anyhow!("ConvertId requires SourceIds."))?;
     [
         "AlternateId",
         "AlternatePublicFolderId",
         "AlternatePublicFolderItemId",
-        "ItemId",
-        "FolderId",
-        "AttachmentId",
     ]
     .into_iter()
-    .flat_map(|tag| convert_id_sources_for_tag(request, tag))
-    .collect()
+    .map(|tag| convert_id_sources_for_tag(source_ids, tag))
+    .collect::<Result<Vec<_>>>()
+    .map(|sources| sources.into_iter().flatten().collect())
 }
 
-fn convert_id_sources_for_tag(request: &str, local_name: &str) -> Vec<ConvertIdSource> {
+fn convert_id_sources_for_tag(
+    request: &str,
+    local_name: &'static str,
+) -> Result<Vec<ConvertIdSource>> {
     let mut values = Vec::new();
     let mut rest = request;
     while let Some(tag_start) = rest.find('<') {
@@ -106,39 +110,79 @@ fn convert_id_sources_for_tag(request: &str, local_name: &str) -> Vec<ConvertIdS
             break;
         };
         if qualified_name.rsplit(':').next() == Some(local_name) {
-            if let Some(id) = attribute_value(open_tag, "Id") {
-                values.push(ConvertIdSource {
-                    id: id.to_string(),
-                    format: attribute_value(open_tag, "Format").map(str::to_string),
-                });
+            let id = attribute_value(open_tag, "Id")
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| anyhow!("ConvertId {local_name} source is missing Id"))?;
+            if id.len() > 512 {
+                bail!("ConvertId source Id exceeds the supported 512-byte bound")
             }
+            let format = attribute_value(open_tag, "Format")
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| anyhow!("ConvertId {local_name} source is missing Format"))?;
+            values.push(ConvertIdSource {
+                id: id.to_string(),
+                format: Some(format.to_string()),
+                element: local_name,
+            });
         }
         rest = &tag_text[tag_end + 1..];
     }
-    values
+    Ok(values)
 }
 
 pub(in crate::service) fn canonical_ews_object_id_from_convert_source(
     source: &ConvertIdSource,
 ) -> Result<CanonicalEwsObjectId> {
-    let id = if source
-        .format
-        .as_deref()
-        .is_some_and(|format| format.eq_ignore_ascii_case("HexEntryId"))
-    {
+    let format = normalize_convert_id_format(
+        source
+            .format
+            .as_deref()
+            .ok_or_else(|| anyhow!("ConvertId source is missing Format"))?,
+    )?;
+    let id = if format == "HexEntryId" {
         decode_hex_entry_id(&source.id)?
     } else {
         source.id.clone()
     };
+    if format == "EwsId" && id.starts_with("LPEEWS1.") {
+        bail!("EwsId ConvertId sources must use the canonical LPE id shape")
+    }
+    if format != "EwsId" && !id.starts_with("LPEEWS1.") {
+        bail!("alternate ConvertId sources must use the LPEEWS1 opaque id shape")
+    }
     if let Some(payload) = id.strip_prefix("LPEEWS1.") {
         let decoded = URL_SAFE_NO_PAD
             .decode(payload.as_bytes())
             .map_err(|_| anyhow!("opaque ConvertId source is not valid base64url"))?;
         let decoded = String::from_utf8(decoded)
             .map_err(|_| anyhow!("opaque ConvertId source is not valid UTF-8"))?;
-        return canonical_ews_object_id_from_payload(&decoded);
+        let canonical = canonical_ews_object_id_from_payload(&decoded)?;
+        validate_convert_source_element(source, &canonical)?;
+        return Ok(canonical);
     }
-    canonical_ews_object_id_from_canonical_id(&id)
+    let canonical = canonical_ews_object_id_from_canonical_id(&id)?;
+    validate_convert_source_element(source, &canonical)?;
+    Ok(canonical)
+}
+
+/// [MS-OXWSCVTID] §3.1.4.1.3.5-.7: the public-folder alternate elements remain
+/// distinct from generic alternate item ids.  This is syntax-only; ConvertId
+/// deliberately does not reveal whether the canonical object exists.
+fn validate_convert_source_element(
+    source: &ConvertIdSource,
+    canonical: &CanonicalEwsObjectId,
+) -> Result<()> {
+    let valid = match source.element {
+        "AlternatePublicFolderId" => canonical.family == "public-folder",
+        "AlternatePublicFolderItemId" => canonical.family == "public-folder-item",
+        "AlternateId" => !matches!(canonical.family, "public-folder" | "public-folder-item"),
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        bail!("ConvertId source element does not match the canonical id family")
+    }
 }
 
 fn canonical_ews_object_id_from_payload(payload: &str) -> Result<CanonicalEwsObjectId> {
@@ -266,8 +310,8 @@ where
                     .or_else(|| {
                         attribute_value_after(request, "ConvertIdRequest", "DestinationFormat")
                     })
-                    .unwrap_or("EwsId");
-            let source_ids = requested_convert_ids(request);
+                    .ok_or_else(|| anyhow!("ConvertId requires DestinationFormat."))?;
+            let source_ids = requested_convert_ids(request)?;
             if source_ids.is_empty() {
                 bail!("ConvertId requires at least one source id.");
             }

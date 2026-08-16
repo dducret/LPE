@@ -97,22 +97,49 @@ pub(in crate::service) fn resolve_names_response(
     request: &str,
     entries: &[ExchangeAddressBookEntry],
 ) -> String {
-    let query = element_text(request, "UnresolvedEntry")
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase();
-    if query.is_empty() {
-        return resolve_names_no_results_response();
-    }
+    let (query, contacts_only) = match resolve_names_query(request) {
+        Ok(query) => query,
+        Err((code, message)) => return resolve_names_error_response(code, message),
+    };
     let principal_entry = principal_address_book_entry(principal);
-    let matched = entries
+    let mut matched = entries
         .iter()
-        .find(|entry| address_book_entry_matches(entry, &query, true))
-        .or_else(|| {
-            address_book_lookup_matches_principal(&query, principal).then_some(&principal_entry)
-        });
-    let Some(entry) = matched else {
-        return resolve_names_no_results_response();
+        .filter(|entry| {
+            (!contacts_only || entry.entry_kind == ExchangeAddressBookEntryKind::Contact)
+                && address_book_entry_matches(entry, &query, true)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if !contacts_only
+        && address_book_lookup_matches_principal(&query, principal)
+        && !matched.iter().any(|entry| {
+            entry.entry_kind == ExchangeAddressBookEntryKind::Account
+                && entry.id == principal.account_id
+        })
+    {
+        matched.push(principal_entry);
+    }
+    matched.sort_by(|left, right| {
+        left.display_name
+            .to_ascii_lowercase()
+            .cmp(&right.display_name.to_ascii_lowercase())
+            .then_with(|| {
+                left.email
+                    .to_ascii_lowercase()
+                    .cmp(&right.email.to_ascii_lowercase())
+            })
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    matched.dedup_by(|left, right| left.entry_kind == right.entry_kind && left.id == right.id);
+    let entry = match matched.as_slice() {
+        [] => return resolve_names_no_results_response(),
+        [entry] => entry,
+        _ => {
+            return resolve_names_error_response(
+                "ErrorNameResolutionMultipleResults",
+                "Multiple visible canonical entries match the requested name.",
+            )
+        }
     };
 
     format!(
@@ -137,7 +164,7 @@ pub(in crate::service) fn resolve_names_response(
         ),
         escape_xml(&entry.display_name),
         escape_xml(&entry.email),
-        ews_mailbox_type(entry),
+        ews_mailbox_type(&entry),
     )
 }
 
@@ -302,18 +329,77 @@ pub(in crate::service) fn visible_address_book_email(
 }
 
 fn resolve_names_no_results_response() -> String {
-    concat!(
-        "<m:ResolveNamesResponse>",
-        "<m:ResponseMessages>",
-        "<m:ResolveNamesResponseMessage ResponseClass=\"Error\">",
-        "<m:MessageText>No results were found.</m:MessageText>",
-        "<m:ResponseCode>ErrorNameResolutionNoResults</m:ResponseCode>",
-        "<m:DescriptiveLinkKey>0</m:DescriptiveLinkKey>",
-        "</m:ResolveNamesResponseMessage>",
-        "</m:ResponseMessages>",
-        "</m:ResolveNamesResponse>"
+    resolve_names_error_response("ErrorNameResolutionNoResults", "No results were found.")
+}
+
+fn resolve_names_error_response(code: &str, message: &str) -> String {
+    format!(
+        concat!(
+            "<m:ResolveNamesResponse>",
+            "<m:ResponseMessages>",
+            "<m:ResolveNamesResponseMessage ResponseClass=\"Error\">",
+            "<m:MessageText>{}</m:MessageText>",
+            "<m:ResponseCode>{}</m:ResponseCode>",
+            "<m:DescriptiveLinkKey>0</m:DescriptiveLinkKey>",
+            "</m:ResolveNamesResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:ResolveNamesResponse>"
+        ),
+        escape_xml(message),
+        escape_xml(code),
     )
-    .to_string()
+}
+
+fn resolve_names_query(
+    request: &str,
+) -> std::result::Result<(String, bool), (&'static str, &'static str)> {
+    // [MS-OXWSRSLNM] §§3.1.4.1.3.5, 3.1.4.1.4.1 define the request and scope.
+    let unresolved = element_contents(request, "UnresolvedEntry");
+    if unresolved.len() != 1 {
+        return Err((
+            "ErrorInvalidNameForNameResolution",
+            "ResolveNames requires exactly one non-empty UnresolvedEntry.",
+        ));
+    }
+    if element_content(request, "ParentFolderIds").is_some()
+        || element_content(request, "ContactDataShape").is_some()
+    {
+        return Err((
+            "ErrorInvalidOperation",
+            "LPE does not support folder-scoped or full-contact ResolveNames shapes.",
+        ));
+    }
+    let contacts_only = match open_tag_text(request, "ResolveNames")
+        .and_then(|tag| attribute_value(tag, "SearchScope"))
+        .unwrap_or("ActiveDirectory")
+    {
+        value if value.eq_ignore_ascii_case("ActiveDirectory") => false,
+        value if value.eq_ignore_ascii_case("Contacts") => true,
+        _ => {
+            return Err((
+                "ErrorInvalidOperation",
+                "LPE supports only ActiveDirectory or Contacts ResolveNames search scope.",
+            ));
+        }
+    };
+    if let Some(value) = open_tag_text(request, "ResolveNames")
+        .and_then(|tag| attribute_value(tag, "ReturnFullContactData"))
+    {
+        if !value.eq_ignore_ascii_case("false") && value != "0" {
+            return Err((
+                "ErrorInvalidOperation",
+                "LPE does not expose full contact details through ResolveNames.",
+            ));
+        }
+    }
+    let query = xml_text(unresolved[0]).trim().to_ascii_lowercase();
+    if query.is_empty() || matches!(query.as_str(), "," | "-") {
+        return Err((
+            "ErrorInvalidNameForNameResolution",
+            "ResolveNames requires a valid non-empty name.",
+        ));
+    }
+    Ok((query, contacts_only))
 }
 
 fn ews_mailbox_xml(entry: &ExchangeAddressBookEntry) -> String {

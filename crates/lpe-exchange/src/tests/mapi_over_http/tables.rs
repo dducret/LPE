@@ -2701,6 +2701,7 @@ async fn mapi_over_http_microsoft_saved_embedded_message_reopens_from_attachment
                 file_name: "saved-child.msg".to_string(),
                 media_type: "application/vnd.ms-outlook".to_string(),
                 blob_bytes: blob,
+                ..Default::default()
             },
         )]))),
         ..Default::default()

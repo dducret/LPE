@@ -133,7 +133,7 @@ pub(in crate::service) fn parse_create_event_input(
         uid: String::new(),
         date,
         time,
-        time_zone: requested_time_zone(request).unwrap_or_else(|| "UTC".to_string()),
+        time_zone: requested_time_zone(request)?.unwrap_or_else(|| "UTC".to_string()),
         duration_minutes,
         all_day: element_text(event, "IsAllDayEvent")
             .map(|value| value.eq_ignore_ascii_case("true"))
@@ -205,7 +205,7 @@ pub(in crate::service) fn parse_update_event_input(
         uid: existing.uid.clone(),
         date,
         time,
-        time_zone: requested_time_zone(request).unwrap_or_else(|| existing.time_zone.clone()),
+        time_zone: requested_time_zone(request)?.unwrap_or_else(|| existing.time_zone.clone()),
         duration_minutes,
         all_day: element_text(event, "IsAllDayEvent")
             .map(|value| value.eq_ignore_ascii_case("true"))
@@ -621,9 +621,18 @@ fn ews_response_type_to_partstat(response_type: &Option<String>) -> String {
         .to_string()
 }
 
-fn requested_time_zone(request: &str) -> Option<String> {
-    let time_zone = open_tag_text(request, "TimeZoneDefinition")?;
-    attribute_value(time_zone, "Id").map(str::to_string)
+fn requested_time_zone(request: &str) -> Result<Option<String>> {
+    // [MS-OXWSGTZ] §3.1.4.1: accept only identifiers in the published EWS catalog.
+    let Some(time_zone) = open_tag_text(request, "TimeZoneDefinition") else {
+        return Ok(None);
+    };
+    let id = attribute_value(time_zone, "Id")
+        .filter(|id| !id.trim().is_empty())
+        .ok_or_else(|| anyhow!("TimeZoneDefinition requires a non-empty supported Id"))?;
+    canonical_ews_time_zone(id)
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("unsupported TimeZoneDefinition Id"))
+        .map(Some)
 }
 
 fn ews_datetime_parts(value: &str) -> Option<(String, String)> {

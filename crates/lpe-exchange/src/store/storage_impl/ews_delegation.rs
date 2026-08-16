@@ -177,195 +177,80 @@ macro_rules! store_impl_ews_delegation {
             })
         }
 
-        fn upsert_ews_delegate<'a>(
+        fn apply_ews_delegate_batch<'a>(
             &'a self,
-            input: UpsertEwsDelegateInput,
+            inputs: &'a [UpsertEwsDelegateInput],
             audit: AuditEntryInput,
-        ) -> StoreFuture<'a, EwsDelegate> {
+        ) -> StoreFuture<'a, Vec<EwsDelegate>> {
             Box::pin(async move {
-                let tenant_id = mapi_tenant_id_for_account(self, input.owner_account_id).await?;
-                let grantee_account_id = sqlx::query_scalar::<_, Uuid>(
-                    r#"
-                SELECT id
-                FROM accounts
-                WHERE tenant_id = $1
-                  AND normalized_primary_email = lower(btrim($2))
-                  AND status = 'active'
-                LIMIT 1
-                "#,
-                )
-                .bind(tenant_id)
-                .bind(&input.grantee_email)
-                .fetch_optional(self.pool())
-                .await?
-                .ok_or_else(|| anyhow::anyhow!("delegate account not found in tenant"))?;
-
-                if input.inbox_rights.may_read {
-                    Storage::upsert_mailbox_delegation_grant(
-                        self,
-                        MailboxDelegationGrantInput {
-                            owner_account_id: input.owner_account_id,
-                            grantee_email: input.grantee_email.clone(),
-                            may_write: input.inbox_rights.may_write,
-                        },
-                        audit.clone(),
-                    )
-                    .await?;
-                } else {
-                    let _ = Storage::delete_mailbox_delegation_grant(
-                        self,
-                        input.owner_account_id,
-                        grantee_account_id,
-                        audit.clone(),
-                    )
-                    .await;
+                let owner_account_id = inputs
+                    .first()
+                    .map(|input| input.owner_account_id)
+                    .ok_or_else(|| anyhow::anyhow!("delegate batch is empty"))?;
+                if inputs.iter().any(|input| input.owner_account_id != owner_account_id) {
+                    anyhow::bail!("delegate batch has mixed owners");
                 }
-
-                if input.calendar_rights.may_read {
-                    Storage::upsert_collaboration_grant(
-                        self,
-                        CollaborationGrantInput {
-                            kind: CollaborationResourceKind::Calendar,
-                            owner_account_id: input.owner_account_id,
-                            grantee_email: input.grantee_email.clone(),
-                            calendar_id: None,
-                            may_read: input.calendar_rights.may_read,
-                            may_write: input.calendar_rights.may_write,
-                            may_delete: input.calendar_rights.may_delete,
-                            may_share: input.calendar_rights.may_share,
+                let canonical_inputs = inputs
+                    .iter()
+                    .map(|input| lpe_storage::CanonicalEwsDelegateInput {
+                        owner_account_id: input.owner_account_id,
+                        grantee_email: input.grantee_email.clone(),
+                        inbox_may_read: input.inbox_rights.may_read,
+                        inbox_may_write: input.inbox_rights.may_write,
+                        inbox_may_delete: input.inbox_rights.may_delete,
+                        inbox_may_share: input.inbox_rights.may_share,
+                        calendar_may_read: input.calendar_rights.may_read,
+                        calendar_may_write: input.calendar_rights.may_write,
+                        calendar_may_delete: input.calendar_rights.may_delete,
+                        calendar_may_share: input.calendar_rights.may_share,
+                        may_send_on_behalf: input.may_send_on_behalf,
+                        preferences: lpe_storage::DelegatePreferences {
+                            meeting_request_delivery: input
+                                .preferences
+                                .meeting_request_delivery
+                                .clone(),
+                            receives_meeting_request_copy: input
+                                .preferences
+                                .receives_meeting_request_copy,
+                            may_view_private_items: input.preferences.may_view_private_items,
                         },
-                        audit.clone(),
-                    )
-                    .await?;
-                } else {
-                    let _ = Storage::delete_collaboration_grant(
-                        self,
-                        input.owner_account_id,
-                        CollaborationResourceKind::Calendar,
-                        grantee_account_id,
-                        audit.clone(),
-                    )
-                    .await;
-                }
-
-                if input.may_send_on_behalf {
-                    Storage::upsert_sender_delegation_grant(
-                        self,
-                        SenderDelegationGrantInput {
-                            owner_account_id: input.owner_account_id,
-                            grantee_email: input.grantee_email.clone(),
-                            sender_right: SenderDelegationRight::SendOnBehalf,
-                        },
-                        audit.clone(),
-                    )
-                    .await?;
-                } else {
-                    let _ = Storage::delete_sender_delegation_grant(
-                        self,
-                        input.owner_account_id,
-                        grantee_account_id,
-                        SenderDelegationRight::SendOnBehalf,
-                        audit.clone(),
-                    )
-                    .await;
-                }
-
-                sqlx::query(
-                    r#"
-                INSERT INTO delegate_preferences (
-                    tenant_id, owner_account_id, grantee_account_id,
-                    meeting_request_delivery, receives_meeting_request_copy,
-                    may_view_private_items
+                    })
+                    .collect::<Vec<_>>();
+                let grantee_ids = Storage::apply_canonical_ews_delegate_batch(
+                    self,
+                    owner_account_id,
+                    &canonical_inputs,
+                    audit,
                 )
-                VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (tenant_id, owner_account_id, grantee_account_id)
-                DO UPDATE SET
-                    meeting_request_delivery = EXCLUDED.meeting_request_delivery,
-                    receives_meeting_request_copy = EXCLUDED.receives_meeting_request_copy,
-                    may_view_private_items = EXCLUDED.may_view_private_items,
-                    updated_at = NOW()
-                "#,
-                )
-                .bind(tenant_id)
-                .bind(input.owner_account_id)
-                .bind(grantee_account_id)
-                .bind(&input.preferences.meeting_request_delivery)
-                .bind(input.preferences.receives_meeting_request_copy)
-                .bind(input.preferences.may_view_private_items)
-                .execute(self.pool())
                 .await?;
-
-                self.fetch_ews_delegates(input.owner_account_id)
-                    .await?
+                let delegates = self.fetch_ews_delegates(owner_account_id).await?;
+                grantee_ids
                     .into_iter()
-                    .find(|delegate| delegate.grantee_account_id == grantee_account_id)
-                    .ok_or_else(|| anyhow::anyhow!("delegate not found after upsert"))
+                    .map(|grantee_id| {
+                        delegates
+                            .iter()
+                            .find(|delegate| delegate.grantee_account_id == grantee_id)
+                            .cloned()
+                            .ok_or_else(|| anyhow::anyhow!("delegate not found after commit"))
+                    })
+                    .collect()
             })
         }
 
-        fn remove_ews_delegate<'a>(
+        fn remove_ews_delegate_batch<'a>(
             &'a self,
             owner_account_id: Uuid,
-            grantee_account_id: Uuid,
+            grantee_account_ids: &'a [Uuid],
             audit: AuditEntryInput,
-        ) -> StoreFuture<'a, bool> {
+        ) -> StoreFuture<'a, ()> {
             Box::pin(async move {
-                let tenant_id = mapi_tenant_id_for_account(self, owner_account_id).await?;
-                let mut deleted = false;
-                if Storage::delete_mailbox_delegation_grant(
+                Storage::remove_canonical_ews_delegate_batch(
                     self,
                     owner_account_id,
-                    grantee_account_id,
-                    audit.clone(),
+                    grantee_account_ids,
+                    audit,
                 )
                 .await
-                .is_ok()
-                {
-                    deleted = true;
-                }
-                if Storage::delete_collaboration_grant(
-                    self,
-                    owner_account_id,
-                    CollaborationResourceKind::Calendar,
-                    grantee_account_id,
-                    audit.clone(),
-                )
-                .await
-                .is_ok()
-                {
-                    deleted = true;
-                }
-                for right in [
-                    SenderDelegationRight::SendOnBehalf,
-                    SenderDelegationRight::SendAs,
-                ] {
-                    if Storage::delete_sender_delegation_grant(
-                        self,
-                        owner_account_id,
-                        grantee_account_id,
-                        right,
-                        audit.clone(),
-                    )
-                    .await
-                    .is_ok()
-                    {
-                        deleted = true;
-                    }
-                }
-                let result = sqlx::query(
-                    r#"
-                DELETE FROM delegate_preferences
-                WHERE tenant_id = $1
-                  AND owner_account_id = $2
-                  AND grantee_account_id = $3
-                "#,
-                )
-                .bind(tenant_id)
-                .bind(owner_account_id)
-                .bind(grantee_account_id)
-                .execute(self.pool())
-                .await?;
-                Ok(deleted || result.rows_affected() > 0)
             })
         }
     };

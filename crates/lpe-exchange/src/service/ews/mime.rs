@@ -213,13 +213,21 @@ pub(in crate::service) fn file_attachment_reference_xml(
             "<t:Name>{name}</t:Name>",
             "<t:ContentType>{content_type}</t:ContentType>",
             "<t:Size>{size}</t:Size>",
-            "<t:IsInline>false</t:IsInline>",
+            "<t:IsInline>{is_inline}</t:IsInline>",
+            "{content_id}",
             "</t:FileAttachment>"
         ),
         file_reference = escape_xml(&attachment.file_reference),
         name = escape_xml(&attachment.file_name),
         content_type = escape_xml(&attachment.media_type),
         size = attachment.size_octets,
+        is_inline = attachment.disposition.as_deref() == Some("inline"),
+        content_id = attachment
+            .content_id
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .map(|value| format!("<t:ContentId>{}</t:ContentId>", escape_xml(value)))
+            .unwrap_or_default(),
     )
 }
 
@@ -233,7 +241,8 @@ pub(in crate::service) fn file_attachment_content_xml(
             "<t:Name>{name}</t:Name>",
             "<t:ContentType>{content_type}</t:ContentType>",
             "<t:Size>{size}</t:Size>",
-            "<t:IsInline>false</t:IsInline>",
+            "<t:IsInline>{is_inline}</t:IsInline>",
+            "{content_id}",
             "<t:Content>{body}</t:Content>",
             "</t:FileAttachment>"
         ),
@@ -241,6 +250,13 @@ pub(in crate::service) fn file_attachment_content_xml(
         name = escape_xml(&content.file_name),
         content_type = escape_xml(&content.media_type),
         size = content.blob_bytes.len(),
+        is_inline = content.disposition.as_deref() == Some("inline"),
+        content_id = content
+            .content_id
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .map(|value| format!("<t:ContentId>{}</t:ContentId>", escape_xml(value)))
+            .unwrap_or_default(),
         body = BASE64_STANDARD.encode(&content.blob_bytes),
     )
 }

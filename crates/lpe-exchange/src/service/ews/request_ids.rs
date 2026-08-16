@@ -29,13 +29,6 @@ pub(in crate::service) fn requested_item_references(request: &str) -> Vec<Reques
     ids
 }
 
-pub(in crate::service) fn requested_attachment_ids(request: &str) -> Vec<String> {
-    attribute_values_for_tag(request, "AttachmentId", "Id")
-        .into_iter()
-        .map(str::to_string)
-        .collect()
-}
-
 pub(in crate::service) fn requested_transfer_item_ids(request: &str) -> Vec<String> {
     let mut ids = requested_item_ids(request);
     ids.extend(

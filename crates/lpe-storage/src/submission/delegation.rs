@@ -3,8 +3,8 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::{
-    normalize_email, AuditEntryInput, MailboxAccountAccessRow, MailboxDelegationGrantRow,
-    SenderDelegationGrantRow, Storage,
+    normalize_email, AuditEntryInput, CanonicalChangeCategory, CollaborationResourceKind,
+    MailboxAccountAccessRow, MailboxDelegationGrantRow, SenderDelegationGrantRow, Storage,
 };
 
 use super::delegate_preferences::{
@@ -12,12 +12,357 @@ use super::delegate_preferences::{
 };
 use super::types::{
     map_mailbox_delegation_grant, map_sender_delegation_grant, sender_identity_id,
-    validate_mailbox_delegation_rights, MailboxAccountAccess, MailboxDelegationGrant,
-    MailboxDelegationGrantInput, MailboxFolderDelegationGrantInput, SenderAuthorizationKind,
-    SenderDelegationGrant, SenderDelegationGrantInput, SenderDelegationRight, SenderIdentity,
+    validate_mailbox_delegation_rights, CanonicalEwsDelegateInput, MailboxAccountAccess,
+    MailboxDelegationGrant, MailboxDelegationGrantInput, MailboxFolderDelegationGrantInput,
+    SenderAuthorizationKind, SenderDelegationGrant, SenderDelegationGrantInput,
+    SenderDelegationRight, SenderIdentity,
 };
 
 impl Storage {
+    /// Applies EWS's bounded delegate tuple as one canonical commit. [MS-OXWSDLGM]
+    /// sections 3.1.4.1 through 3.1.4.4 define the corresponding EWS operations.
+    pub async fn apply_canonical_ews_delegate_batch(
+        &self,
+        owner_account_id: Uuid,
+        inputs: &[CanonicalEwsDelegateInput],
+        audit: AuditEntryInput,
+    ) -> Result<Vec<Uuid>> {
+        if inputs.is_empty() || inputs.len() > 100 {
+            bail!("delegate batch must contain between one and 100 entries");
+        }
+        let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
+        let mut inputs = inputs.to_vec();
+        inputs.sort_by(|left, right| left.grantee_email.cmp(&right.grantee_email));
+        if inputs.windows(2).any(|pair| {
+            normalize_email(&pair[0].grantee_email) == normalize_email(&pair[1].grantee_email)
+        }) {
+            bail!("delegate batch contains a duplicate grantee");
+        }
+        for input in &inputs {
+            if input.owner_account_id != owner_account_id
+                || normalize_email(&input.grantee_email).is_empty()
+                || !matches!(
+                    input.preferences.meeting_request_delivery.as_str(),
+                    "delegate_only" | "delegate_and_owner" | "owner_only"
+                )
+                || (!input.inbox_may_read
+                    && (input.inbox_may_write || input.inbox_may_delete || input.inbox_may_share))
+                || (!input.calendar_may_read
+                    && (input.calendar_may_write
+                        || input.calendar_may_delete
+                        || input.calendar_may_share))
+                || input.inbox_may_delete && !input.inbox_may_write
+                || input.inbox_may_share && !input.inbox_may_write
+                || input.calendar_may_delete && !input.calendar_may_write
+                || input.calendar_may_share && !input.calendar_may_write
+            {
+                bail!("invalid canonical delegate tuple");
+            }
+        }
+
+        let mut tx = self.pool.begin().await?;
+        self.ensure_account_exists(&mut tx, &tenant_id, owner_account_id)
+            .await?;
+        sqlx::query("SELECT id FROM accounts WHERE tenant_id = $1 AND id = $2 FOR UPDATE")
+            .bind(&tenant_id)
+            .bind(owner_account_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        let inbox_id = sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM mailboxes WHERE tenant_id = $1 AND account_id = $2 AND role = 'inbox' FOR UPDATE",
+        )
+        .bind(&tenant_id)
+        .bind(owner_account_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| anyhow!("default Inbox is unavailable"))?;
+        let mut resolved = Vec::with_capacity(inputs.len());
+        for input in &inputs {
+            let grantee_email = normalize_email(&input.grantee_email);
+            let grantee_id = sqlx::query_scalar::<_, Uuid>(
+                "SELECT id FROM accounts WHERE tenant_id = $1 AND normalized_primary_email = $2 AND status = 'active' FOR UPDATE",
+            )
+            .bind(&tenant_id)
+            .bind(&grantee_email)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| anyhow!("delegate account not found in tenant"))?;
+            if grantee_id == owner_account_id {
+                bail!("self-delegation is not supported");
+            }
+            resolved.push((input, grantee_id));
+        }
+        let calendar_id =
+            Self::ensure_default_calendar_in_tx(&mut tx, &tenant_id, owner_account_id).await?;
+
+        for (input, grantee_id) in &resolved {
+            let inbox_change = if input.inbox_may_read {
+                let id = sqlx::query_scalar::<_, Uuid>(
+                    r#"
+                    INSERT INTO mailbox_delegation_grants (
+                        id, tenant_id, mailbox_id, owner_account_id, grantee_account_id,
+                        may_read, may_write, may_delete, may_share
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    ON CONFLICT (tenant_id, mailbox_id, grantee_account_id) DO UPDATE SET
+                        may_read = EXCLUDED.may_read, may_write = EXCLUDED.may_write,
+                        may_delete = EXCLUDED.may_delete, may_share = EXCLUDED.may_share,
+                        updated_at = NOW()
+                    RETURNING id
+                    "#,
+                )
+                .bind(Uuid::new_v4())
+                .bind(&tenant_id)
+                .bind(inbox_id)
+                .bind(owner_account_id)
+                .bind(*grantee_id)
+                .bind(true)
+                .bind(input.inbox_may_write)
+                .bind(input.inbox_may_delete)
+                .bind(input.inbox_may_share)
+                .fetch_one(&mut *tx)
+                .await?;
+                Some((id, "updated"))
+            } else {
+                sqlx::query_scalar::<_, Uuid>(
+                    "DELETE FROM mailbox_delegation_grants WHERE tenant_id = $1 AND mailbox_id = $2 AND grantee_account_id = $3 RETURNING id",
+                ).bind(&tenant_id).bind(inbox_id).bind(*grantee_id).fetch_optional(&mut *tx).await?
+                    .map(|id| (id, "destroyed"))
+            };
+            if let Some((id, kind)) = inbox_change {
+                let modseq = self
+                    .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, owner_account_id)
+                    .await?;
+                Self::insert_mail_change_log_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    Some(owner_account_id),
+                    None,
+                    "mailbox_delegation_grant",
+                    id,
+                    kind,
+                    modseq,
+                    &[owner_account_id, *grantee_id],
+                    serde_json::json!({"mailboxId": inbox_id, "granteeId": grantee_id}),
+                )
+                .await?;
+            }
+
+            let calendar_change = if input.calendar_may_read {
+                let id = sqlx::query_scalar::<_, Uuid>(
+                    r#"
+                    INSERT INTO calendar_grants (
+                        id, tenant_id, calendar_id, owner_account_id, grantee_account_id,
+                        may_read, may_write, may_delete, may_share
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    ON CONFLICT (tenant_id, calendar_id, grantee_account_id) DO UPDATE SET
+                        may_read = EXCLUDED.may_read, may_write = EXCLUDED.may_write,
+                        may_delete = EXCLUDED.may_delete, may_share = EXCLUDED.may_share,
+                        updated_at = NOW()
+                    RETURNING id
+                    "#,
+                )
+                .bind(Uuid::new_v4())
+                .bind(&tenant_id)
+                .bind(calendar_id)
+                .bind(owner_account_id)
+                .bind(*grantee_id)
+                .bind(true)
+                .bind(input.calendar_may_write)
+                .bind(input.calendar_may_delete)
+                .bind(input.calendar_may_share)
+                .fetch_one(&mut *tx)
+                .await?;
+                Some((id, "updated"))
+            } else {
+                sqlx::query_scalar::<_, Uuid>(
+                    "DELETE FROM calendar_grants WHERE tenant_id = $1 AND calendar_id = $2 AND grantee_account_id = $3 RETURNING id",
+                ).bind(&tenant_id).bind(calendar_id).bind(*grantee_id).fetch_optional(&mut *tx).await?
+                    .map(|id| (id, "destroyed"))
+            };
+            if let Some((id, kind)) = calendar_change {
+                let modseq = self
+                    .allocate_account_modseq_in_tx(
+                        &mut tx,
+                        &tenant_id,
+                        owner_account_id,
+                        CanonicalChangeCategory::Calendar.as_str(),
+                    )
+                    .await?;
+                Self::insert_mail_change_log_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    Some(owner_account_id),
+                    None,
+                    "calendar_grant",
+                    id,
+                    kind,
+                    modseq,
+                    &[owner_account_id, *grantee_id],
+                    serde_json::json!({"collectionId": calendar_id, "granteeId": grantee_id}),
+                )
+                .await?;
+            }
+
+            let sender_change = if input.may_send_on_behalf {
+                let id = sqlx::query_scalar::<_, Uuid>(
+                    r#"INSERT INTO sender_rights (id, tenant_id, owner_account_id, grantee_account_id, sender_right)
+                        VALUES ($1, $2, $3, $4, 'send_on_behalf')
+                        ON CONFLICT (tenant_id, owner_account_id, grantee_account_id, sender_right) WHERE identity_id IS NULL
+                        DO UPDATE SET updated_at = NOW() RETURNING id"#,
+                ).bind(Uuid::new_v4()).bind(&tenant_id).bind(owner_account_id).bind(*grantee_id)
+                    .fetch_one(&mut *tx).await?;
+                Some((id, "updated"))
+            } else {
+                sqlx::query_scalar::<_, Uuid>(
+                    "DELETE FROM sender_rights WHERE tenant_id = $1 AND owner_account_id = $2 AND grantee_account_id = $3 AND sender_right = 'send_on_behalf' AND identity_id IS NULL RETURNING id",
+                ).bind(&tenant_id).bind(owner_account_id).bind(*grantee_id).fetch_optional(&mut *tx).await?
+                    .map(|id| (id, "destroyed"))
+            };
+            if let Some((id, kind)) = sender_change {
+                let modseq = self
+                    .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, owner_account_id)
+                    .await?;
+                Self::insert_mail_change_log_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    Some(owner_account_id),
+                    None,
+                    "sender_right",
+                    id,
+                    kind,
+                    modseq,
+                    &[owner_account_id, *grantee_id],
+                    serde_json::json!({"granteeId": grantee_id, "senderRight": "send_on_behalf"}),
+                )
+                .await?;
+            }
+
+            sqlx::query(
+                r#"
+                INSERT INTO delegate_preferences (tenant_id, owner_account_id, grantee_account_id,
+                    meeting_request_delivery, receives_meeting_request_copy, may_view_private_items)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (tenant_id, owner_account_id, grantee_account_id) DO UPDATE SET
+                    meeting_request_delivery = EXCLUDED.meeting_request_delivery,
+                    receives_meeting_request_copy = EXCLUDED.receives_meeting_request_copy,
+                    may_view_private_items = EXCLUDED.may_view_private_items, updated_at = NOW()
+            "#,
+            )
+            .bind(&tenant_id)
+            .bind(owner_account_id)
+            .bind(*grantee_id)
+            .bind(&input.preferences.meeting_request_delivery)
+            .bind(input.preferences.receives_meeting_request_copy)
+            .bind(input.preferences.may_view_private_items)
+            .execute(&mut *tx)
+            .await?;
+            Self::emit_mail_delegation_change(&mut tx, &tenant_id, owner_account_id, *grantee_id)
+                .await?;
+            Self::emit_collaboration_grant_change(
+                &mut tx,
+                &tenant_id,
+                CollaborationResourceKind::Calendar,
+                owner_account_id,
+                *grantee_id,
+            )
+            .await?;
+        }
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        tx.commit().await?;
+        Ok(resolved.into_iter().map(|(_, id)| id).collect())
+    }
+
+    pub async fn remove_canonical_ews_delegate_batch(
+        &self,
+        owner_account_id: Uuid,
+        grantee_account_ids: &[Uuid],
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        if grantee_account_ids.is_empty() || grantee_account_ids.len() > 100 {
+            bail!("delegate batch must contain between one and 100 entries");
+        }
+        let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
+        let mut grantee_account_ids = grantee_account_ids.to_vec();
+        grantee_account_ids.sort();
+        grantee_account_ids.dedup();
+        if grantee_account_ids.len() > 100 || grantee_account_ids.contains(&owner_account_id) {
+            bail!("invalid delegate removal batch");
+        }
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT id FROM accounts WHERE tenant_id = $1 AND id = $2 FOR UPDATE")
+            .bind(&tenant_id)
+            .bind(owner_account_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        let inbox_id = sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM mailboxes WHERE tenant_id = $1 AND account_id = $2 AND role = 'inbox' FOR UPDATE",
+        ).bind(&tenant_id).bind(owner_account_id).fetch_optional(&mut *tx).await?
+            .ok_or_else(|| anyhow!("default Inbox is unavailable"))?;
+        let calendar_id = sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM calendars WHERE tenant_id = $1 AND owner_account_id = $2 AND role = 'calendar' FOR UPDATE",
+        )
+        .bind(&tenant_id)
+        .bind(owner_account_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| anyhow!("default Calendar is unavailable"))?;
+        for grantee_id in &grantee_account_ids {
+            let exists = sqlx::query_scalar::<_, bool>(r#"
+                SELECT EXISTS (
+                    SELECT 1 FROM mailbox_delegation_grants WHERE tenant_id = $1 AND mailbox_id = $2 AND grantee_account_id = $3
+                    UNION ALL SELECT 1 FROM calendar_grants WHERE tenant_id = $1 AND calendar_id = $4 AND grantee_account_id = $3
+                    UNION ALL SELECT 1 FROM sender_rights WHERE tenant_id = $1 AND owner_account_id = $5 AND grantee_account_id = $3 AND sender_right = 'send_on_behalf' AND identity_id IS NULL
+                    UNION ALL SELECT 1 FROM delegate_preferences WHERE tenant_id = $1 AND owner_account_id = $5 AND grantee_account_id = $3
+                )
+            "#).bind(&tenant_id).bind(inbox_id).bind(*grantee_id).bind(calendar_id).bind(owner_account_id)
+                .fetch_one(&mut *tx).await?;
+            if !exists {
+                bail!("delegate was not found");
+            }
+        }
+        for grantee_id in grantee_account_ids {
+            if let Some(id) = sqlx::query_scalar::<_, Uuid>(
+                "DELETE FROM mailbox_delegation_grants WHERE tenant_id = $1 AND mailbox_id = $2 AND grantee_account_id = $3 RETURNING id",
+            ).bind(&tenant_id).bind(inbox_id).bind(grantee_id).fetch_optional(&mut *tx).await? {
+                let modseq = self.allocate_mail_modseq_in_tx(&mut tx, &tenant_id, owner_account_id).await?;
+                Self::insert_mail_change_log_in_tx(&mut tx, &tenant_id, Some(owner_account_id), None,
+                    "mailbox_delegation_grant", id, "destroyed", modseq, &[owner_account_id, grantee_id],
+                    serde_json::json!({"mailboxId": inbox_id, "granteeId": grantee_id})).await?;
+            }
+            if let Some(id) = sqlx::query_scalar::<_, Uuid>(
+                "DELETE FROM calendar_grants WHERE tenant_id = $1 AND calendar_id = $2 AND grantee_account_id = $3 RETURNING id",
+            ).bind(&tenant_id).bind(calendar_id).bind(grantee_id).fetch_optional(&mut *tx).await? {
+                let modseq = self.allocate_account_modseq_in_tx(&mut tx, &tenant_id, owner_account_id, CanonicalChangeCategory::Calendar.as_str()).await?;
+                Self::insert_mail_change_log_in_tx(&mut tx, &tenant_id, Some(owner_account_id), None,
+                    "calendar_grant", id, "destroyed", modseq, &[owner_account_id, grantee_id],
+                    serde_json::json!({"collectionId": calendar_id, "granteeId": grantee_id})).await?;
+            }
+            if let Some(id) = sqlx::query_scalar::<_, Uuid>(
+                "DELETE FROM sender_rights WHERE tenant_id = $1 AND owner_account_id = $2 AND grantee_account_id = $3 AND sender_right = 'send_on_behalf' AND identity_id IS NULL RETURNING id",
+            ).bind(&tenant_id).bind(owner_account_id).bind(grantee_id).fetch_optional(&mut *tx).await? {
+                let modseq = self.allocate_mail_modseq_in_tx(&mut tx, &tenant_id, owner_account_id).await?;
+                Self::insert_mail_change_log_in_tx(&mut tx, &tenant_id, Some(owner_account_id), None,
+                    "sender_right", id, "destroyed", modseq, &[owner_account_id, grantee_id],
+                    serde_json::json!({"granteeId": grantee_id, "senderRight": "send_on_behalf"})).await?;
+            }
+            sqlx::query("DELETE FROM delegate_preferences WHERE tenant_id = $1 AND owner_account_id = $2 AND grantee_account_id = $3")
+                .bind(&tenant_id).bind(owner_account_id).bind(grantee_id).execute(&mut *tx).await?;
+            Self::emit_mail_delegation_change(&mut tx, &tenant_id, owner_account_id, grantee_id)
+                .await?;
+            Self::emit_collaboration_grant_change(
+                &mut tx,
+                &tenant_id,
+                CollaborationResourceKind::Calendar,
+                owner_account_id,
+                grantee_id,
+            )
+            .await?;
+        }
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn fetch_account_identity(&self, account_id: Uuid) -> Result<MailboxAccountAccess> {
         let account = self.account_identity_for_id(account_id).await?;
         Ok(MailboxAccountAccess {

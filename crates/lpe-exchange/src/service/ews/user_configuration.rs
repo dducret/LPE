@@ -2,6 +2,12 @@ use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 
 use super::super::*;
 
+const MAX_USER_CONFIGURATION_NAME_BYTES: usize = 256;
+const MAX_USER_CONFIGURATION_DICTIONARY_ENTRIES: usize = 128;
+const MAX_USER_CONFIGURATION_DICTIONARY_KEY_BYTES: usize = 256;
+const MAX_USER_CONFIGURATION_DICTIONARY_VALUE_BYTES: usize = 4096;
+const MAX_USER_CONFIGURATION_PAYLOAD_BYTES: usize = 64 * 1024;
+
 impl<S, V> ExchangeService<S, V>
 where
     S: ExchangeStore + Clone + Send + Sync + 'static,
@@ -27,7 +33,14 @@ where
             .fetch_ews_user_configuration(principal.account_id, &key)
             .await?
         {
-            Some(configuration) => Ok(get_user_configuration_response(&configuration, request)),
+            Some(configuration) => match get_user_configuration_response(&configuration, request) {
+                Ok(response) => Ok(response),
+                Err(error) => Ok(operation_error_response(
+                    "GetUserConfiguration",
+                    "ErrorInvalidOperation",
+                    &error.to_string(),
+                )),
+            },
             None => Ok(operation_error_response(
                 "GetUserConfiguration",
                 "ErrorItemNotFound",
@@ -154,8 +167,8 @@ where
 pub(in crate::service) fn get_user_configuration_response(
     configuration: &EwsUserConfiguration,
     request: &str,
-) -> String {
-    let properties = requested_user_configuration_properties(request);
+) -> Result<String> {
+    let properties = requested_user_configuration_properties(request)?;
     let dictionary = if properties.dictionary {
         ews_user_configuration_dictionary_xml(&configuration.dictionary_json)
     } else {
@@ -184,7 +197,7 @@ pub(in crate::service) fn get_user_configuration_response(
     } else {
         String::new()
     };
-    format!(
+    Ok(format!(
         concat!(
             "<m:GetUserConfigurationResponse>",
             "<m:ResponseMessages>",
@@ -207,7 +220,7 @@ pub(in crate::service) fn get_user_configuration_response(
         dictionary = dictionary,
         xml_data = xml_data,
         binary_data = binary_data,
-    )
+    ))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -217,29 +230,32 @@ struct RequestedUserConfigurationProperties {
     binary_data: bool,
 }
 
-fn requested_user_configuration_properties(request: &str) -> RequestedUserConfigurationProperties {
+fn requested_user_configuration_properties(
+    request: &str,
+) -> Result<RequestedUserConfigurationProperties> {
     let values = element_contents(request, "UserConfigurationProperties")
         .into_iter()
         .map(xml_text)
         .collect::<Vec<_>>();
     if values.is_empty() || values.iter().any(|value| value.eq_ignore_ascii_case("All")) {
-        return RequestedUserConfigurationProperties {
+        return Ok(RequestedUserConfigurationProperties {
             dictionary: true,
             xml_data: true,
             binary_data: true,
-        };
+        });
     }
-    RequestedUserConfigurationProperties {
-        dictionary: values
-            .iter()
-            .any(|value| value.eq_ignore_ascii_case("Dictionary")),
-        xml_data: values
-            .iter()
-            .any(|value| value.eq_ignore_ascii_case("XmlData")),
-        binary_data: values
-            .iter()
-            .any(|value| value.eq_ignore_ascii_case("BinaryData")),
+    if values
+        .iter()
+        .any(|value| !matches!(value.as_str(), "Dictionary" | "XmlData" | "BinaryData"))
+        || values.windows(2).any(|values| values[0] == values[1])
+    {
+        bail!("UserConfigurationProperties contains an unsupported or duplicate property");
     }
+    Ok(RequestedUserConfigurationProperties {
+        dictionary: values.iter().any(|value| value == "Dictionary"),
+        xml_data: values.iter().any(|value| value == "XmlData"),
+        binary_data: values.iter().any(|value| value == "BinaryData"),
+    })
 }
 
 fn ews_user_configuration_dictionary_xml(dictionary: &serde_json::Value) -> String {
@@ -279,6 +295,9 @@ pub(in crate::service) fn parse_ews_user_configuration_key(
         .map(xml_text)
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| anyhow!("UserConfigurationName Name is required."))?;
+    if config_name.len() > MAX_USER_CONFIGURATION_NAME_BYTES {
+        bail!("UserConfigurationName Name exceeds the supported limit.");
+    }
     let folder_id = attribute_value_after(name_element, "FolderId", "Id")
         .or_else(|| attribute_value_after(name_element, "DistinguishedFolderId", "Id"))
         .map(str::trim)
@@ -331,6 +350,11 @@ pub(in crate::service) fn parse_ews_user_configuration_upsert(
                 .map_err(|_| anyhow!("BinaryData must be valid base64."))
         })
         .transpose()?;
+    let payload_size = xml_payload.as_ref().map_or(0, |value| value.len())
+        + binary_payload.as_ref().map_or(0, Vec::len);
+    if payload_size > MAX_USER_CONFIGURATION_PAYLOAD_BYTES {
+        bail!("User configuration payload exceeds the supported limit.");
+    }
     Ok(UpsertEwsUserConfigurationInput {
         account_id: principal.account_id,
         key,
@@ -346,6 +370,16 @@ fn parse_ews_user_configuration_dictionary(request: &str) -> Result<serde_json::
     };
     let mut object = serde_json::Map::new();
     for entry in element_contents(dictionary, "DictionaryEntry") {
+        if object.len() == MAX_USER_CONFIGURATION_DICTIONARY_ENTRIES {
+            bail!("Dictionary exceeds the supported entry limit.");
+        }
+        let key_type = element_content(entry, "DictionaryKey")
+            .and_then(|content| element_text(content, "Type"));
+        let value_type = element_content(entry, "DictionaryValue")
+            .and_then(|content| element_text(content, "Type"));
+        if key_type.as_deref() != Some("String") || value_type.as_deref() != Some("String") {
+            bail!("Dictionary supports only String keys and values.");
+        }
         let key = element_content(entry, "DictionaryKey")
             .and_then(|content| element_text(content, "Value"))
             .filter(|value| !value.trim().is_empty())
@@ -353,6 +387,14 @@ fn parse_ews_user_configuration_dictionary(request: &str) -> Result<serde_json::
         let value = element_content(entry, "DictionaryValue")
             .and_then(|content| element_text(content, "Value"))
             .unwrap_or_default();
+        if key.len() > MAX_USER_CONFIGURATION_DICTIONARY_KEY_BYTES
+            || value.len() > MAX_USER_CONFIGURATION_DICTIONARY_VALUE_BYTES
+        {
+            bail!("Dictionary key or value exceeds the supported limit.");
+        }
+        if object.contains_key(&key) {
+            bail!("Dictionary contains a duplicate key.");
+        }
         object.insert(key, serde_json::Value::String(value));
     }
     Ok(serde_json::Value::Object(object))

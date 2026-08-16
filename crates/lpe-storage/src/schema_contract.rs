@@ -40,6 +40,7 @@ const WORKSPACE_STORAGE: &str = concat!(
 );
 const ADMIN_STORAGE: &str = include_str!("admin.rs");
 const ADMIN_PROVISIONING_STORAGE: &str = include_str!("admin/provisioning.rs");
+const ADMIN_RULES_STORAGE: &str = include_str!("admin/rules.rs");
 const AUTH_STORAGE: &str = include_str!("auth.rs");
 const EXCHANGE_STORE: &str = include_str!("../../lpe-exchange/src/store.rs");
 const EXCHANGE_STORE_MAPI_METADATA: &str =
@@ -2638,6 +2639,14 @@ fn mailbox_rules_are_canonical_sieve_scripts_with_replay() {
             && ADMIN_STORAGE.contains("insert_collaboration_tombstone_in_tx")
             && ADMIN_STORAGE.contains("emit_account_scoped_change"),
         "Sieve script mutations must be canonical rule changes with replay tombstones"
+    );
+    assert!(
+        ADMIN_RULES_STORAGE.contains("replace_active_sieve_script")
+            && ADMIN_RULES_STORAGE.contains("FOR UPDATE")
+            && ADMIN_RULES_STORAGE.contains("insert_mail_change_log_in_tx")
+            && ADMIN_RULES_STORAGE.contains("insert_collaboration_tombstone_in_tx")
+            && ADMIN_RULES_STORAGE.contains("emit_account_scoped_change"),
+        "atomic generated-Sieve replacement must lock, replay, and audit canonical rule state"
     );
     for forbidden in [
         "CREATE TABLE ews_rules",

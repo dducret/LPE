@@ -654,6 +654,37 @@ impl Storage {
         account_id: Uuid,
         file_reference: &str,
     ) -> Result<Option<ActiveSyncAttachmentContent>> {
+        let Some((event_id, attachment_id)) =
+            parse_calendar_attachment_file_reference(file_reference)
+        else {
+            return Ok(None);
+        };
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let metadata = sqlx::query(
+            r#"
+            SELECT a.file_name, a.disposition, a.content_id
+            FROM calendar_event_attachments a
+            JOIN calendar_events event
+              ON event.tenant_id = a.tenant_id
+             AND event.owner_account_id = a.owner_account_id
+             AND event.id = a.event_id
+             AND event.lifecycle_state = 'active'
+            WHERE a.tenant_id = $1
+              AND a.owner_account_id = $2
+              AND a.event_id = $3
+              AND a.id = $4
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(event_id)
+        .bind(attachment_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(metadata) = metadata else {
+            return Ok(None);
+        };
         let Some(blob) = self
             .fetch_calendar_attachment_blob(account_id, file_reference)
             .await?
@@ -662,8 +693,10 @@ impl Storage {
         };
         Ok(Some(ActiveSyncAttachmentContent {
             file_reference: file_reference.trim().to_string(),
-            file_name: "calendar-attachment".to_string(),
+            file_name: metadata.try_get("file_name")?,
             media_type: blob.media_type,
+            disposition: metadata.try_get("disposition")?,
+            content_id: metadata.try_get("content_id")?,
             blob_bytes: blob.blob_bytes,
         }))
     }
@@ -941,7 +974,7 @@ impl Storage {
                     AND mm.message_id = a.message_id
                     AND mm.visibility = 'visible'
               )
-            RETURNING a.message_id
+            RETURNING a.message_id, a.mime_part_id
             "#,
         )
         .bind(&tenant_id)
@@ -954,6 +987,22 @@ impl Storage {
         if deleted.is_none() {
             tx.commit().await?;
             return Ok(None);
+        }
+        let deleted = deleted.expect("checked attachment deletion");
+        let deleted_message_id: Uuid = deleted.try_get("message_id")?;
+        let deleted_mime_part_id: Option<Uuid> = deleted.try_get("mime_part_id")?;
+        if let Some(mime_part_id) = deleted_mime_part_id {
+            sqlx::query(
+                r#"
+                DELETE FROM mime_parts
+                WHERE tenant_id = $1 AND message_id = $2 AND id = $3
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(deleted_message_id)
+            .bind(mime_part_id)
+            .execute(&mut *tx)
+            .await?;
         }
 
         let principals =

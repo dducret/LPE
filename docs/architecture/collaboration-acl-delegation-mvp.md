@@ -37,6 +37,10 @@
   - mailbox `Share` reads and deletion target only the owner's default Inbox;
     deleting that relation deletes its preference tuple while custom-folder ACLs,
     calendar grants, and sender rights remain independently managed relations
+  - EWS delegate add, update, and removal validate the complete bounded
+    same-tenant delegate batch, then commit its default-Inbox/default-Calendar,
+    send-on-behalf, and preference tuples atomically; EWS removal never deletes
+    independently managed `send_as` rights
 - Delegate / free-busy object layer:
   - `/api/mail/delegation/free-busy` returns canonical delegate access objects
     and computed free/busy blocks for Outlook, EWS, and MAPI consumers

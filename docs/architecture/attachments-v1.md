@@ -16,6 +16,11 @@ Attachments are validated before processing and indexed only for the documented 
 - Keep export able to reconstruct messages with the original blobs.
 - Keep `Bcc` out of user search and AI-facing pipelines.
 - Use asynchronous extraction for attachment text.
+- Storage module split plan: `crates/lpe-storage/src/attachments.rs` currently owns both
+  attachment mutation transactions and message/calendar blob-content projections. Before the
+  next attachment behavior is added, move the read projections into an `attachments/content.rs`
+  sibling while retaining canonical create/delete transactions in the current module. This P0
+  work changes only those existing paths and does not add another attachment abstraction.
 - Do not extend indexed file types without updating architecture documentation.
 - The authenticated web client uploads one attachment to an existing canonical draft through
   `POST /api/mail/messages/{messageId}/attachments?accountId={mailboxAccountId}` as multipart

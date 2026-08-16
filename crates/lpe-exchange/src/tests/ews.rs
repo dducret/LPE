@@ -1703,7 +1703,36 @@ async fn get_server_time_zones_returns_minimal_definitions() {
     assert!(body.contains("<m:GetServerTimeZonesResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(body.contains("<t:TimeZoneDefinition Id=\"UTC\""));
-    assert!(body.contains("<t:TimeZoneDefinition Id=\"W. Europe Standard Time\""));
+    assert!(body.contains("<t:TimeZoneDefinition Id=\"Europe/Berlin\""));
+}
+
+#[tokio::test]
+async fn get_server_time_zones_projects_only_requested_compact_catalog_entries() {
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    });
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetServerTimeZones ReturnFullTimeZoneData="false"><t:Ids><t:Id>UTC</t:Id></t:Ids></m:GetServerTimeZones></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:TimeZoneDefinition Id=\"UTC\""));
+    assert!(!body.contains("Europe/Berlin"));
+
+    let invalid = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetServerTimeZones ReturnFullTimeZoneData="false"><t:Ids><t:Id>Unknown/Zone</t:Id></t:Ids></m:GetServerTimeZones></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let invalid_body = response_text(invalid).await;
+    assert!(invalid_body.contains("<m:ResponseCode>ErrorInvalidRequest</m:ResponseCode>"));
+    assert!(!invalid_body.contains("TimeZoneDefinition Id="));
 }
 
 #[tokio::test]
@@ -1838,6 +1867,85 @@ async fn resolve_names_returns_no_results_for_non_directory_names() {
 }
 
 #[tokio::test]
+async fn resolve_names_rejects_ambiguous_and_inaccessible_contact_results() {
+    let mut hidden_collection = FakeStore::collection("hidden", "contacts", "Hidden Contacts");
+    hidden_collection.rights.may_read = false;
+    let mut hidden_contact = FakeStore::contact(
+        "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+        "Bob Hidden",
+        "hidden@example.test",
+    );
+    hidden_contact.collection_id = "hidden".to_string();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![hidden_collection])),
+        contacts: Arc::new(Mutex::new(vec![hidden_contact])),
+        directory_accounts: Arc::new(Mutex::new(vec![
+            {
+                let mut account = FakeStore::account();
+                account.account_id =
+                    Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+                account.display_name = "Bob Tenant".to_string();
+                account.email = "bob@example.test".to_string();
+                account
+            },
+            {
+                let mut account = FakeStore::account();
+                account.account_id =
+                    Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
+                account.display_name = "Bob Other".to_string();
+                account.email = "bob.other@example.test".to_string();
+                account
+            },
+            {
+                let mut account = FakeStore::account();
+                account.tenant_id = Uuid::from_u128(0xdddddddddddddddddddddddddddddddd);
+                account.account_id =
+                    Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap();
+                account.display_name = "Foreign Directory".to_string();
+                account.email = "foreign@example.test".to_string();
+                account
+            },
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let ambiguous = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:ResolveNames><m:UnresolvedEntry>bob</m:UnresolvedEntry></m:ResolveNames></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let ambiguous_body = response_text(ambiguous).await;
+    assert!(ambiguous_body
+        .contains("<m:ResponseCode>ErrorNameResolutionMultipleResults</m:ResponseCode>"));
+    assert!(!ambiguous_body.contains("bob@example.test"));
+
+    let hidden = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:ResolveNames SearchScope="Contacts"><m:UnresolvedEntry>Bob Hidden</m:UnresolvedEntry></m:ResolveNames></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let hidden_body = response_text(hidden).await;
+    assert!(hidden_body.contains("<m:ResponseCode>ErrorNameResolutionNoResults</m:ResponseCode>"));
+    assert!(!hidden_body.contains("hidden@example.test"));
+
+    let foreign = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:ResolveNames><m:UnresolvedEntry>Foreign Directory</m:UnresolvedEntry></m:ResolveNames></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let foreign_body = response_text(foreign).await;
+    assert!(foreign_body.contains("<m:ResponseCode>ErrorNameResolutionNoResults</m:ResponseCode>"));
+    assert!(!foreign_body.contains("foreign@example.test"));
+}
+
+#[tokio::test]
 async fn find_people_projects_canonical_accounts_and_contacts() {
     let mut bob = FakeStore::account();
     bob.account_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
@@ -1951,6 +2059,9 @@ async fn get_persona_resolves_only_visible_stateless_persona_ids() {
 async fn get_user_availability_returns_canonical_busy_events() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
         events: Arc::new(Mutex::new(vec![
             AccessibleEvent {
                 id: Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap(),
@@ -2054,6 +2165,9 @@ async fn get_user_availability_returns_canonical_busy_events() {
 async fn get_user_availability_returns_suggestions_when_requested() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -2102,6 +2216,139 @@ async fn get_user_availability_returns_suggestions_when_requested() {
     assert!(body.contains("<t:SuggestionDayResult>"));
     assert!(body.contains("<t:Date>2026-05-15T00:00:00Z</t:Date>"));
     assert!(body.contains("<t:SuggestionArray></t:SuggestionArray>"));
+}
+
+#[tokio::test]
+async fn get_user_availability_enforces_calendar_grants_and_redacts_failures() {
+    let mut shared_calendar = FakeStore::collection(
+        "shared-calendar-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "calendar",
+        "Bob Calendar",
+    );
+    shared_calendar.owner_account_id =
+        Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    shared_calendar.owner_email = "bob@example.test".to_string();
+    shared_calendar.owner_display_name = "Bob".to_string();
+    shared_calendar.is_owned = false;
+    let mut event = AccessibleEvent {
+        id: Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap(),
+        uid: "shared-busy".to_string(),
+        collection_id: shared_calendar.id.clone(),
+        owner_account_id: shared_calendar.owner_account_id,
+        owner_email: shared_calendar.owner_email.clone(),
+        owner_display_name: shared_calendar.owner_display_name.clone(),
+        rights: shared_calendar.rights.clone(),
+        date: "2026-05-04".to_string(),
+        time: "09:00".to_string(),
+        time_zone: "UTC".to_string(),
+        duration_minutes: 30,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
+        title: "Protected subject".to_string(),
+        location: "Protected room".to_string(),
+        organizer_json: "{}".to_string(),
+        attendees: "protected@example.test".to_string(),
+        attendees_json: "[]".to_string(),
+        notes: "Protected body".to_string(),
+        body_html: String::new(),
+    };
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        calendar_collections: Arc::new(Mutex::new(vec![shared_calendar.clone()])),
+        events: Arc::new(Mutex::new(vec![event.clone()])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let request = br#"<s:Envelope><s:Body><m:GetUserAvailabilityRequest><m:MailboxDataArray><t:MailboxData><t:Email><t:Address>bob@example.test</t:Address></t:Email></t:MailboxData></m:MailboxDataArray><t:FreeBusyViewOptions><t:TimeWindow><t:StartTime>2026-05-04T00:00:00Z</t:StartTime><t:EndTime>2026-05-05T00:00:00Z</t:EndTime></t:TimeWindow></t:FreeBusyViewOptions></m:GetUserAvailabilityRequest></s:Body></s:Envelope>"#;
+    let response = service.handle(&bearer_headers(), request).await.unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("2026-05-04T09:00:00Z"));
+    assert!(!body.contains("Protected subject"));
+    assert!(!body.contains("protected@example.test"));
+
+    shared_calendar.rights.may_read = false;
+    event.rights.may_read = false;
+    let denied = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        calendar_collections: Arc::new(Mutex::new(vec![shared_calendar])),
+        events: Arc::new(Mutex::new(vec![event])),
+        ..Default::default()
+    })
+    .handle(&bearer_headers(), request)
+    .await
+    .unwrap();
+    let denied_body = response_text(denied).await;
+    assert!(denied_body.contains("<m:ResponseCode>ErrorFreeBusyGenerationFailed</m:ResponseCode>"));
+    assert!(!denied_body.contains("Protected subject"));
+}
+
+#[tokio::test]
+async fn get_user_availability_expands_supported_recurrence_in_utc_across_berlin_dst() {
+    let calendar = FakeStore::collection("default", "calendar", "Calendar");
+    let event = AccessibleEvent {
+        id: Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap(),
+        uid: "berlin-recurring".to_string(),
+        collection_id: "default".to_string(),
+        owner_account_id: FakeStore::account().account_id,
+        owner_email: "alice@example.test".to_string(),
+        owner_display_name: "Alice".to_string(),
+        rights: FakeStore::rights(),
+        date: "2026-03-29".to_string(),
+        time: "09:00".to_string(),
+        time_zone: "Europe/Berlin".to_string(),
+        duration_minutes: 60,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: "FREQ=DAILY;COUNT=2".to_string(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
+        title: "Busy".to_string(),
+        location: String::new(),
+        organizer_json: "{}".to_string(),
+        attendees: String::new(),
+        attendees_json: "[]".to_string(),
+        notes: String::new(),
+        body_html: String::new(),
+    };
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        calendar_collections: Arc::new(Mutex::new(vec![calendar])),
+        events: Arc::new(Mutex::new(vec![event])),
+        ..Default::default()
+    });
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetUserAvailabilityRequest><m:MailboxDataArray><t:MailboxData><t:Email><t:Address>alice@example.test</t:Address></t:Email></t:MailboxData></m:MailboxDataArray><t:FreeBusyViewOptions><t:TimeWindow><t:StartTime>2026-03-29T00:00:00Z</t:StartTime><t:EndTime>2026-03-31T00:00:00Z</t:EndTime></t:TimeWindow></t:FreeBusyViewOptions></m:GetUserAvailabilityRequest></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("2026-03-29T07:00:00Z"));
+    assert!(body.contains("2026-03-30T07:00:00Z"));
+}
+
+#[tokio::test]
+async fn get_user_availability_rejects_invalid_time_window_without_event_detail() {
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    });
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetUserAvailabilityRequest><m:MailboxDataArray><t:MailboxData><t:Email><t:Address>alice@example.test</t:Address></t:Email></t:MailboxData></m:MailboxDataArray><t:FreeBusyViewOptions><t:TimeWindow><t:StartTime>2026-05-05T00:00:00Z</t:StartTime><t:EndTime>2026-05-04T00:00:00Z</t:EndTime></t:TimeWindow></t:FreeBusyViewOptions></m:GetUserAvailabilityRequest></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorFreeBusyGenerationFailed</m:ResponseCode>"));
+    assert!(!body.contains("CalendarEvent"));
 }
 
 #[tokio::test]
@@ -3834,6 +4081,72 @@ async fn delegate_add_rejects_cross_tenant_delegate() {
 }
 
 #[tokio::test]
+async fn delegate_batches_reject_invalid_members_without_partial_mutation() {
+    let delegate = AuthenticatedAccount {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "delegate@example.test".to_string(),
+        display_name: "Delegate User".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        directory_accounts: Arc::new(Mutex::new(vec![delegate])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body><m:AddDelegate><m:DelegateUsers>
+                <t:DelegateUser><t:UserId><t:PrimarySmtpAddress>delegate@example.test</t:PrimarySmtpAddress></t:UserId><t:DelegatePermissions><t:InboxFolderPermissionLevel>Reviewer</t:InboxFolderPermissionLevel></t:DelegatePermissions></t:DelegateUser>
+                <t:DelegateUser><t:UserId><t:PrimarySmtpAddress>missing@example.test</t:PrimarySmtpAddress></t:UserId><t:DelegatePermissions><t:CalendarFolderPermissionLevel>Reviewer</t:CalendarFolderPermissionLevel></t:DelegatePermissions></t:DelegateUser>
+              </m:DelegateUsers></m:AddDelegate></s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:AddDelegateResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(store.ews_delegates.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn delegate_remove_validates_the_full_batch_before_mutation() {
+    let delegate = AuthenticatedAccount {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "delegate@example.test".to_string(),
+        display_name: "Delegate User".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        directory_accounts: Arc::new(Mutex::new(vec![delegate])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+    let add = service.handle(&bearer_headers(), br#"
+        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"><s:Body><m:AddDelegate><m:DelegateUsers><t:DelegateUser><t:UserId><t:PrimarySmtpAddress>delegate@example.test</t:PrimarySmtpAddress></t:UserId><t:DelegatePermissions><t:InboxFolderPermissionLevel>Reviewer</t:InboxFolderPermissionLevel></t:DelegatePermissions></t:DelegateUser></m:DelegateUsers></m:AddDelegate></s:Body></s:Envelope>
+    "#).await.unwrap();
+    assert!(response_text(add)
+        .await
+        .contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+
+    let response = service.handle(&bearer_headers(), br#"
+        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"><s:Body><m:RemoveDelegate><m:UserIds><t:UserId><t:PrimarySmtpAddress>delegate@example.test</t:PrimarySmtpAddress></t:UserId><t:UserId><t:PrimarySmtpAddress>missing@example.test</t:PrimarySmtpAddress></t:UserId></m:UserIds></m:RemoveDelegate></s:Body></s:Envelope>
+    "#).await.unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorItemNotFound</m:ResponseCode>"));
+    assert_eq!(store.ews_delegates.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn delegate_add_rejects_unsupported_exchange_only_permission_shapes() {
     let delegate = AuthenticatedAccount {
         tenant_id: FakeStore::account().tenant_id,
@@ -4138,6 +4451,7 @@ async fn pull_subscription_get_events_and_unsubscribe_return_status_flow() {
               <s:Body>
                 <m:Subscribe>
                   <m:PullSubscriptionRequest>
+                    <t:SubscribeToAllFolders>true</t:SubscribeToAllFolders>
                     <t:EventTypes><t:EventType>NewMailEvent</t:EventType><t:EventType>DeletedEvent</t:EventType></t:EventTypes>
                     <t:Timeout>10</t:Timeout>
                   </m:PullSubscriptionRequest>
@@ -4337,7 +4651,7 @@ async fn pull_subscription_get_events_replays_canonical_changes_after_restart() 
         .unwrap();
     let body = response_text(response).await;
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert!(body.contains("<t:NewMailEvent>"));
+    assert!(body.contains("<t:CreatedEvent>"));
     assert!(body.contains(&format!("<t:ItemId Id=\"message:{message_id}\"")));
     assert!(body.contains(&format!("<t:ParentFolderId Id=\"mailbox:{mailbox_id}\"")));
     assert!(!body.contains("<t:StatusEvent>"));
@@ -4426,16 +4740,26 @@ async fn pull_subscription_expired_watermark_returns_parseable_error() {
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
             mailbox_id, "inbox", "Inbox",
         )])),
+        mapi_notification_cursor: Arc::new(Mutex::new(Some(7))),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
 
-    let subscription_id = "00000000-0000-4000-8000-000000000888";
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:Subscribe><m:PullSubscriptionRequest><t:SubscribeToAllFolders>true</t:SubscribeToAllFolders><t:EventTypes><t:EventType>NewMailEvent</t:EventType></t:EventTypes><t:Timeout>10</t:Timeout></m:PullSubscriptionRequest></m:Subscribe></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let subscription = response_text(response).await;
+    let subscription_id = test_xml_text(&subscription, "SubscriptionId").unwrap();
+    let watermark = test_xml_text(&subscription, "Watermark").unwrap();
     let response = service
         .handle(
             &bearer_headers(),
             format!(
-                r#"<s:Envelope><s:Body><m:GetEvents><m:SubscriptionId>{subscription_id}</m:SubscriptionId><m:Watermark>lpe:{subscription_id}:all:99</m:Watermark></m:GetEvents></s:Body></s:Envelope>"#
+                r#"<s:Envelope><s:Body><m:GetEvents><m:SubscriptionId>{subscription_id}</m:SubscriptionId><m:Watermark>{watermark}</m:Watermark></m:GetEvents></s:Body></s:Envelope>"#
             )
             .as_bytes(),
         )
@@ -4446,6 +4770,105 @@ async fn pull_subscription_expired_watermark_returns_parseable_error() {
     assert!(body.contains("ResponseClass=\"Error\""));
     assert!(body.contains("<m:ResponseCode>ErrorInvalidWatermark</m:ResponseCode>"));
     assert!(body.contains("canonical change-log retention"));
+}
+
+#[tokio::test]
+async fn pull_notification_tokens_scope_changes_and_empty_replay_are_durable() {
+    let mailbox_id = Uuid::parse_str("88888888-8888-8888-8888-888888888801").unwrap();
+    let message_id = Uuid::parse_str("88888888-8888-8888-8888-888888888802").unwrap();
+    let replays = Arc::new(Mutex::new(vec![
+        EwsNotificationReplay {
+            expired: false,
+            current_cursor: Some(8),
+            next_cursor: 8,
+            more_events: false,
+            events: Vec::new(),
+        },
+        EwsNotificationReplay {
+            expired: false,
+            current_cursor: Some(8),
+            next_cursor: 8,
+            more_events: false,
+            events: vec![EwsNotificationLogEvent {
+                cursor: 8,
+                mailbox_id,
+                message_id,
+                change_kind: "created".to_string(),
+                modseq: 8,
+                created_at: "2026-08-16T12:00:00.000000Z".to_string(),
+            }],
+        },
+    ]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &mailbox_id.to_string(),
+            "inbox",
+            "Inbox",
+        )])),
+        mapi_notification_cursor: Arc::new(Mutex::new(Some(7))),
+        ews_notification_replays: replays,
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:Subscribe><m:PullSubscriptionRequest><t:FolderIds><t:FolderId Id="mailbox:{mailbox_id}"/></t:FolderIds><t:EventTypes><t:EventType>CreatedEvent</t:EventType></t:EventTypes><t:Timeout>10</t:Timeout></m:PullSubscriptionRequest></m:Subscribe></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let subscription = response_text(response).await;
+    let subscription_id = test_xml_text(&subscription, "SubscriptionId").unwrap();
+    let watermark = test_xml_text(&subscription, "Watermark").unwrap();
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:GetEvents><m:SubscriptionId>{subscription_id}</m:SubscriptionId><m:Watermark>{watermark}</m:Watermark></m:GetEvents></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:CreatedEvent>"));
+    assert!(!body.contains("<t:NewMailEvent>"));
+    assert!(body.contains("2026-08-16T12:00:00.000000Z"));
+    let next_watermark = test_xml_text(&body, "Watermark").unwrap();
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:GetEvents><m:SubscriptionId>{subscription_id}</m:SubscriptionId><m:Watermark>{next_watermark}</m:Watermark></m:GetEvents></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:StatusEvent>"));
+    assert!(!body.contains("<t:CreatedEvent>"));
+    assert!(body.contains(&next_watermark));
+
+    let tampered = next_watermark.replacen(".8.", ".9.", 1);
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:GetEvents><m:SubscriptionId>{subscription_id}</m:SubscriptionId><m:Watermark>{tampered}</m:Watermark></m:GetEvents></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidWatermark</m:ResponseCode>"));
 }
 
 #[tokio::test]
@@ -4884,6 +5307,10 @@ async fn inbox_rules_project_and_update_canonical_sieve_rules() {
         session: Some(FakeStore::account()),
         mailbox_rules: mailbox_rules.clone(),
         active_sieve_script: active_sieve_script.clone(),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox("aaaaaaaa-bbbb-cccc-dddd-000000000013", "custom", "Invoices"),
+            FakeStore::mailbox("aaaaaaaa-bbbb-cccc-dddd-000000000014", "custom", "Paid"),
+        ])),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -4897,13 +5324,12 @@ async fn inbox_rules_project_and_update_canonical_sieve_rules() {
         .unwrap();
     let body = response_text(response).await;
     assert!(body.contains("<m:GetInboxRulesResponse>"));
-    assert!(body.contains("<t:RuleId>Reports</t:RuleId>"));
-    assert!(body.contains("<t:IsNotSupported>false</t:IsNotSupported>"));
+    assert!(!body.contains("Reports"));
 
     let response = service
         .handle(
             &bearer_headers(),
-            br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:CreateRuleOperation><t:Rule><t:DisplayName>Invoices</t:DisplayName><t:IsEnabled>true</t:IsEnabled><t:Conditions><t:SubjectContainsWords><t:String>invoice</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:MoveToFolder><t:DisplayName>Invoices</t:DisplayName></t:MoveToFolder></t:Actions></t:Rule></t:CreateRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#,
+            br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:CreateRuleOperation><t:Rule><t:DisplayName>Invoices</t:DisplayName><t:IsEnabled>true</t:IsEnabled><t:Conditions><t:SubjectContainsWords><t:String>invoice</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:MoveToFolder><t:FolderId Id="mailbox:aaaaaaaa-bbbb-cccc-dddd-000000000013"/></t:MoveToFolder></t:Actions></t:Rule></t:CreateRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#,
         )
         .await
         .unwrap();
@@ -4913,16 +5339,30 @@ async fn inbox_rules_project_and_update_canonical_sieve_rules() {
     let sieve = active_sieve_script.lock().unwrap().clone().unwrap();
     assert!(sieve.contains(r#"header :contains "Subject" "invoice""#));
     assert!(sieve.contains(r#"fileinto "Invoices";"#));
-    assert!(mailbox_rules
-        .lock()
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetInboxRules /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:DisplayName>Invoices</t:DisplayName>"));
+    assert!(body.contains("mailbox:aaaaaaaa-bbbb-cccc-dddd-000000000013"));
+    let rule_id = body
+        .split("<t:RuleId>")
+        .nth(1)
+        .and_then(|value| value.split("</t:RuleId>").next())
         .unwrap()
-        .iter()
-        .any(|rule| rule.source_kind == "sieve_script" && rule.name == "Invoices"));
+        .to_string();
 
     let response = service
         .handle(
             &bearer_headers(),
-            br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:SetRuleOperation><t:Rule><t:RuleId>Invoices</t:RuleId><t:DisplayName>Invoices</t:DisplayName><t:IsEnabled>true</t:IsEnabled><t:Conditions><t:SubjectContainsWords><t:String>paid invoice</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:MoveToFolder><t:DisplayName>Paid</t:DisplayName></t:MoveToFolder></t:Actions></t:Rule></t:SetRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#,
+            format!(
+                r#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:SetRuleOperation><t:Rule><t:RuleId>{rule_id}</t:RuleId><t:DisplayName>Invoices</t:DisplayName><t:IsEnabled>true</t:IsEnabled><t:Conditions><t:SubjectContainsWords><t:String>paid invoice</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:MoveToFolder><t:FolderId Id="mailbox:aaaaaaaa-bbbb-cccc-dddd-000000000014"/></t:MoveToFolder></t:Actions></t:Rule></t:SetRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
         )
         .await
         .unwrap();
@@ -4936,16 +5376,28 @@ async fn inbox_rules_project_and_update_canonical_sieve_rules() {
     let response = service
         .handle(
             &bearer_headers(),
-            br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:DeleteRuleOperation><t:RuleId>Reports</t:RuleId></t:DeleteRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#,
+            br#"<s:Envelope><s:Body><m:GetInboxRules /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("paid invoice"));
+    assert!(body.contains("mailbox:aaaaaaaa-bbbb-cccc-dddd-000000000014"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:DeleteRuleOperation><t:RuleId>{rule_id}</t:RuleId></t:DeleteRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
         )
         .await
         .unwrap();
     let body = response_text(response).await;
     assert!(body.contains("<m:UpdateInboxRulesResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    let rules = mailbox_rules.lock().unwrap();
-    assert!(!rules.iter().any(|rule| rule.name == "Reports"));
-    assert!(rules.iter().any(|rule| rule.name == "Invoices"));
+    assert!(active_sieve_script.lock().unwrap().is_none());
 }
 
 #[tokio::test]
@@ -4975,7 +5427,7 @@ async fn update_inbox_rules_rejects_exchange_only_rule_shapes_without_side_effec
         br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:CreateRuleOperation><t:Rule><t:DisplayName>Client only</t:DisplayName><t:IsClientOnly>true</t:IsClientOnly><t:Conditions><t:SubjectContainsWords><t:String>invoice</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:MoveToFolder><t:DisplayName>Invoices</t:DisplayName></t:MoveToFolder></t:Actions></t:Rule></t:CreateRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#.as_slice(),
         br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:CreateRuleOperation><t:Rule><t:DisplayName>Blob</t:DisplayName><t:RuleProviderData>AQID</t:RuleProviderData><t:Conditions><t:SubjectContainsWords><t:String>invoice</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:MoveToFolder><t:DisplayName>Invoices</t:DisplayName></t:MoveToFolder></t:Actions></t:Rule></t:CreateRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#.as_slice(),
         br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:CreateRuleOperation><t:Rule><t:DisplayName>Deferred</t:DisplayName><t:DeferredActionMessage>AQID</t:DeferredActionMessage><t:Conditions><t:SubjectContainsWords><t:String>invoice</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:MoveToFolder><t:DisplayName>Invoices</t:DisplayName></t:MoveToFolder></t:Actions></t:Rule></t:CreateRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#.as_slice(),
-        br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:CreateRuleOperation><t:Rule><t:DisplayName>Valid first</t:DisplayName><t:Conditions><t:SubjectContainsWords><t:String>valid</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:MoveToFolder><t:DisplayName>Valid</t:DisplayName></t:MoveToFolder></t:Actions></t:Rule></t:CreateRuleOperation><t:CreateRuleOperation><t:Rule><t:DisplayName>Unsupported second</t:DisplayName><t:IsClientOnly>true</t:IsClientOnly></t:Rule></t:CreateRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#.as_slice(),
+        br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:CreateRuleOperation><t:Rule><t:DisplayName>Valid first</t:DisplayName><t:Conditions><t:SubjectContainsWords><t:String>valid</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:Delete/></t:Actions></t:Rule></t:CreateRuleOperation><t:CreateRuleOperation><t:Rule><t:DisplayName>Unsupported second</t:DisplayName><t:IsClientOnly>true</t:IsClientOnly></t:Rule></t:CreateRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#.as_slice(),
     ] {
         let response = service.handle(&bearer_headers(), request).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -4991,6 +5443,32 @@ async fn update_inbox_rules_rejects_exchange_only_rule_shapes_without_side_effec
             .all(|rule| rule.name == "Existing"));
         assert!(active_sieve_script.lock().unwrap().is_none());
     }
+}
+
+#[tokio::test]
+async fn inbox_rules_are_scoped_to_the_authenticated_mailbox() {
+    let active_sieve_script = Arc::new(Mutex::new(Some(
+        "require [\"fileinto\"];\nif true { fileinto \"Private\"; }\n".to_string(),
+    )));
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        active_sieve_script: active_sieve_script.clone(),
+        ..Default::default()
+    });
+
+    for request in [
+        br#"<s:Envelope><s:Body><m:GetInboxRules><m:MailboxSmtpAddress>other@example.test</m:MailboxSmtpAddress></m:GetInboxRules></s:Body></s:Envelope>"#.as_slice(),
+        br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:MailboxSmtpAddress>other@example.test</m:MailboxSmtpAddress><m:Operations><t:CreateRuleOperation><t:Rule><t:DisplayName>Discard invoices</t:DisplayName><t:Conditions><t:SubjectContainsWords><t:String>invoice</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:Delete/></t:Actions></t:Rule></t:CreateRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#.as_slice(),
+    ] {
+        let response = service.handle(&bearer_headers(), request).await.unwrap();
+        let body = response_text(response).await;
+        assert!(body.contains("ResponseClass=\"Error\""));
+        assert!(body.contains("ErrorInvalidOperation"));
+    }
+    assert_eq!(
+        active_sieve_script.lock().unwrap().as_deref(),
+        Some("require [\"fileinto\"];\nif true { fileinto \"Private\"; }\n")
+    );
 }
 
 #[tokio::test]
@@ -5674,7 +6152,7 @@ async fn pull_and_streaming_notifications_replay_canonical_sql_change_cursor() {
         .handle(
             &bearer_headers(),
             format!(
-                r#"<s:Envelope><s:Body><m:GetStreamingEvents><m:SubscriptionId>{subscription_id}</m:SubscriptionId><m:Watermark>lpe:{subscription_id}:all:8</m:Watermark></m:GetStreamingEvents></s:Body></s:Envelope>"#
+                r#"<s:Envelope><s:Body><m:GetStreamingEvents><m:SubscriptionIds><t:SubscriptionId>{subscription_id}</t:SubscriptionId></m:SubscriptionIds><m:ConnectionTimeout>1</m:ConnectionTimeout></m:GetStreamingEvents></s:Body></s:Envelope>"#
             )
             .as_bytes(),
         )
@@ -5874,6 +6352,34 @@ async fn convert_id_round_trips_hex_entry_id_attachment_payload() {
     let body = response_text(response).await;
     assert!(body.contains("<m:ConvertIdResponse>"));
     assert!(body.contains(&format!("Id=\"{attachment_id}\"")));
+}
+
+#[tokio::test]
+async fn convert_id_rejects_malformed_and_cross_family_sources_without_lookup() {
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    });
+    for source in [
+        "<t:AlternatePublicFolderId Format=\"EwsId\" Id=\"message:99999999-9999-9999-9999-999999999999\"/>",
+        "<t:AlternateId Format=\"EwsId\" Id=\"public-folder:bbbbbbbb-cccc-dddd-eeee-ffffffffffff\"/>",
+        "<t:AlternateId Format=\"Unknown\" Id=\"message:99999999-9999-9999-9999-999999999999\"/>",
+        "<t:AlternateId Format=\"EwsId\"/>",
+    ] {
+        let response = service
+            .handle(
+                &bearer_headers(),
+                format!(
+                    "<s:Envelope><s:Body><m:ConvertId DestinationFormat=\"EwsId\"><m:SourceIds>{source}</m:SourceIds></m:ConvertId></s:Body></s:Envelope>"
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let body = response_text(response).await;
+        assert!(body.contains("<m:ResponseCode>ErrorInvalidId</m:ResponseCode>"));
+        assert!(!body.contains("not found"));
+    }
 }
 
 fn convert_id_response_sources(body: &str) -> Vec<(String, String, String)> {
@@ -9536,6 +10042,7 @@ async fn get_item_mime_content_includes_canonical_attachments() {
                 file_name: "brief.pdf".to_string(),
                 media_type: "application/pdf".to_string(),
                 blob_bytes: b"hello".to_vec(),
+                ..Default::default()
             },
         )]))),
         ..Default::default()
@@ -9571,6 +10078,8 @@ async fn get_attachment_returns_canonical_attachment_content() {
                 file_reference: file_reference.clone(),
                 file_name: "brief.pdf".to_string(),
                 media_type: "application/pdf".to_string(),
+                disposition: Some("inline".to_string()),
+                content_id: Some("brief-cid@example.test".to_string()),
                 blob_bytes: b"hello".to_vec(),
             },
         )]))),
@@ -9593,6 +10102,8 @@ async fn get_attachment_returns_canonical_attachment_content() {
     assert!(body.contains("<t:Name>brief.pdf</t:Name>"));
     assert!(body.contains("<t:ContentType>application/pdf</t:ContentType>"));
     assert!(body.contains("<t:Size>5</t:Size>"));
+    assert!(body.contains("<t:IsInline>true</t:IsInline>"));
+    assert!(body.contains("<t:ContentId>brief-cid@example.test</t:ContentId>"));
     assert!(body.contains("<t:Content>aGVsbG8=</t:Content>"));
 }
 
@@ -9634,13 +10145,15 @@ async fn create_attachment_validates_and_adds_canonical_attachment() {
     let created_attachments = store.created_attachments.clone();
     let attachments = store.attachments.clone();
     let emails = store.emails.clone();
-    let service =
-        ExchangeService::new_with_validator(store, Validator::new(FakeDetector::pdf(), 0.8));
+    let service = ExchangeService::new_with_validator(
+        store.clone(),
+        Validator::new(FakeDetector::pdf(), 0.8),
+    );
 
     let response = service
         .handle(
             &bearer_headers(),
-            br#"<s:Envelope><s:Body><m:CreateAttachment><m:ParentItemId><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/></m:ParentItemId><m:Attachments><t:FileAttachment><t:Name>brief.pdf</t:Name><t:ContentType>application/pdf</t:ContentType><t:Content>aGVsbG8=</t:Content></t:FileAttachment></m:Attachments></m:CreateAttachment></s:Body></s:Envelope>"#,
+            br#"<s:Envelope><s:Body><m:CreateAttachment><m:ParentItemId><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/></m:ParentItemId><m:Attachments><t:FileAttachment><t:Name>brief.pdf</t:Name><t:ContentType>application/pdf</t:ContentType><t:IsInline>true</t:IsInline><t:ContentId>brief-cid@example.test</t:ContentId><t:Content>aGVsbG8=</t:Content></t:FileAttachment></m:Attachments></m:CreateAttachment></s:Body></s:Envelope>"#,
         )
         .await
         .unwrap();
@@ -9654,12 +10167,60 @@ async fn create_attachment_validates_and_adds_canonical_attachment() {
     let attachment = &created_attachments.lock().unwrap()[0];
     assert_eq!(attachment.file_name, "brief.pdf");
     assert_eq!(attachment.media_type, "application/pdf");
+    assert_eq!(attachment.disposition.as_deref(), Some("inline"));
+    assert_eq!(
+        attachment.content_id.as_deref(),
+        Some("brief-cid@example.test")
+    );
     assert_eq!(attachment.blob_bytes, b"hello");
     assert_eq!(
         attachments.lock().unwrap().get(&message_id).unwrap().len(),
         1
     );
     assert!(emails.lock().unwrap()[0].has_attachments);
+
+    let get_response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetAttachment><m:AttachmentIds><t:AttachmentId Id="attachment:99999999-9999-9999-9999-999999999999:cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd"/></m:AttachmentIds></m:GetAttachment></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let get = response_text(get_response).await;
+    assert!(get.contains("<t:Content>aGVsbG8=</t:Content>"));
+    assert!(get.contains("<t:IsInline>true</t:IsInline>"));
+    assert!(get.contains("<t:ContentId>brief-cid@example.test</t:ContentId>"));
+}
+
+#[tokio::test]
+// [MS-OXWSATT] sections 2.2.4.5 and 3.1.4.1: unsupported/malformed shapes
+// are rejected before the bounded canonical attachment mutation.
+async fn create_attachment_rejects_batch_and_malformed_shapes_without_mutation() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "99999999-9999-9999-9999-999999999999",
+            "44444444-4444-4444-4444-444444444444",
+            "custom",
+            "RCA folder item",
+        )])),
+        ..Default::default()
+    };
+    let created_attachments = store.created_attachments.clone();
+    let service =
+        ExchangeService::new_with_validator(store, Validator::new(FakeDetector::pdf(), 0.8));
+
+    for request in [
+        br#"<s:Envelope><s:Body><m:CreateAttachment><m:ParentItemId><t:ItemId Id="message:not-a-uuid"/></m:ParentItemId><m:Attachments><t:FileAttachment><t:Name>brief.pdf</t:Name><t:Content>aGVsbG8=</t:Content></t:FileAttachment></m:Attachments></m:CreateAttachment></s:Body></s:Envelope>"# as &[u8],
+        br#"<s:Envelope><s:Body><m:CreateAttachment><m:ParentItemId><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/></m:ParentItemId><m:Attachments><t:FileAttachment><t:Name>first.pdf</t:Name><t:Content>aGVsbG8=</t:Content></t:FileAttachment><t:FileAttachment><t:Name>second.pdf</t:Name><t:Content>%%%bad-base64%%%</t:Content></t:FileAttachment></m:Attachments></m:CreateAttachment></s:Body></s:Envelope>"#,
+        br#"<s:Envelope><s:Body><m:CreateAttachment><m:ParentItemId><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/></m:ParentItemId><m:Attachments><t:ItemAttachment><t:Name>nested</t:Name></t:ItemAttachment></m:Attachments></m:CreateAttachment></s:Body></s:Envelope>"#,
+    ] {
+        let response = service.handle(&bearer_headers(), request).await.unwrap();
+        let body = response_text(response).await;
+        assert!(body.contains("<m:CreateAttachmentResponse>"));
+        assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    }
+    assert!(created_attachments.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -9791,6 +10352,51 @@ async fn delete_attachment_rejects_unknown_attachment_id() {
     assert!(body.contains("<m:DeleteAttachmentResponse>"));
     assert!(body.contains("ResponseClass=\"Error\""));
     assert!(body.contains("<m:ResponseCode>ErrorAttachmentNotFound</m:ResponseCode>"));
+}
+
+#[tokio::test]
+// [MS-OXWSATT] sections 2.2.4.2 and 3.1.4.2: bounded deletion validates the
+// complete request before the one canonical attachment delete.
+async fn delete_attachment_rejects_multiple_ids_without_mutation() {
+    let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+    let attachment_id = Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap();
+    let file_reference = format!("attachment:{message_id}:{attachment_id}");
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "99999999-9999-9999-9999-999999999999",
+            "44444444-4444-4444-4444-444444444444",
+            "custom",
+            "RCA folder item",
+        )])),
+        attachments: Arc::new(Mutex::new(HashMap::from([(
+            message_id,
+            vec![ActiveSyncAttachment {
+                id: attachment_id,
+                message_id,
+                file_name: "brief.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                disposition: Some("attachment".to_string()),
+                content_id: None,
+                size_octets: 5,
+                file_reference: file_reference.clone(),
+            }],
+        )]))),
+        ..Default::default()
+    };
+    let attachments = store.attachments.clone();
+    let service = ExchangeService::new(store);
+    let request = format!(
+        r#"<s:Envelope><s:Body><m:DeleteAttachment><m:AttachmentIds><t:AttachmentId Id="{file_reference}"/><t:AttachmentId Id="attachment:not-a-uuid"/></m:AttachmentIds></m:DeleteAttachment></s:Body></s:Envelope>"#
+    );
+
+    let response = service
+        .handle(&bearer_headers(), request.as_bytes())
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert_eq!(attachments.lock().unwrap()[&message_id].len(), 1);
 }
 
 #[tokio::test]

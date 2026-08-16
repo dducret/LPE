@@ -523,6 +523,26 @@ macro_rules! store_impl_collaboration {
         Box::pin(async move { self.delete_sieve_script(account_id, name, audit).await })
     }
 
+    fn replace_active_sieve_script<'a>(
+        &'a self,
+        account_id: Uuid,
+        name: &'a str,
+        expected_content: Option<&'a str>,
+        replacement: Option<&'a str>,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.replace_active_sieve_script(
+                account_id,
+                name,
+                expected_content,
+                replacement,
+                audit,
+            )
+            .await
+        })
+    }
+
     fn create_accessible_task<'a>(
         &'a self,
         _principal_account_id: Uuid,

@@ -389,6 +389,39 @@ pub(crate) struct MapiNotificationPoll {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum EwsNotificationFolderScope {
+    All,
+    Mailboxes(Vec<Uuid>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum EwsNotificationEventType {
+    Created,
+    Deleted,
+    Modified,
+    NewMail,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsNotificationLogEvent {
+    pub(crate) cursor: i64,
+    pub(crate) mailbox_id: Uuid,
+    pub(crate) message_id: Uuid,
+    pub(crate) change_kind: String,
+    pub(crate) modseq: u64,
+    pub(crate) created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsNotificationReplay {
+    pub(crate) expired: bool,
+    pub(crate) current_cursor: Option<i64>,
+    pub(crate) next_cursor: i64,
+    pub(crate) more_events: bool,
+    pub(crate) events: Vec<EwsNotificationLogEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EwsUserConfiguration {
     pub(crate) id: Uuid,
     pub(crate) scope_kind: String,

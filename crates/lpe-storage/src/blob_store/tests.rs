@@ -2708,6 +2708,8 @@ async fn attachment_content_fetch_reads_through_blob_store_boundary() {
         .expect("attachment content exists");
     assert_eq!(by_reference.file_name, "note.txt");
     assert_eq!(by_reference.media_type, "text/plain");
+    assert_eq!(by_reference.disposition.as_deref(), Some("inline"));
+    assert_eq!(by_reference.content_id.as_deref(), Some("cid-1"));
     assert_eq!(by_reference.blob_bytes, b"attachment body");
 
     let by_cid = storage
@@ -2798,4 +2800,162 @@ async fn attachment_content_fetch_reads_through_blob_store_boundary() {
         .mime_parts
         .iter()
         .any(|part| part.file_name.as_deref() == Some("note.txt")));
+
+    let original_mime_part_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT mime_part_id FROM attachments WHERE tenant_id = $1 AND id = $2",
+    )
+    .bind(tenant_id)
+    .bind(attachment_id)
+    .fetch_one(storage.pool())
+    .await
+    .expect("load original attachment MIME part");
+    let (_, duplicate) = storage
+        .add_message_attachment(
+            account_id,
+            message_id,
+            AttachmentUploadInput {
+                file_name: "duplicate.txt".to_string(),
+                media_type: "text/plain".to_string(),
+                disposition: Some("attachment".to_string()),
+                content_id: None,
+                blob_bytes: b"attachment body".to_vec(),
+            },
+            crate::AuditEntryInput {
+                actor: "storage-test@example.test".to_string(),
+                action: "attachment-dedupe-test".to_string(),
+                subject: format!("message:{message_id}"),
+            },
+        )
+        .await
+        .expect("add duplicate attachment")
+        .expect("message remains visible");
+    let duplicate_blob_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT blob_id FROM attachments WHERE tenant_id = $1 AND id = $2",
+    )
+    .bind(tenant_id)
+    .bind(duplicate.id)
+    .fetch_one(storage.pool())
+    .await
+    .expect("load duplicate attachment blob");
+    assert_eq!(duplicate_blob_id, attachment_blob_id);
+    let modseq_before_delete = storage
+        .fetch_jmap_emails(account_id, &[message_id])
+        .await
+        .expect("fetch parent before delete")[0]
+        .modseq;
+
+    let deleted = storage
+        .delete_message_attachment(
+            account_id,
+            &file_reference,
+            crate::AuditEntryInput {
+                actor: "storage-test@example.test".to_string(),
+                action: "attachment-delete-test".to_string(),
+                subject: file_reference.clone(),
+            },
+        )
+        .await
+        .expect("delete original attachment")
+        .expect("deleted attachment returns its parent");
+    assert!(deleted.has_attachments);
+    assert!(deleted.modseq > modseq_before_delete);
+    assert!(storage
+        .fetch_activesync_attachment_content(account_id, &file_reference)
+        .await
+        .expect("fetch deleted attachment")
+        .is_none());
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM mime_parts WHERE tenant_id = $1 AND id = $2",
+        )
+        .bind(tenant_id)
+        .bind(original_mime_part_id)
+        .fetch_one(storage.pool())
+        .await
+        .expect("count deleted attachment MIME part"),
+        0
+    );
+    let retained = storage
+        .fetch_activesync_attachment_content(account_id, &duplicate.file_reference)
+        .await
+        .expect("fetch duplicate attachment")
+        .expect("deduplicated blob remains readable");
+    assert_eq!(retained.blob_bytes, b"attachment body");
+
+    let denied_account_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO accounts (id, tenant_id, primary_domain_id, primary_email, display_name)
+        VALUES ($1, $2, $3, 'denied@example.test', 'Denied')
+        "#,
+    )
+    .bind(denied_account_id)
+    .bind(tenant_id)
+    .bind(domain_id)
+    .execute(storage.pool())
+    .await
+    .expect("insert denied same-tenant account");
+    assert!(storage
+        .fetch_activesync_attachment_content(denied_account_id, &duplicate.file_reference)
+        .await
+        .expect("fetch denied same-tenant attachment")
+        .is_none());
+    assert!(storage
+        .delete_message_attachment(
+            denied_account_id,
+            &duplicate.file_reference,
+            crate::AuditEntryInput {
+                actor: "denied@example.test".to_string(),
+                action: "attachment-delete-denied".to_string(),
+                subject: duplicate.file_reference.clone(),
+            },
+        )
+        .await
+        .expect("delete denied same-tenant attachment")
+        .is_none());
+
+    let other_tenant_id = Uuid::new_v4();
+    let other_domain_id = Uuid::new_v4();
+    let other_account_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO tenants (id, slug, display_name) VALUES ($1, $2, 'Other tenant')")
+        .bind(other_tenant_id)
+        .bind(format!("other-{}", other_tenant_id.simple()))
+        .execute(storage.pool())
+        .await
+        .expect("insert other tenant");
+    sqlx::query("INSERT INTO domains (id, tenant_id, name) VALUES ($1, $2, $3)")
+        .bind(other_domain_id)
+        .bind(other_tenant_id)
+        .bind(format!("{}.example.test", other_domain_id.simple()))
+        .execute(storage.pool())
+        .await
+        .expect("insert other tenant domain");
+    sqlx::query(
+        r#"
+        INSERT INTO accounts (id, tenant_id, primary_domain_id, primary_email, display_name)
+        VALUES ($1, $2, $3, 'other@example.test', 'Other')
+        "#,
+    )
+    .bind(other_account_id)
+    .bind(other_tenant_id)
+    .bind(other_domain_id)
+    .execute(storage.pool())
+    .await
+    .expect("insert other tenant account");
+    assert!(storage
+        .fetch_activesync_attachment_content(other_account_id, &duplicate.file_reference)
+        .await
+        .expect("fetch denied cross-tenant attachment")
+        .is_none());
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM mail_change_log WHERE tenant_id = $1 AND object_kind = 'attachment' AND object_id = $2 AND change_kind = 'destroyed'",
+        )
+        .bind(tenant_id)
+        .bind(attachment_id)
+        .fetch_one(storage.pool())
+        .await
+        .expect("count attachment destroy changes"),
+        1
+    );
 }

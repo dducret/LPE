@@ -17,9 +17,12 @@ The implemented protocol projections are bounded:
   Sieve script.
 - JMAP private `Rule/get`, `Rule/query`, `Rule/changes`, and
   `Rule/queryChanges` read canonical rule projections.
-- EWS `GetInboxRules` projects canonical Sieve-backed rules.
-- EWS `UpdateInboxRules` creates, updates, and deletes only rule shapes that
-  can be represented safely as generated canonical Sieve.
+- EWS `GetInboxRules` projects only the exact `lpe-ews-inbox-rules-v1`
+  generated active Sieve script for the authenticated mailbox.
+- EWS `UpdateInboxRules` atomically replaces that generated script only after
+  validating the complete request and its expected canonical script version.
+  The generated script holds ordered stable rule IDs in Sieve comments and
+  executes only subject-contains plus custom-folder `fileinto` or `discard`.
 - MAPI `RopGetRulesTable` projects canonical Sieve-backed rules.
 - MAPI `RopModifyRules` accepts only generated bounded provider data that maps
   to canonical Sieve actions.
@@ -68,6 +71,13 @@ No protocol adapter should independently decide whether an Exchange rule blob is
 safe to execute. If a behavior cannot be represented by the canonical rule
 service, it remains unsupported.
 
+EWS must not replace an active ManageSieve or generated vacation/OOF script.
+Because canonical inbound evaluation executes one active Sieve script, such a
+script blocks EWS rule mutation with a parseable error and remains absent from
+the EWS rule projection. This preserves canonical ownership instead of making
+EWS enablement a second active-script selector. The EWS mapping follows
+`[MS-OXWSRULES]` §§2.2.4.1, 2.2.4.4-.5, 3.1.4.1, and 3.1.4.2.
+
 ## Canonical Model Needed For Wider Support
 
 Before supporting Exchange rule blobs or deferred actions, LPE needs a canonical
@@ -96,6 +106,7 @@ Existing evidence covers the bounded model:
 
 - `inbox_rules_project_and_update_canonical_sieve_rules`
 - `update_inbox_rules_rejects_exchange_only_rule_shapes_without_side_effects`
+- `inbox_rules_are_scoped_to_the_authenticated_mailbox`
 - `mapi_over_http_get_rules_table_projects_canonical_sieve_rules`
 - `mapi_over_http_modify_rules_writes_bounded_canonical_sieve_rule`
 - `mapi_over_http_modify_rules_accepts_bounded_sieve_actions`

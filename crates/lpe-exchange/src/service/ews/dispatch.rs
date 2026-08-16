@@ -72,7 +72,7 @@ where
             "FindConversation" => self.find_conversation(&principal, &body).await?,
             "GetConversationItems" => self.get_conversation_items(&principal, &body).await?,
             "ApplyConversationAction" => self.apply_conversation_action(&principal, &body).await?,
-            "GetServerTimeZones" => get_server_time_zones_response(),
+            "GetServerTimeZones" => get_server_time_zones_response(&body),
             "ResolveNames" => self.resolve_names(&principal, &body).await?,
             "GetUserAvailability" => self.get_user_availability(&principal, &body).await?,
             "CreateItem" => self.create_item(&principal, &body).await?,
@@ -91,19 +91,56 @@ where
             "MoveFolder" => self.move_folder(&principal, &body).await?,
             "UpdateFolder" => self.update_folder(&principal, &body).await?,
             "DeleteFolder" => self.delete_folder(&principal, &body).await?,
-            "GetAttachment" => self.get_attachment(&principal, &body).await?,
-            "CreateAttachment" => self.create_attachment(&principal, &body).await?,
-            "DeleteAttachment" => self.delete_attachment(&principal, &body).await?,
+            "GetAttachment" => {
+                self.get_attachment(&principal, &body)
+                    .await
+                    .unwrap_or_else(|error| {
+                        operation_error_response(
+                            "GetAttachment",
+                            ews_error_code_or(&error, "ErrorInvalidOperation"),
+                            &error.to_string(),
+                        )
+                    })
+            }
+            "CreateAttachment" => self
+                .create_attachment(&principal, &body)
+                .await
+                .unwrap_or_else(|error| {
+                    operation_error_response(
+                        "CreateAttachment",
+                        ews_error_code_or(&error, "ErrorInvalidOperation"),
+                        &error.to_string(),
+                    )
+                }),
+            "DeleteAttachment" => self
+                .delete_attachment(&principal, &body)
+                .await
+                .unwrap_or_else(|error| {
+                    operation_error_response(
+                        "DeleteAttachment",
+                        ews_error_code_or(&error, "ErrorInvalidOperation"),
+                        &error.to_string(),
+                    )
+                }),
             "GetUserOofSettings" => self.get_user_oof_settings(&principal).await?,
             "SetUserOofSettings" => self.set_user_oof_settings(&principal, &body).await?,
-            "GetInboxRules" => self.get_inbox_rules(&principal).await?,
+            "GetInboxRules" => self
+                .get_inbox_rules(&principal, &body)
+                .await
+                .unwrap_or_else(|error| {
+                    operation_error_response(
+                        "GetInboxRules",
+                        "ErrorInvalidOperation",
+                        &error.to_string(),
+                    )
+                }),
             "UpdateInboxRules" => self.update_inbox_rules(&principal, &body).await?,
             "GetReminders" => self.get_reminders(&principal, &body).await?,
             "PerformReminderAction" => self.perform_reminder_action(&principal, &body).await?,
             "Subscribe" => self.subscribe(&principal, &body).await?,
             "GetEvents" => self.get_events(&principal, &body).await?,
             "GetStreamingEvents" => self.get_streaming_events(&principal, &body).await?,
-            "Unsubscribe" => self.unsubscribe(&body).await?,
+            "Unsubscribe" => self.unsubscribe(&principal, &body).await?,
             "GetRooms" => self.get_rooms(&principal, &body).await?,
             "GetRoomLists" => self.get_room_lists(&principal).await?,
             "ConvertId" => self.convert_id(&body).await?,

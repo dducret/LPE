@@ -2532,6 +2532,8 @@ sections = [
   "2.2.4.6 t:ItemAttachmentType Complex Type",
   "2.2.4.8 t:ReferenceAttachmentType Complex Type",
   "3.1.4.1 CreateAttachment Operation",
+  "3.1.4.2 DeleteAttachment Operation",
+  "3.1.4.3 GetAttachment Operation",
 ]
 
 [[protocol]]
@@ -2578,6 +2580,7 @@ sections = [
   "2.2.4.5 t:RuleType Complex Type",
   "2.2.5.1 t:FlaggedForActionType Simple Type",
   "3.1.4.1 GetInboxRules",
+  "3.1.4.2 UpdateInboxRules",
 ]
 
 [[protocol]]
@@ -2803,6 +2806,12 @@ sections = [
   "2.2 Common Message Syntax",
   "2.2.9 Common Data Structures",
   "3.1.4.1 ConvertId",
+  "3.1.4.1.3.3 m:ConvertIdType Complex Type",
+  "3.1.4.1.3.5 t:AlternateIdType Complex Type",
+  "3.1.4.1.3.6 t:AlternatePublicFolderIdType Complex Type",
+  "3.1.4.1.3.7 t:AlternatePublicFolderItemIdType Complex Type",
+  "3.1.4.1.3.8 m:ConvertIdResponseMessageType Complex Type",
+  "3.1.4.1.4.1 t:IdFormatType Simple Type",
 ]
 
 [[protocol]]
@@ -2920,6 +2929,8 @@ used_for = [
 sections = [
   "2.2 Common Message Syntax",
   "3.1.4.1 GetServerTimeZones",
+  "3.1.4.1.2.1 GetServerTimeZones Element",
+  "3.1.4.1.3.3 GetServerTimeZonesType Complex Type",
 ]
 
 [[protocol]]
@@ -3020,10 +3031,11 @@ used_for = [
   "EWS pull and streaming notification boundaries over canonical mail change-log replay",
 ]
 sections = [
-  "2.2 Common Message Syntax",
+  "2.2.4.1-2.2.4.8 Notification response and event types",
+  "2.2.5.1-2.2.5.2 Watermark and subscription identifiers",
   "3.1.4.1 GetEvents",
-  "3.1.4.2 GetStreamingEvents",
-  "3.1.4.3 Subscribe",
+  "3.1.4.2 GetStreamingEvents and 3.1.4.2.3.1 Streaming request type",
+  "3.1.4.3 Subscribe and 3.1.4.3.3.3-3.1.4.3.3.5 subscription types",
   "3.1.4.4 Unsubscribe",
 ]
 
@@ -3149,6 +3161,8 @@ used_for = [
 sections = [
   "2.2 Common Message Syntax",
   "3.1.4.1 ResolveNames Operation",
+  "3.1.4.1.3.5 ResolveNamesType Complex Type",
+  "3.1.4.1.4.1 SearchScope Simple Type",
 ]
 
 [[protocol]]
@@ -3721,6 +3735,11 @@ sections = [
   "2.2 Common Message Syntax",
   "2.2.2 Messages",
   "2.2.4 Complex Types",
+  "3.1.4.1 GetUserAvailability",
+  "3.1.4.1.3.13 FreeBusyViewOptionsType",
+  "3.1.4.1.3.14 GetUserAvailabilityRequestType",
+  "3.1.4.1.3.18 MailboxData",
+  "3.1.4.1.3.19 SerializableTimeZone",
 ]
 
 [[protocol]]

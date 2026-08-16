@@ -220,6 +220,24 @@ pub struct SenderDelegationGrantInput {
     pub sender_right: SenderDelegationRight,
 }
 
+/// The bounded canonical delegate tuple exposed by EWS.  It deliberately has
+/// no Exchange folder-permission or protocol-local fields.
+#[derive(Debug, Clone)]
+pub struct CanonicalEwsDelegateInput {
+    pub owner_account_id: Uuid,
+    pub grantee_email: String,
+    pub inbox_may_read: bool,
+    pub inbox_may_write: bool,
+    pub inbox_may_delete: bool,
+    pub inbox_may_share: bool,
+    pub calendar_may_read: bool,
+    pub calendar_may_write: bool,
+    pub calendar_may_delete: bool,
+    pub calendar_may_share: bool,
+    pub may_send_on_behalf: bool,
+    pub preferences: DelegatePreferences,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MailboxDelegationGrant {

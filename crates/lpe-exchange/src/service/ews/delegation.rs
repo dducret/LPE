@@ -37,7 +37,7 @@ where
                 ))
             }
         };
-        self.mutate_ews_delegates("AddDelegate", &principal.email, users, true)
+        self.mutate_ews_delegates("AddDelegate", principal, users, true)
             .await
     }
 
@@ -73,7 +73,7 @@ where
                 ))
             }
         };
-        self.mutate_ews_delegates("UpdateDelegate", &principal.email, users, true)
+        self.mutate_ews_delegates("UpdateDelegate", principal, users, true)
             .await
     }
 
@@ -89,7 +89,16 @@ where
                 &error.to_string(),
             ));
         }
-        let requested_emails = parse_delegate_user_id_emails(request);
+        let requested_emails = match parse_delegate_user_id_emails(request) {
+            Ok(emails) => emails,
+            Err(error) => {
+                return Ok(operation_error_response(
+                    "GetDelegate",
+                    "ErrorInvalidOperation",
+                    &error.to_string(),
+                ))
+            }
+        };
         let requested = requested_emails
             .iter()
             .map(|email| email.to_ascii_lowercase())
@@ -119,53 +128,54 @@ where
                 &error.to_string(),
             ));
         }
-        let emails = parse_delegate_user_id_emails(request);
-        if emails.is_empty() {
-            return Ok(operation_error_response(
-                "RemoveDelegate",
-                "ErrorInvalidOperation",
-                "RemoveDelegate requires at least one UserId.",
-            ));
-        }
-        let entries = self.store.fetch_address_book_entries(principal).await?;
-        let mut response_messages = String::new();
-        for email in emails {
-            let Some(entry) = entries
+        let emails = match parse_delegate_user_id_emails(request) {
+            Ok(emails) => emails,
+            Err(error) => {
+                return Ok(operation_error_response(
+                    "RemoveDelegate",
+                    "ErrorInvalidOperation",
+                    &error.to_string(),
+                ))
+            }
+        };
+        let delegates = self.store.fetch_ews_delegates(principal.account_id).await?;
+        let mut ids = Vec::with_capacity(emails.len());
+        for email in &emails {
+            let Some(delegate) = delegates
                 .iter()
-                .find(|entry| entry.email.eq_ignore_ascii_case(&email))
+                .find(|delegate| delegate.grantee_email.eq_ignore_ascii_case(email))
             else {
-                response_messages.push_str(&delegate_error_response_message(
-                    "ErrorItemNotFound",
-                    "Delegate account was not found in the tenant.",
-                ));
-                continue;
-            };
-            match self
-                .store
-                .remove_ews_delegate(
-                    principal.account_id,
-                    entry.id,
-                    AuditEntryInput {
-                        actor: principal.email.clone(),
-                        action: "ews-remove-delegate".to_string(),
-                        subject: email.clone(),
-                    },
-                )
-                .await
-            {
-                Ok(true) => response_messages.push_str(
-                    "<m:DelegateUserResponseMessageType ResponseClass=\"Success\"><m:ResponseCode>NoError</m:ResponseCode></m:DelegateUserResponseMessageType>",
-                ),
-                Ok(false) => response_messages.push_str(&delegate_error_response_message(
+                return Ok(operation_error_response(
+                    "RemoveDelegate",
                     "ErrorItemNotFound",
                     "Delegate was not found.",
-                )),
-                Err(error) => response_messages.push_str(&delegate_error_response_message(
-                    ews_error_code_or(&error, "ErrorInvalidOperation"),
-                    &error.to_string(),
-                )),
-            }
+                ));
+            };
+            ids.push(delegate.grantee_account_id);
         }
+        if let Err(error) = self
+            .store
+            .remove_ews_delegate_batch(
+                principal.account_id,
+                &ids,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-remove-delegate".to_string(),
+                    subject: emails.join(","),
+                },
+            )
+            .await
+        {
+            return Ok(operation_error_response(
+                "RemoveDelegate",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            ));
+        }
+        let response_messages = ids
+            .iter()
+            .map(|_| "<m:DelegateUserResponseMessageType ResponseClass=\"Success\"><m:ResponseCode>NoError</m:ResponseCode></m:DelegateUserResponseMessageType>")
+            .collect::<String>();
         Ok(delegate_operation_response(
             "RemoveDelegate",
             &response_messages,
@@ -175,35 +185,40 @@ where
     async fn mutate_ews_delegates(
         &self,
         operation: &str,
-        actor_email: &str,
+        principal: &AccountPrincipal,
         users: Vec<UpsertEwsDelegateInput>,
         include_delegate: bool,
     ) -> Result<String> {
-        let mut response_messages = String::new();
-        for user in users {
-            let subject = user.grantee_email.clone();
-            match self
-                .store
-                .upsert_ews_delegate(
-                    user,
-                    AuditEntryInput {
-                        actor: actor_email.to_string(),
-                        action: format!("ews-{}", operation.to_ascii_lowercase()),
-                        subject,
-                    },
-                )
-                .await
-            {
-                Ok(delegate) => response_messages.push_str(&delegate_success_response_message(
-                    &delegate,
-                    include_delegate,
-                )),
-                Err(error) => response_messages.push_str(&delegate_error_response_message(
+        let subject = users
+            .iter()
+            .map(|user| user.grantee_email.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+        let delegates = match self
+            .store
+            .apply_ews_delegate_batch(
+                &users,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: format!("ews-{}", operation.to_ascii_lowercase()),
+                    subject,
+                },
+            )
+            .await
+        {
+            Ok(delegates) => delegates,
+            Err(error) => {
+                return Ok(operation_error_response(
+                    operation,
                     ews_error_code_or(&error, "ErrorInvalidOperation"),
                     &error.to_string(),
-                )),
+                ))
             }
-        }
+        };
+        let response_messages = delegates
+            .iter()
+            .map(|delegate| delegate_success_response_message(delegate, include_delegate))
+            .collect::<String>();
         Ok(delegate_operation_response(operation, &response_messages))
     }
 }
@@ -249,19 +264,6 @@ pub(in crate::service) fn delegate_success_response_message(
     )
 }
 
-pub(in crate::service) fn delegate_error_response_message(code: &str, message: &str) -> String {
-    format!(
-        concat!(
-            "<m:DelegateUserResponseMessageType ResponseClass=\"Error\">",
-            "<m:MessageText>{message}</m:MessageText>",
-            "<m:ResponseCode>{code}</m:ResponseCode>",
-            "</m:DelegateUserResponseMessageType>"
-        ),
-        code = escape_xml(code),
-        message = escape_xml(message),
-    )
-}
-
 fn ews_delegate_user_xml(delegate: &EwsDelegate) -> String {
     format!(
         concat!(
@@ -303,13 +305,18 @@ pub(in crate::service) fn validate_delegate_mailbox_owner(
     principal: &AccountPrincipal,
     request: &str,
 ) -> Result<()> {
-    let Some(mailbox) = element_content(request, "Mailbox") else {
+    let mailboxes = element_contents(request, "Mailbox");
+    if mailboxes.is_empty() {
         return Ok(());
-    };
+    }
+    if mailboxes.len() != 1 {
+        bail!("delegate operation accepts exactly one Mailbox");
+    }
+    let mailbox = mailboxes[0];
     let Some(email) = element_text(mailbox, "EmailAddress")
         .or_else(|| element_text(mailbox, "PrimarySmtpAddress"))
     else {
-        return Ok(());
+        bail!("Mailbox EmailAddress is required");
     };
     if email.eq_ignore_ascii_case(&principal.email) {
         Ok(())
@@ -344,6 +351,15 @@ pub(in crate::service) fn parse_ews_delegate_users(
     }
     if users.is_empty() {
         bail!("DelegateUsers must contain at least one DelegateUser");
+    }
+    if users.len() > 100 {
+        bail!("DelegateUsers exceeds the supported maximum of 100 delegates");
+    }
+    let mut seen = HashSet::new();
+    for user in &users {
+        if !seen.insert(user.grantee_email.clone()) {
+            bail!("DelegateUsers contains a duplicate delegate");
+        }
     }
     Ok(users)
 }
@@ -429,14 +445,23 @@ fn collaboration_rights(
     }
 }
 
-pub(in crate::service) fn parse_delegate_user_id_emails(request: &str) -> Vec<String> {
-    element_contents(request, "UserId")
-        .into_iter()
-        .filter_map(|user_id| {
-            element_text(user_id, "PrimarySmtpAddress")
-                .or_else(|| element_text(user_id, "EmailAddress"))
-        })
-        .map(|email| normalization::normalize_trimmed_lowercase(&email))
-        .filter(|email| !email.is_empty())
-        .collect()
+pub(in crate::service) fn parse_delegate_user_id_emails(request: &str) -> Result<Vec<String>> {
+    let user_ids = element_contents(request, "UserId");
+    if user_ids.is_empty() || user_ids.len() > 100 {
+        bail!("UserIds must contain between one and 100 UserId values");
+    }
+    let mut emails = Vec::with_capacity(user_ids.len());
+    let mut seen = HashSet::new();
+    for user_id in user_ids {
+        let email = element_text(user_id, "PrimarySmtpAddress")
+            .or_else(|| element_text(user_id, "EmailAddress"))
+            .map(|email| normalization::normalize_trimmed_lowercase(&email))
+            .filter(|email| !email.is_empty())
+            .ok_or_else(|| anyhow!("UserId PrimarySmtpAddress is required"))?;
+        if !seen.insert(email.clone()) {
+            bail!("UserIds contains a duplicate delegate");
+        }
+        emails.push(email);
+    }
+    Ok(emails)
 }

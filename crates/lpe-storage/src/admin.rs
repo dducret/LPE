@@ -17,6 +17,7 @@ use crate::{
 mod dashboard;
 mod helpers;
 mod provisioning;
+mod rules;
 
 use helpers::{
     count_from_row, mailbox_rule_summaries, map_email_trace_row, map_mail_flow_row,

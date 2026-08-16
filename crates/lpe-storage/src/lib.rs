@@ -113,10 +113,10 @@ pub use crate::public_folders::{
 pub use crate::recoverable_items::RecoverableItem;
 pub use crate::search_folders::{SearchFolderDefinition, UpsertSearchFolderInput};
 pub use crate::submission::{
-    AttachmentUploadInput, CancelSubmissionResult, DelegatePreferences, DelegatePreferencesPatch,
-    MailboxAccountAccess, MailboxDelegationGrant, MailboxDelegationGrantInput,
-    MailboxDelegationOverview, MailboxFolderDelegationGrantInput, SavedDraftMessage,
-    SenderAuthorizationKind, SenderDelegationGrant, SenderDelegationGrantInput,
+    AttachmentUploadInput, CancelSubmissionResult, CanonicalEwsDelegateInput, DelegatePreferences,
+    DelegatePreferencesPatch, MailboxAccountAccess, MailboxDelegationGrant,
+    MailboxDelegationGrantInput, MailboxDelegationOverview, MailboxFolderDelegationGrantInput,
+    SavedDraftMessage, SenderAuthorizationKind, SenderDelegationGrant, SenderDelegationGrantInput,
     SenderDelegationRight, SenderIdentity, SubmissionAccountIdentity, SubmitMessageInput,
     SubmittedMessage, SubmittedRecipientInput,
 };

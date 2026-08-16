@@ -46,11 +46,13 @@ pub struct ActiveSyncAttachment {
     pub file_reference: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct ActiveSyncAttachmentContent {
     pub file_reference: String,
     pub file_name: String,
     pub media_type: String,
+    pub disposition: Option<String>,
+    pub content_id: Option<String>,
     pub blob_bytes: Vec<u8>,
 }
 
@@ -587,7 +589,7 @@ impl Storage {
 
         let row = sqlx::query(
             r#"
-            SELECT a.file_name, a.domain_id, a.blob_id
+            SELECT a.file_name, a.disposition, a.content_id, a.domain_id, a.blob_id
             FROM attachments a
             JOIN mailbox_messages mm
               ON mm.tenant_id = a.tenant_id
@@ -628,6 +630,8 @@ impl Storage {
             file_reference: file_reference.trim().to_string(),
             file_name: row.try_get("file_name").unwrap_or_default(),
             media_type: blob.media_type,
+            disposition: row.try_get("disposition")?,
+            content_id: row.try_get("content_id")?,
             blob_bytes: blob.bytes,
         }))
     }
@@ -645,7 +649,7 @@ impl Storage {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let row = sqlx::query(
             r#"
-            SELECT a.id, a.file_name, a.domain_id, a.blob_id
+            SELECT a.id, a.file_name, a.disposition, a.content_id, a.domain_id, a.blob_id
             FROM attachments a
             WHERE a.tenant_id = $1
               AND a.account_id = $2
@@ -690,6 +694,8 @@ impl Storage {
             file_reference: format!("attachment:{message_id}:{attachment_id}"),
             file_name: row.try_get("file_name").unwrap_or_default(),
             media_type: blob.media_type,
+            disposition: row.try_get("disposition")?,
+            content_id: row.try_get("content_id")?,
             blob_bytes: blob.bytes,
         }))
     }

@@ -2163,6 +2163,7 @@ async fn mapi_over_http_microsoft_stream_region_rops_succeed_on_stream_handles()
                 file_name: "stream.pdf".to_string(),
                 media_type: "application/pdf".to_string(),
                 blob_bytes: b"hello-world".to_vec(),
+                ..Default::default()
             },
         )]))),
         ..Default::default()
@@ -3010,6 +3011,7 @@ async fn mapi_over_http_copy_to_stream_saves_canonical_attachment() {
                 file_name: "source.pdf".to_string(),
                 media_type: "application/pdf".to_string(),
                 blob_bytes: source_bytes.to_vec(),
+                ..Default::default()
             },
         )]))),
         created_attachments: created_attachments.clone(),

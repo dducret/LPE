@@ -306,7 +306,3 @@ pub(in crate::service) fn parse_xml_bool(value: &str) -> Result<bool> {
         other => bail!("unsupported boolean value {other}"),
     }
 }
-
-pub(in crate::service) fn parse_xml_bool_attr(value: &str) -> bool {
-    matches!(value.trim().to_ascii_lowercase().as_str(), "true" | "1")
-}

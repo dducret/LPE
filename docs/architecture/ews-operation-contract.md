@@ -88,9 +88,9 @@ Current automated gate coverage:
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `CreateAttachment` | Partial | `blobs`, `blob_placements`, `mime_parts`, `attachments`, `calendar_event_attachments`, Magika validation fields | Canonical attachment create API with Magika validation | File attachments on one canonical message parent; `ItemAttachment` unsupported | P0 |
-| `GetAttachment` | Partial | Attachment/blob/MIME/calendar attachment rows | Canonical attachment read/export API | Supports LPE attachment references; bounded file content projection | P0 |
-| `DeleteAttachment` | Partial | Attachment rows and change log | Canonical attachment delete API | Supports LPE attachment references; no full Exchange item attachment model | P0 |
+| `CreateAttachment` | Partial | `blobs`, `blob_placements`, `mime_parts`, `attachments`, `calendar_event_attachments`, Magika validation fields | Canonical attachment create API with Magika validation | One validated `FileAttachment` on one canonical message parent per request; `ItemAttachment`, reference attachments, and attachment batches are unsupported | P0 |
+| `GetAttachment` | Partial | Attachment/blob/MIME/calendar attachment rows | Canonical attachment read/export API | One canonical message or calendar attachment reference per request; bounded file content and metadata projection | P0 |
+| `DeleteAttachment` | Partial | Attachment rows and change log | Canonical attachment delete API | One canonical message or calendar attachment reference per request; no full Exchange item attachment model | P0 |
 
 ## Reminder Operations
 
@@ -115,14 +115,14 @@ Current automated gate coverage:
 | `ExpandDL` | Partial | Existing canonical group aliases/members and visible directory entries | Canonical directory/group expansion API | Expands visible same-tenant public DL membership only; no recursive expansion or private Exchange DL item expansion | P2 |
 | `GetUserPhoto` | Partial parseable gap | New account/contact photo blob metadata if photo support is later introduced | Directory/profile photo API | Validates same-tenant directory visibility, then returns parseable no-photo because no canonical photo blob state exists | P3 |
 | `MarkAsJunk` | Partial | Existing canonical mailbox/message state; no protocol-local junk list state | Canonical message move to Junk; future spam feedback must cross LPE-CT boundary explicitly | Supports `IsJunk=true` plus `MoveItem=true`; Exchange blocked/safe sender list and unblock-only behavior return parseable gaps | P2 |
-| `ResolveNames` | Partial | Accounts, tenant directory rows, contact books/contacts and grants | Canonical address-book/contact lookup API | No full GAL templates, ambiguous name behavior, or distribution-list expansion parity | P0 |
+| `ResolveNames` | Partial | Accounts, tenant directory rows, contact books/contacts and grants | Canonical address-book/contact lookup API | Resolves one visible canonical match; invalid, unsupported-scope, and ambiguous lookups are parseable and expose no candidates. No full GAL templates or distribution-list expansion parity | P0 |
 | `GetPasswordExpirationDate` | Partial parseable gap | Credential expiry policy/state if supported later | Account credential policy API | Authenticated account query returns parseable gap because no canonical password-expiration field exists; other-account query is denied | P3 |
 
 ## Availability Operations
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `GetUserAvailability` | Partial | `calendars`, `calendar_events`, calendar grants | Canonical free/busy API | Authenticated mailbox free/busy only; no full organization availability service | P0 |
+| `GetUserAvailability` | Partial | `calendars`, `calendar_events`, calendar grants | Canonical free/busy API | Returns only busy intervals for one same-tenant mailbox with a readable canonical calendar; simple daily/weekly recurrence is expanded within a 42-day request window. No event detail or full organization availability service | P0 |
 | `GetRoomLists` | Partial | Room/equipment accounts by `directory_kind`; explicit room-list grouping SQL is still absent | Directory room-list API over computed tenant room/resource projection | Returns a computed tenant room/resource list, not arbitrary Exchange room-list membership | P1 |
 | `GetRooms` | Partial | Room/equipment accounts plus tenant scoping and GAL visibility | Directory rooms API | Lists visible room/equipment accounts; explicit room-list membership filtering is rejected unless it matches the computed LPE list | P1 |
 | `GetUserOofSettings` | Partial | `sieve_scripts`, `sieve_vacation_responses` | Canonical Sieve vacation projection API | OOF is projected from vacation Sieve, not Exchange OOF state | P1 |
@@ -148,8 +148,8 @@ Current automated gate coverage:
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `GetInboxRules` | Partial | `sieve_scripts` and bounded rule projection state | Canonical Sieve-backed mailbox rule read API | Projects bounded server-side rules only; Exchange rule blobs and client-only rules are not exposed as canonical rules | P0 |
-| `UpdateInboxRules` | Partial | Same as `GetInboxRules` plus rule mutation/change rows | Canonical generated-Sieve mutation API | Creates, updates, and deletes only rule shapes that map safely to canonical Sieve behavior | P0 |
+| `GetInboxRules` | Partial | `sieve_scripts` and bounded generated-rule comments | Canonical Sieve-backed mailbox rule read API | Projects only the exact authenticated-mailbox `lpe-ews-inbox-rules-v1` generated script; arbitrary Sieve, OOF, Exchange rule blobs, and client-only rules are not exposed as canonical rules | P0 |
+| `UpdateInboxRules` | Partial | Same as `GetInboxRules` plus rule mutation/change rows | Canonical generated-Sieve mutation API | Atomically creates, updates, and deletes ordered subject-contains plus custom-folder move or discard rules in one generated active Sieve script; rejects an active non-generated Sieve/OOF script rather than replacing it | P0 |
 
 ## Mail App Management Operations
 
@@ -223,7 +223,7 @@ Current automated gate coverage:
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `GetServerTimeZones` | Partial | None for current static response; full parity might need versioned time-zone catalog data | Time-zone catalog projection | Minimal static compatibility set, not full Exchange time-zone corpus | P0 |
+| `GetServerTimeZones` | Partial | None | Explicit EWS time-zone catalog projection | `lpe-ews-time-zones-v1` exposes compact `UTC` and `Europe/Berlin` definitions only when `ReturnFullTimeZoneData=false`; optional unique known IDs filter that catalog. Full transition definitions and the Exchange corpus remain unsupported | P0 |
 
 ## Unified Messaging Operations
 
