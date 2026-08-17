@@ -4,6 +4,12 @@
 
 `lpe-exchange` exposes bounded EWS compatibility and guarded MAPI over HTTP endpoints over canonical `LPE` mailbox, contacts, calendar, task, address-book, and submission state. Full Outlook functionality is the target, but current Exchange compatibility remains incomplete and release-gated; the adapter must not introduce Exchange-specific mailbox storage or protocol-local canonical state.
 
+The EWS dispatcher has a concrete bounded handler for each of the 96 operation
+names in the current Microsoft EWS catalog snapshot. This is catalog coverage,
+not a claim of Exchange parity: every handler remains constrained to documented
+canonical `LPE` state and returns a parseable EWS result when an Exchange-only
+shape is outside that scope.
+
 EWS GetItem obtains protected Bcc metadata only through the canonical
 owner-bound mailbox projection and emits BccRecipients only for that owner's
 Sent item. Draft, delegate, shared, search, sync, MIME, and AI projections
@@ -49,6 +55,14 @@ The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI ove
     ChangeKey, authorization, update shape, and delete mode validate. Multi-item
     calendar/contact mutation batches are rejected before mutation until the
     canonical store provides an atomic batch transaction.
+  - preflights supported `CopyItem` and `MoveItem` batches completely, then
+    commits at most 100 canonical mail or public-folder-post changes in one
+    canonical transaction; unsupported, mixed, or inaccessible shapes do not
+    leave partial EWS mutations
+  - keeps bounded EWS hierarchy and item synchronization resumable with
+    account- and scope-bound durable cursor snapshots. The snapshots contain
+    derived protocol state only; mailbox replay remains sourced from canonical
+    change-log and tombstone state
   - maps calendar `MoveToDeletedItems` to the canonical deleted-items lifecycle,
     permits contact deletion only as canonical hard deletion, and rejects other
     unsupported contact/calendar EWS delete modes before mutation
@@ -82,14 +96,15 @@ The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI ove
 
 | EWS operation group | Current support |
 | --- | --- |
-| Folder discovery | `FindFolder`, `GetFolder`, `SyncFolderHierarchy` |
-| Mail item discovery | `FindItem`, `GetItem`, `SyncFolderItems` |
-| Mail mutation | selected `CreateItem`, selected `DeleteItem` |
-| Folder mutation | `CreateFolder`, `DeleteFolder` |
+| Folder discovery and sync | `FindFolder`, `GetFolder`, and `SyncFolderHierarchy`; supported hierarchy cursors are durable, opaque, account- and scope-bound derived snapshots rather than an Exchange hierarchy store. |
+| Mail item discovery and sync | `FindItem`, `GetItem`, and `SyncFolderItems`; the first bounded mailbox page reads canonical current state, while continuations and resumes replay retained canonical mailbox changes. |
+| Mail mutation | bounded `CreateItem`, `CopyItem`, `DeleteItem`, `MarkAllItemsAsRead`, `MoveItem`, `SendItem`, and `UpdateItem`. Copy/move support is limited to 100 preflighted canonical mail or public-folder-post items per atomic batch; item-family mutations without a canonical batch transaction remain single-item. |
+| Folder mutation | bounded `CreateFolder`, `CreateFolderPath`, `CopyFolder`, `DeleteFolder`, `EmptyFolder`, `MoveFolder`, and `UpdateFolder` over canonical custom mailbox folders and permitted public folders. `EmptyFolder` atomically handles at most 10,000 items in a supported scope. |
 | Contacts | canonical contact read/write operations |
 | Calendar | canonical event read/write operations |
 | Tasks | canonical task read/write operations where exposed |
 | Submission | canonical send flow with authoritative `Sent` |
+| Conversations, reminders, availability, and OOF | bounded `ApplyConversationAction`, `FindConversation`, `GetConversationItems`, `GetReminders`, `PerformReminderAction`, `GetUserAvailability`, room discovery, and canonical-Sieve OOF projection/mutation. Conversation identity remains the lightweight canonical message thread identifier; persistent `Always*` actions and full Exchange availability semantics remain unsupported. |
 | Notifications | bounded pull-subscription compatibility through `Subscribe`, `GetEvents`, `GetStreamingEvents`, and `Unsubscribe`; deterministic account-, folder-, event-filter-, and cursor-bound tokens replay only retained canonical `mail_change_log` mailbox-message rows in stable cursor order. `GetStreamingEvents` is a one-shot streaming-shaped replay of one pull token, not a long-held connection. There is no compatibility journal, synthesized current-state event, Exchange-only subscription table, or notification store. Push notifications and full Exchange streaming affinity semantics remain unsupported pending Outlook interoperability evidence. |
 | Public folders | canonical public-folder trees, folders, post-like items, permissions, replicas, per-user read state, replay, and tombstones are stored in core LPE tables; EWS can project public-folder roots/folders through `FindFolder`, `GetFolder`, and `SyncFolderHierarchy`, create/delete child public folders through canonical storage, list/read public-folder post items through `FindItem`, `GetItem`, and `SyncFolderItems`, and create/update/delete/copy/move public-folder post items through canonical storage using `public-folder:{uuid}` and `public-folder-item:{uuid}` identifiers; MAPI public-folder `RopLogon` now creates a distinct public-folder store handle, guarded same-request root hierarchy probes do not leak private mailbox folders, store-backed hierarchy probes can list canonical public-folder roots and child folders, normal public-folder contents tables can project canonical post-like items, `RopOpenFolder` plus `RopGetPropertiesSpecific` can read bounded canonical public-folder folder properties, `RopOpenMessage` plus `RopGetPropertiesSpecific` can read bounded canonical public-folder post properties, content sync export can emit canonical public-folder post facts plus read/unread state, `RopSetReadFlags` / `RopSetMessageReadFlag` update only canonical per-user read state, `RopGetPermissionsTable` projects canonical public-folder grants plus reserved compatibility rows, `RopModifyPermissions` adds, modifies, and removes same-tenant account grants through the canonical public-folder permission API, `RopGetOwningServers` returns active canonical public-folder replica server names, `RopPublicFolderIsGhosted` derives ghost state from the same active replica set, `RopReadPerUserInformation` / `RopWritePerUserInformation` round-trip a bounded single-chunk LPE-owned stream into canonical per-user read-state patches, `RopGetPerUserLongTermIds` / `RopGetPerUserGuid` provide bounded canonical public-folder identity lookup from private mailbox or public-folder logon handles, `RopCreateMessage` / `RopSaveChangesMessage` can create bounded recipient-free `IPM.Post`-like public-folder items through canonical storage, existing public-folder items can update bounded canonical properties through `RopSetProperties`, body stream writes plus `RopSaveChangesMessage`, or `RopSynchronizationImportMessageChange`, new public-folder posts can be staged by `RopSynchronizationImportMessageChange` and persisted by `RopSaveChangesMessage`, `RopDeleteMessages` and `RopHardDeleteMessages` delete bounded public-folder post items through canonical storage without MAPI-local dumpster state, `RopMoveCopyMessages` copies or moves bounded public-folder post items between canonical public folders, `RopGetRulesTable` returns an empty table for public-folder handles, and message-status ROPs accept canonical public-folder item IDs with session-local status bits while cross-server public-folder replication, recipient-bearing conversion, and arbitrary Exchange-compatible per-user-information blobs remain gated |
 
