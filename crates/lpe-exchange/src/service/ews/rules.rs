@@ -23,7 +23,7 @@ where
             .fetch_active_sieve_script(principal.account_id)
             .await?
         {
-            Some(script) => parse_ews_inbox_rule_script(&script.content)?.unwrap_or_default(),
+            Some(script) => parse_active_ews_inbox_rule_script(&script)?.unwrap_or_default(),
             None => Vec::new(),
         };
         Ok(get_inbox_rules_response(&rules))
@@ -43,7 +43,7 @@ where
                 .await?;
             let (expected_content, mut rules) = match active_script {
                 Some(script) => {
-                    let rules = parse_ews_inbox_rule_script(&script.content)?.ok_or_else(|| {
+                    let rules = parse_active_ews_inbox_rule_script(&script)?.ok_or_else(|| {
                         anyhow!(
                             "the active canonical Sieve script is not the bounded EWS inbox-rule projection"
                         )
@@ -389,6 +389,15 @@ fn resolve_rule_input(
         subject: input.subject.clone(),
         action,
     })
+}
+
+fn parse_active_ews_inbox_rule_script(
+    script: &lpe_storage::SieveScriptDocument,
+) -> Result<Option<Vec<EwsInboxRule>>> {
+    if script.name != EWS_INBOX_RULES_SCRIPT_NAME {
+        return Ok(None);
+    }
+    parse_ews_inbox_rule_script(&script.content)
 }
 
 fn parse_ews_inbox_rule_script(content: &str) -> Result<Option<Vec<EwsInboxRule>>> {

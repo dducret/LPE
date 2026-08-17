@@ -4232,6 +4232,7 @@ struct FakeStore {
     notes: Arc<Mutex<Vec<ClientNote>>>,
     journal_entries: Arc<Mutex<Vec<JournalEntry>>>,
     active_sieve_script: Arc<Mutex<Option<String>>>,
+    active_sieve_script_name: Arc<Mutex<Option<String>>>,
     mailbox_rules: Arc<Mutex<Vec<MailboxRule>>>,
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
     imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
@@ -10863,13 +10864,16 @@ impl ExchangeStore for FakeStore {
         _account_id: Uuid,
     ) -> StoreFuture<'a, Option<SieveScriptDocument>> {
         let content = self.active_sieve_script.lock().unwrap().clone();
+        let name = self.active_sieve_script_name.lock().unwrap().clone();
         Box::pin(async move {
             Ok(content.map(|content| SieveScriptDocument {
-                name: if content.contains("# LPE-EWS-OOF-State:") {
+                name: name.unwrap_or_else(|| if content.contains("# LPE-EWS-OOF-State:") {
                     "ews-oof".to_string()
+                } else if content.starts_with("# lpe-ews-inbox-rules-v1") {
+                    "lpe-ews-inbox-rules-v1".to_string()
                 } else {
                     "jmap-vacation".to_string()
-                },
+                }),
                 content,
                 is_active: true,
                 updated_at: "2026-05-05T08:00:00Z".to_string(),
@@ -10947,12 +10951,13 @@ impl ExchangeStore for FakeStore {
     fn replace_active_sieve_script<'a>(
         &'a self,
         account_id: Uuid,
-        _name: &'a str,
+        name: &'a str,
         expected_content: Option<&'a str>,
         replacement: Option<&'a str>,
         _audit: lpe_storage::AuditEntryInput,
     ) -> StoreFuture<'a, ()> {
         let active_sieve_script = self.active_sieve_script.clone();
+        let active_sieve_script_name = self.active_sieve_script_name.clone();
         Box::pin(async move {
             if account_id != Self::account().account_id {
                 bail!("account not found");
@@ -10962,6 +10967,7 @@ impl ExchangeStore for FakeStore {
                 bail!("active sieve script changed concurrently or is not the expected generated script");
             }
             *active = replacement.map(str::to_string);
+            *active_sieve_script_name.lock().unwrap() = replacement.map(|_| name.to_string());
             Ok(())
         })
     }

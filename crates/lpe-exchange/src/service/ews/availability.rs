@@ -214,27 +214,20 @@ fn requested_server_time_zone_ids(
     let Some(id_set) = id_sets.into_iter().next() else {
         return Ok(None);
     };
-    let mut ids = element_contents(id_set, "Id")
+    let ids = element_contents(id_set, "Id")
         .into_iter()
         .map(xml_text)
-        .map(|id| id.trim().to_string())
         .collect::<Vec<_>>();
-    if ids.is_empty() || ids.iter().any(String::is_empty) {
-        return Err("Ids must contain one or more non-empty supported identifiers.".to_string());
+    if ids.len() != 1 || ids[0].is_empty() {
+        return Err("Ids must contain exactly one non-empty supported identifier.".to_string());
     }
-    ids.sort_by_key(|id| id.to_ascii_lowercase());
-    if ids
-        .windows(2)
-        .any(|ids| ids[0].eq_ignore_ascii_case(&ids[1]))
-        || ids.iter().any(|id| canonical_ews_time_zone(id).is_none())
+    if !EWS_TIME_ZONE_CATALOG
+        .iter()
+        .any(|(known_id, _)| ids[0] == *known_id)
     {
-        return Err("Ids contains an unsupported or duplicate time-zone identifier.".to_string());
+        return Err("Ids contains an unsupported time-zone identifier.".to_string());
     }
-    Ok(Some(
-        ids.into_iter()
-            .filter_map(|id| canonical_ews_time_zone(&id).map(str::to_string))
-            .collect(),
-    ))
+    Ok(Some(ids))
 }
 
 fn parse_availability_request(request: &str) -> std::result::Result<(String, i64, i64), String> {

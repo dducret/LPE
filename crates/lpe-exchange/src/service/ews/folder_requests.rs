@@ -36,6 +36,113 @@ pub(in crate::service) enum FindFolderParent {
     Collection(FolderKind),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::service) enum GetFolderTarget {
+    Root,
+    Mailbox(Uuid),
+    MailboxRole(&'static str),
+    PublicFolder(Uuid),
+    Collection(FolderKind, String),
+}
+
+/// [MS-OXWSFOLD] sections 2.2.4.4 and 3.1.4.6: GetFolder consumes one
+/// FolderIds sequence. Preserve every supported target in wire order so an
+/// unsupported target cannot be dropped into an unscoped projection.
+pub(in crate::service) fn parse_get_folder_targets(request: &str) -> Result<Vec<GetFolderTarget>> {
+    let wrappers = element_contents(request, "FolderIds");
+    if wrappers.len() != 1 {
+        bail!("GetFolder requires exactly one FolderIds collection");
+    }
+    let wrapper = wrappers[0];
+    if attribute_values_for_tag(request, "FolderId", "Id").len()
+        != attribute_values_for_tag(wrapper, "FolderId", "Id").len()
+        || attribute_values_for_tag(request, "DistinguishedFolderId", "Id").len()
+            != attribute_values_for_tag(wrapper, "DistinguishedFolderId", "Id").len()
+    {
+        bail!("GetFolder FolderIds must contain every folder target");
+    }
+
+    let mut targets = Vec::new();
+    let mut rest = wrapper.trim();
+    while !rest.is_empty() {
+        if !rest.starts_with('<') {
+            bail!("GetFolder FolderIds contains unsupported content");
+        }
+        let tag_end = rest
+            .find('>')
+            .ok_or_else(|| anyhow!("GetFolder FolderIds is malformed"))?;
+        let tag = &rest[1..tag_end];
+        if tag.starts_with('/') || !tag.trim_end().ends_with('/') {
+            bail!("GetFolder FolderIds contains unsupported content");
+        }
+        let name = tag
+            .split(|value: char| value.is_whitespace() || value == '/')
+            .next()
+            .and_then(|name| name.rsplit(':').next())
+            .ok_or_else(|| anyhow!("GetFolder FolderIds is malformed"))?;
+        let id = attribute_value(tag, "Id")
+            .filter(|id| !id.trim().is_empty())
+            .ok_or_else(|| anyhow!("GetFolder folder id is invalid"))?;
+        targets.push(match name {
+            "FolderId" => parse_get_folder_id(id)?,
+            "DistinguishedFolderId" => parse_get_distinguished_folder_id(id)?,
+            _ => bail!("GetFolder folder id is not supported"),
+        });
+        rest = rest[tag_end + 1..].trim();
+    }
+
+    if targets.is_empty() {
+        bail!("GetFolder requires at least one supported FolderId");
+    }
+    Ok(targets)
+}
+
+fn parse_get_folder_id(id: &str) -> Result<GetFolderTarget> {
+    if let Some(id) = id.strip_prefix("mailbox:") {
+        return Ok(GetFolderTarget::Mailbox(parse_folder_uuid(id, "mailbox")?));
+    }
+    if let Some(id) = id.strip_prefix("public-folder:") {
+        return Ok(GetFolderTarget::PublicFolder(parse_folder_uuid(
+            id,
+            "public folder",
+        )?));
+    }
+    if let Ok(id) = Uuid::parse_str(id) {
+        return Ok(GetFolderTarget::Mailbox(id));
+    }
+    parse_get_distinguished_folder_id(id)
+}
+
+fn parse_get_distinguished_folder_id(id: &str) -> Result<GetFolderTarget> {
+    match id {
+        "msgfolderroot" | "root" => Ok(GetFolderTarget::Root),
+        "contacts" => Ok(GetFolderTarget::Collection(
+            FolderKind::Contacts,
+            DEFAULT_COLLECTION_ID.to_string(),
+        )),
+        "calendar" => Ok(GetFolderTarget::Collection(
+            FolderKind::Calendar,
+            DEFAULT_COLLECTION_ID.to_string(),
+        )),
+        "tasks" => Ok(GetFolderTarget::Collection(
+            FolderKind::Tasks,
+            DEFAULT_COLLECTION_ID.to_string(),
+        )),
+        id if id.starts_with("shared-contacts-") => {
+            Ok(GetFolderTarget::Collection(FolderKind::Contacts, id.to_string()))
+        }
+        id if id.starts_with("shared-calendar-") => {
+            Ok(GetFolderTarget::Collection(FolderKind::Calendar, id.to_string()))
+        }
+        id if id.starts_with("shared-tasks-") => {
+            Ok(GetFolderTarget::Collection(FolderKind::Tasks, id.to_string()))
+        }
+        id => ews_distinguished_mailbox_role(id)
+            .map(GetFolderTarget::MailboxRole)
+            .ok_or_else(|| anyhow!("GetFolder distinguished folder is not supported")),
+    }
+}
+
 /// [MS-OXWSFOLD] sections 2.2.4.2, 2.2.4.16, and 3.1.4.2 require an
 /// existing parent and a supported folder shape. LPE deliberately accepts one
 /// canonical `IPF.Note` folder per request so validation completes before its
@@ -380,54 +487,4 @@ fn sync_state_folder_kind(sync_state: &str) -> Option<FolderKind> {
     } else {
         None
     }
-}
-
-pub(in crate::service) fn requested_folder_kinds(request: &str) -> Vec<FolderKind> {
-    let mut kinds = Vec::new();
-    if request.contains("DistinguishedFolderId Id=\"msgfolderroot\"")
-        || request.contains("DistinguishedFolderId Id='msgfolderroot'")
-        || request.contains("DistinguishedFolderId Id=\"root\"")
-        || request.contains("DistinguishedFolderId Id='root'")
-        || request.contains("FolderId Id=\"msgfolderroot\"")
-        || request.contains("FolderId Id='msgfolderroot'")
-        || request.contains("FolderId Id=\"root\"")
-        || request.contains("FolderId Id='root'")
-    {
-        kinds.push(FolderKind::Root);
-    }
-    if request.contains("DistinguishedFolderId Id=\"contacts\"")
-        || request.contains("DistinguishedFolderId Id='contacts'")
-        || request.contains("FolderId Id=\"contacts\"")
-        || request.contains("FolderId Id='contacts'")
-        || request.contains("shared-contacts-")
-    {
-        kinds.push(FolderKind::Contacts);
-    }
-    if request.contains("DistinguishedFolderId Id=\"calendar\"")
-        || request.contains("DistinguishedFolderId Id='calendar'")
-        || request.contains("FolderId Id=\"calendar\"")
-        || request.contains("FolderId Id='calendar'")
-        || request.contains("shared-calendar-")
-    {
-        kinds.push(FolderKind::Calendar);
-    }
-    if request.contains("DistinguishedFolderId Id=\"tasks\"")
-        || request.contains("DistinguishedFolderId Id='tasks'")
-        || request.contains("FolderId Id=\"tasks\"")
-        || request.contains("FolderId Id='tasks'")
-        || request.contains("shared-tasks-")
-    {
-        kinds.push(FolderKind::Tasks);
-    }
-    if request.contains("public-folder:") {
-        kinds.push(FolderKind::PublicFolders);
-    }
-    if request.contains("mailbox:") || !requested_mailbox_folder_ids(request).is_empty() {
-        kinds.push(FolderKind::Mailbox);
-    }
-    if requested_mailbox_role(request).is_some() {
-        kinds.push(FolderKind::Mailbox);
-    }
-    kinds.dedup();
-    kinds
 }

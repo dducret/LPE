@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::super::*;
-use super::folder_requests::{requested_find_folder_parent, FindFolderParent};
+use super::folder_requests::{
+    parse_get_folder_targets, requested_find_folder_parent, FindFolderParent, GetFolderTarget,
+};
 use super::sync_state::{ews_sync_cursor_token, parse_ews_sync_cursor_token, requested_sync_state};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -483,177 +485,107 @@ where
         principal: &AccountPrincipal,
         request: &str,
     ) -> Result<String> {
-        if let Err(error) = validate_get_folder_canonical_ids(request) {
-            return Ok(get_folder_error_response(
-                "ErrorFolderNotFound",
-                &error.to_string(),
-            ));
-        }
-        let mailbox_ids = self
-            .requested_mailbox_folder_ids(principal, request)
-            .await?;
-        let public_folder_ids = requested_public_folder_ids(request);
-        if !mailbox_ids.is_empty() && !public_folder_ids.is_empty() {
-            return Ok(get_folder_error_response(
-                "ErrorFolderNotFound",
-                "folder ids must use one supported folder family",
-            ));
-        }
-        if !mailbox_ids.is_empty() {
-            let mailboxes = self
-                .store
-                .fetch_jmap_mailboxes(principal.account_id)
-                .await?;
-            let mut folders = String::new();
-            for mailbox_id in &mailbox_ids {
-                let Some(mailbox) = mailboxes.iter().find(|mailbox| mailbox.id == *mailbox_id)
-                else {
+        let targets = match parse_get_folder_targets(request) {
+            Ok(targets) => targets,
+            Err(error) => {
+                return Ok(get_folder_error_response(
+                    "ErrorFolderNotFound",
+                    &error.to_string(),
+                ))
+            }
+        };
+        let mut folders = String::new();
+        for target in targets {
+            match self.get_folder_target_xml(principal, target).await {
+                Ok(folder) => folders.push_str(&folder),
+                Err(error) => {
                     return Ok(get_folder_error_response(
                         "ErrorFolderNotFound",
-                        "requested mailbox folder is not exposed by EWS",
-                    ));
-                };
-                folders.push_str(&mailbox_folder_xml(mailbox));
-            }
-
-            return Ok(get_folder_success_response(folders));
-        }
-
-        if !public_folder_ids.is_empty() {
-            let mut folders = String::new();
-            for folder_id in public_folder_ids {
-                let folder = self
-                    .store
-                    .fetch_public_folder(principal.account_id, folder_id)
-                    .await?;
-                folders.push_str(&self.public_folder_projection(principal, &folder).await?);
-            }
-            return Ok(get_folder_success_response(folders));
-        }
-
-        let requested = requested_folder_kinds(request);
-        if requested.is_empty() && request_contains_folder_reference(request) {
-            return Ok(get_folder_error_response(
-                "ErrorFolderNotFound",
-                "folder not found",
-            ));
-        }
-
-        let mut folders = String::new();
-        let requested_collection = requested_collection_id(request);
-        for kind in requested {
-            match kind {
-                FolderKind::Root => {
-                    folders.push_str(&root_folder_xml(
-                        self.root_child_folder_count(principal).await?,
-                    ));
-                }
-                FolderKind::Contacts => {
-                    let collections = self
-                        .store
-                        .fetch_accessible_contact_collections(principal.account_id)
-                        .await?
-                        .into_iter()
-                        .filter(|collection| {
-                            requested_collection.map_or(true, |id| collection.id == id)
-                        })
-                        .collect::<Vec<_>>();
-                    if requested_collection.is_some() && collections.is_empty() {
-                        return Ok(get_folder_error_response(
-                            "ErrorFolderNotFound",
-                            "requested contact collection is not exposed by EWS",
-                        ));
-                    }
-                    for collection in collections {
-                        folders.push_str(
-                            &self
-                                .collection_folder_xml(&collection, CONTACTS_FOLDER_ID, "Contacts")
-                                .await?,
-                        );
-                    }
-                }
-                FolderKind::Calendar => {
-                    let collections = self
-                        .store
-                        .fetch_accessible_calendar_collections(principal.account_id)
-                        .await?
-                        .into_iter()
-                        .filter(|collection| {
-                            requested_collection.map_or(true, |id| collection.id == id)
-                        })
-                        .collect::<Vec<_>>();
-                    if requested_collection.is_some() && collections.is_empty() {
-                        return Ok(get_folder_error_response(
-                            "ErrorFolderNotFound",
-                            "requested calendar collection is not exposed by EWS",
-                        ));
-                    }
-                    for collection in collections {
-                        folders.push_str(
-                            &self
-                                .collection_folder_xml(&collection, CALENDAR_FOLDER_ID, "Calendar")
-                                .await?,
-                        );
-                    }
-                }
-                FolderKind::Tasks => {
-                    let collections = self
-                        .store
-                        .fetch_accessible_task_collections(principal.account_id)
-                        .await?
-                        .into_iter()
-                        .filter(|collection| {
-                            requested_collection.map_or(true, |id| collection.id == id)
-                        })
-                        .collect::<Vec<_>>();
-                    if requested_collection.is_some() && collections.is_empty() {
-                        return Ok(get_folder_error_response(
-                            "ErrorFolderNotFound",
-                            "requested task collection is not exposed by EWS",
-                        ));
-                    }
-                    for collection in collections {
-                        folders.push_str(
-                            &self
-                                .collection_folder_xml(&collection, TASKS_FOLDER_ID, "Task")
-                                .await?,
-                        );
-                    }
-                }
-                FolderKind::Mailbox => {
-                    let mailbox_ids = self
-                        .requested_mailbox_folder_ids(principal, request)
-                        .await?;
-                    let mailboxes = self
-                        .store
-                        .fetch_jmap_mailboxes(principal.account_id)
-                        .await?;
-                    for mailbox in mailboxes.into_iter().filter(|mailbox| {
-                        mailbox_ids.is_empty() || mailbox_ids.contains(&mailbox.id)
-                    }) {
-                        folders.push_str(&mailbox_folder_xml(&mailbox));
-                    }
-                }
-                FolderKind::PublicFolders => {
-                    for folder_id in requested_public_folder_ids(request) {
-                        let folder = self
-                            .store
-                            .fetch_public_folder(principal.account_id, folder_id)
-                            .await?;
-                        folders.push_str(&self.public_folder_projection(principal, &folder).await?);
-                    }
+                        &error.to_string(),
+                    ))
                 }
             }
         }
-
-        if folders.is_empty() {
-            return Ok(get_folder_error_response(
-                "ErrorFolderNotFound",
-                "folder not found",
-            ));
-        }
-
         Ok(get_folder_success_response(folders))
+    }
+
+    async fn get_folder_target_xml(
+        &self,
+        principal: &AccountPrincipal,
+        target: GetFolderTarget,
+    ) -> Result<String> {
+        match target {
+            GetFolderTarget::Root => Ok(root_folder_xml(self.root_child_folder_count(principal).await?)),
+            GetFolderTarget::Mailbox(id) => {
+                let mailbox = self
+                    .store
+                    .fetch_jmap_mailboxes(principal.account_id)
+                    .await?
+                    .into_iter()
+                    .find(|mailbox| mailbox.id == id)
+                    .ok_or_else(|| anyhow!("requested mailbox folder is not exposed by EWS"))?;
+                Ok(mailbox_folder_xml(&mailbox))
+            }
+            GetFolderTarget::MailboxRole(role) => {
+                let mailbox = self
+                    .store
+                    .fetch_jmap_mailboxes(principal.account_id)
+                    .await?
+                    .into_iter()
+                    .find(|mailbox| mailbox.role == role)
+                    .ok_or_else(|| anyhow!("requested mailbox folder is not exposed by EWS"))?;
+                Ok(mailbox_folder_xml(&mailbox))
+            }
+            GetFolderTarget::PublicFolder(id) => {
+                let folder = self.store.fetch_public_folder(principal.account_id, id).await?;
+                self.public_folder_projection(principal, &folder).await
+            }
+            GetFolderTarget::Collection(kind, id) => match kind {
+                FolderKind::Contacts => self.get_collection_folder_xml(
+                    principal,
+                    &id,
+                    FolderKind::Contacts,
+                    CONTACTS_FOLDER_ID,
+                    "Contacts",
+                ).await,
+                FolderKind::Calendar => self.get_collection_folder_xml(
+                    principal,
+                    &id,
+                    FolderKind::Calendar,
+                    CALENDAR_FOLDER_ID,
+                    "Calendar",
+                ).await,
+                FolderKind::Tasks => self.get_collection_folder_xml(
+                    principal,
+                    &id,
+                    FolderKind::Tasks,
+                    TASKS_FOLDER_ID,
+                    "Task",
+                ).await,
+                _ => bail!("GetFolder collection is not supported"),
+            },
+        }
+    }
+
+    async fn get_collection_folder_xml(
+        &self,
+        principal: &AccountPrincipal,
+        id: &str,
+        kind: FolderKind,
+        distinguished_id: &str,
+        class: &str,
+    ) -> Result<String> {
+        let collections = match kind {
+            FolderKind::Contacts => self.store.fetch_accessible_contact_collections(principal.account_id).await?,
+            FolderKind::Calendar => self.store.fetch_accessible_calendar_collections(principal.account_id).await?,
+            FolderKind::Tasks => self.store.fetch_accessible_task_collections(principal.account_id).await?,
+            _ => unreachable!("GetFolder collection kind was validated"),
+        };
+        let collection = collections
+            .into_iter()
+            .find(|collection| collection.id == id)
+            .ok_or_else(|| anyhow!("requested {class} collection is not exposed by EWS"))?;
+        self.collection_folder_xml(&collection, distinguished_id, class).await
     }
 
     pub(in crate::service) async fn root_child_folder_count(
@@ -816,21 +748,6 @@ fn validate_hierarchy_sync_change(change: &str) -> Result<()> {
         .any(|(start, end)| change.starts_with(start) && change.ends_with(end))
     {
         bail!("SyncState change page is invalid");
-    }
-    Ok(())
-}
-
-// [MS-OXWSFOLD] sections 2.2.4.4 and 3.1.4.6: a malformed explicit
-// canonical folder ID must be rejected, never collapsed into an unscoped
-// GetFolder projection.
-fn validate_get_folder_canonical_ids(request: &str) -> Result<()> {
-    for id in requested_folder_ids(request) {
-        if let Some(id) = id.strip_prefix("mailbox:") {
-            Uuid::parse_str(id).map_err(|_| anyhow!("GetFolder mailbox folder id is invalid"))?;
-        }
-        if let Some(id) = id.strip_prefix("public-folder:") {
-            Uuid::parse_str(id).map_err(|_| anyhow!("GetFolder public folder id is invalid"))?;
-        }
     }
     Ok(())
 }
@@ -1130,7 +1047,7 @@ fn collection_folder_change_key(collection: &CollaborationCollection, revision: 
 
 #[cfg(test)]
 mod tests {
-    use super::{requested_hierarchy_max_changes, validate_get_folder_canonical_ids};
+    use super::requested_hierarchy_max_changes;
     use crate::service::ews::sync_state::{ews_sync_cursor_token, parse_ews_sync_cursor_token};
     use uuid::Uuid;
 
@@ -1163,14 +1080,4 @@ mod tests {
         .is_err());
     }
 
-    #[test]
-    fn get_folder_rejects_malformed_canonical_ids() {
-        assert!(
-            validate_get_folder_canonical_ids(r#"<t:FolderId Id="mailbox:not-a-uuid"/>"#).is_err()
-        );
-        assert!(validate_get_folder_canonical_ids(
-            r#"<t:FolderId Id="public-folder:not-a-uuid"/>"#
-        )
-        .is_err());
-    }
 }

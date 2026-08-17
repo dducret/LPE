@@ -2,7 +2,7 @@ use super::super::*;
 
 enum AttachmentReference {
     Message(String),
-    Calendar(String),
+    Calendar { file_reference: String, event_id: Uuid },
 }
 
 struct ParsedFileAttachment {
@@ -22,9 +22,28 @@ where
     ) -> Result<String> {
         let id = parse_attachment_reference(request, "GetAttachment")?;
         let file_reference = attachment_reference_value(&id);
+        let content_account_id = match &id {
+            AttachmentReference::Message(_) => principal.account_id,
+            AttachmentReference::Calendar { event_id, .. } => {
+                let Some(event) = self
+                    .store
+                    .fetch_accessible_events_by_ids(principal.account_id, &[*event_id])
+                    .await?
+                    .into_iter()
+                    .find(|event| event.id == *event_id && event.rights.may_read)
+                else {
+                    return Ok(operation_error_response(
+                        "GetAttachment",
+                        "ErrorAttachmentNotFound",
+                        "The requested attachment was not found or is not exposed by EWS.",
+                    ));
+                };
+                event.owner_account_id
+            }
+        };
         let Some(content) = self
             .store
-            .fetch_attachment_content(principal.account_id, file_reference)
+            .fetch_attachment_content(content_account_id, file_reference)
             .await?
         else {
             return Ok(operation_error_response(
@@ -148,11 +167,27 @@ where
                 };
                 root_item_id_xml(&email)
             }
-            AttachmentReference::Calendar(file_reference) => {
+            AttachmentReference::Calendar {
+                file_reference,
+                event_id,
+            } => {
+                let Some(event) = self
+                    .store
+                    .fetch_accessible_events_by_ids(principal.account_id, &[event_id])
+                    .await?
+                    .into_iter()
+                    .find(|event| event.id == event_id && event.rights.may_delete)
+                else {
+                    return Ok(operation_error_response(
+                        "DeleteAttachment",
+                        "ErrorAttachmentNotFound",
+                        "The requested attachment was not found or is not exposed by EWS.",
+                    ));
+                };
                 let Some(event_id) = self
                     .store
                     .delete_calendar_event_attachment(
-                        principal.account_id,
+                        event.owner_account_id,
                         &file_reference,
                         AuditEntryInput {
                             actor: principal.email.clone(),
@@ -280,16 +315,18 @@ fn parse_canonical_attachment_reference(
         Some("attachment") => Ok(AttachmentReference::Message(format!(
             "attachment:{parent_id}:{attachment_id}"
         ))),
-        Some("calendar-attachment") => Ok(AttachmentReference::Calendar(format!(
-            "calendar-attachment:{parent_id}:{attachment_id}"
-        ))),
+        Some("calendar-attachment") => Ok(AttachmentReference::Calendar {
+            file_reference: format!("calendar-attachment:{parent_id}:{attachment_id}"),
+            event_id: parent_id,
+        }),
         _ => bail!("{operation} attachment id is not supported"),
     }
 }
 
 fn attachment_reference_value(reference: &AttachmentReference) -> &str {
     match reference {
-        AttachmentReference::Message(value) | AttachmentReference::Calendar(value) => value,
+        AttachmentReference::Message(value) => value,
+        AttachmentReference::Calendar { file_reference, .. } => file_reference,
     }
 }
 

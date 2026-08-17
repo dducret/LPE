@@ -886,6 +886,56 @@ async fn get_folder_returns_multiple_supported_folder_kinds() {
 }
 
 #[tokio::test]
+async fn get_folder_preserves_exact_supported_targets_in_request_order() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "44444444-4444-4444-4444-444444444444",
+            "custom",
+            "RCA Sync",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetFolder><m:FolderIds><t:FolderId Id="mailbox:44444444-4444-4444-4444-444444444444"/><t:DistinguishedFolderId Id="msgfolderroot"/><t:DistinguishedFolderId Id="calendar"/></m:FolderIds></m:GetFolder></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    let mailbox = body.find("<t:DisplayName>RCA Sync</t:DisplayName>").unwrap();
+    let root = body.find("<t:DisplayName>Root</t:DisplayName>").unwrap();
+    let calendar = body.find("<t:CalendarFolder>").unwrap();
+    assert!(mailbox < root && root < calendar);
+}
+
+#[tokio::test]
+async fn get_folder_rejects_missing_duplicate_or_misplaced_folder_ids_wrapper() {
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    });
+
+    for request in [
+        br#"<s:Envelope><s:Body><m:GetFolder><t:DistinguishedFolderId Id="msgfolderroot"/></m:GetFolder></s:Body></s:Envelope>"# as &[u8],
+        br#"<s:Envelope><s:Body><m:GetFolder><m:FolderIds><t:DistinguishedFolderId Id="msgfolderroot"/></m:FolderIds><m:FolderIds><t:DistinguishedFolderId Id="calendar"/></m:FolderIds></m:GetFolder></s:Body></s:Envelope>"#,
+        br#"<s:Envelope><s:Body><m:GetFolder><m:FolderIds><t:DistinguishedFolderId Id="msgfolderroot"/></m:FolderIds><t:DistinguishedFolderId Id="calendar"/></m:GetFolder></s:Body></s:Envelope>"#,
+    ] {
+        let response = service.handle(&bearer_headers(), request).await.unwrap();
+        let body = response_text(response).await;
+        assert!(body.contains("<m:GetFolderResponseMessage ResponseClass=\"Error\">"));
+        assert!(body.contains("<m:ResponseCode>ErrorFolderNotFound</m:ResponseCode>"));
+    }
+}
+
+#[tokio::test]
 async fn get_folder_returns_only_the_requested_collaboration_collection() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -1767,28 +1817,19 @@ async fn get_server_time_zones_projects_only_requested_compact_catalog_entries()
 }
 
 #[tokio::test]
-async fn get_server_time_zones_normalizes_known_ids_and_rejects_invalid_requests() {
+async fn get_server_time_zones_requires_one_exact_case_catalog_id_when_filtered() {
     let service = ExchangeService::new(FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
     });
 
-    let response = service
-        .handle(
-            &bearer_headers(),
-            br#"<s:Envelope><s:Body><m:GetServerTimeZones ReturnFullTimeZoneData="false"><t:Ids><t:Id>utc</t:Id></t:Ids></m:GetServerTimeZones></s:Body></s:Envelope>"#,
-        )
-        .await
-        .unwrap();
-    let body = response_text(response).await;
-    assert!(body.contains("<t:TimeZoneDefinition Id=\"UTC\""));
-    assert!(!body.contains("Europe/Berlin"));
-
     for request in [
         br#"<s:Envelope><s:Body><m:GetServerTimeZones /></s:Body></s:Envelope>"#.as_slice(),
         br#"<s:Envelope><s:Body><m:GetServerTimeZones ReturnFullTimeZoneData="true" /></s:Body></s:Envelope>"#.as_slice(),
         br#"<s:Envelope><s:Body><m:GetServerTimeZones ReturnFullTimeZoneData="false"><t:Ids /></m:GetServerTimeZones></s:Body></s:Envelope>"#.as_slice(),
+        br#"<s:Envelope><s:Body><m:GetServerTimeZones ReturnFullTimeZoneData="false"><t:Ids><t:Id>utc</t:Id></t:Ids></m:GetServerTimeZones></s:Body></s:Envelope>"#.as_slice(),
         br#"<s:Envelope><s:Body><m:GetServerTimeZones ReturnFullTimeZoneData="false"><t:Ids><t:Id>UTC</t:Id><t:Id>utc</t:Id></t:Ids></m:GetServerTimeZones></s:Body></s:Envelope>"#.as_slice(),
+        br#"<s:Envelope><s:Body><m:GetServerTimeZones ReturnFullTimeZoneData="false"><t:Ids><t:Id>UTC</t:Id><t:Id>Europe/Berlin</t:Id></t:Ids></m:GetServerTimeZones></s:Body></s:Envelope>"#.as_slice(),
         br#"<s:Envelope><s:Body><m:GetServerTimeZones ReturnFullTimeZoneData="false"><t:Ids><t:Id>UTC</t:Id></t:Ids><t:Ids><t:Id>Europe/Berlin</t:Id></t:Ids></m:GetServerTimeZones></s:Body></s:Envelope>"#.as_slice(),
     ] {
         let response = service.handle(&bearer_headers(), request).await.unwrap();
@@ -1927,6 +1968,31 @@ async fn resolve_names_returns_no_results_for_non_directory_names() {
     assert!(body.contains("<m:ResolveNamesResponseMessage ResponseClass=\"Error\">"));
     assert!(body.contains("<m:ResponseCode>ErrorNameResolutionNoResults</m:ResponseCode>"));
     assert!(!body.contains("bob@example.test"));
+}
+
+#[tokio::test]
+async fn resolve_names_does_not_project_distribution_lists() {
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        group_aliases: Arc::new(Mutex::new(vec![(
+            Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap(),
+            "All Hands".to_string(),
+            "all@example.test".to_string(),
+        )])),
+        ..Default::default()
+    });
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:ResolveNames><m:UnresolvedEntry>all@example.test</m:UnresolvedEntry></m:ResolveNames></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorNameResolutionNoResults</m:ResponseCode>"));
+    assert!(!body.contains("all@example.test"));
 }
 
 #[tokio::test]
@@ -5990,7 +6056,7 @@ async fn update_item_rejects_multi_item_and_unsupported_message_fields_without_m
 }
 
 #[tokio::test]
-async fn update_item_rejects_an_unavailable_target_before_updating_another_item() {
+async fn update_item_rejects_multiple_targets_before_updating_another_item() {
     let message_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000015").unwrap();
     let mailbox_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000016").unwrap();
     let emails = Arc::new(Mutex::new(vec![FakeStore::email(
@@ -6029,12 +6095,12 @@ async fn update_item_rejects_an_unavailable_target_before_updating_another_item(
         .unwrap();
 
     let body = response_text(response).await;
-    assert!(body.contains("<m:ResponseCode>ErrorItemNotFound</m:ResponseCode>"));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
     assert!(!emails.lock().unwrap()[0].unread);
 }
 
 #[tokio::test]
-async fn delete_item_rejects_an_unavailable_target_before_deleting_another_item() {
+async fn delete_item_rejects_multiple_targets_before_deleting_another_item() {
     let message_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000018").unwrap();
     let mailbox_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000019").unwrap();
     let deleted_emails = Arc::new(Mutex::new(Vec::new()));
@@ -6068,7 +6134,7 @@ async fn delete_item_rejects_an_unavailable_target_before_deleting_another_item(
         .unwrap();
 
     let body = response_text(response).await;
-    assert!(body.contains("<m:ResponseCode>ErrorItemNotFound</m:ResponseCode>"));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
     assert!(deleted_emails.lock().unwrap().is_empty());
 }
 
@@ -6278,6 +6344,46 @@ async fn update_inbox_rules_refuses_unmanaged_or_oof_sieve_without_mutation() {
         assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
         assert_eq!(active_sieve_script.lock().unwrap().as_deref(), Some(script));
     }
+}
+
+#[tokio::test]
+async fn inbox_rules_require_the_exact_active_generated_script_name() {
+    let script = concat!(
+        "# lpe-ews-inbox-rules-v1\n",
+        "require [\"discard\"];\n",
+        "# lpe-ews-rule-v1 aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee 1 RGlzY2FyZCBpbnZvaWNlcw aW52b2ljZQ\n",
+        "# lpe-ews-action-delete\n",
+        "if header :contains \"Subject\" \"invoice\" {\n  discard;\n  stop;\n}\n"
+    );
+    let active_sieve_script = Arc::new(Mutex::new(Some(script.to_string())));
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        active_sieve_script: active_sieve_script.clone(),
+        active_sieve_script_name: Arc::new(Mutex::new(Some("other-script".to_string()))),
+        ..Default::default()
+    });
+
+    let read = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetInboxRules /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let read_body = response_text(read).await;
+    assert!(read_body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(!read_body.contains("Discard invoices"));
+
+    let update = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:CreateRuleOperation><t:Rule><t:DisplayName>Discard receipts</t:DisplayName><t:Conditions><t:SubjectContainsWords><t:String>receipt</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:Delete/></t:Actions></t:Rule></t:CreateRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let update_body = response_text(update).await;
+    assert!(update_body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert_eq!(active_sieve_script.lock().unwrap().as_deref(), Some(script));
 }
 
 #[tokio::test]
@@ -11225,6 +11331,149 @@ async fn get_attachment_returns_canonical_attachment_content() {
     assert!(body.contains("<t:IsInline>true</t:IsInline>"));
     assert!(body.contains("<t:ContentId>brief-cid@example.test</t:ContentId>"));
     assert!(body.contains("<t:Content>aGVsbG8=</t:Content>"));
+}
+
+#[tokio::test]
+async fn calendar_attachment_get_and_delete_use_the_accessible_canonical_event() {
+    let event_id = Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap();
+    let attachment_id = Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap();
+    let file_reference = format!("calendar-attachment:{event_id}:{attachment_id}");
+    let event = AccessibleEvent {
+        id: event_id,
+        uid: event_id.to_string(),
+        collection_id: "default".to_string(),
+        owner_account_id: FakeStore::account().account_id,
+        owner_email: "alice@example.test".to_string(),
+        owner_display_name: "Alice".to_string(),
+        rights: FakeStore::rights(),
+        date: "2026-05-04".to_string(),
+        time: "09:30".to_string(),
+        time_zone: "UTC".to_string(),
+        duration_minutes: 45,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
+        title: "Planning".to_string(),
+        location: String::new(),
+        organizer_json: "{}".to_string(),
+        attendees: String::new(),
+        attendees_json: "[]".to_string(),
+        notes: String::new(),
+        body_html: String::new(),
+    };
+    let attachments = Arc::new(Mutex::new(HashMap::from([(
+        event_id,
+        vec![CalendarEventAttachment {
+            id: attachment_id,
+            event_id,
+            file_name: "agenda.pdf".to_string(),
+            media_type: "application/pdf".to_string(),
+            size_octets: 5,
+            file_reference: file_reference.clone(),
+        }],
+    )])));
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        events: Arc::new(Mutex::new(vec![event])),
+        calendar_attachments: attachments.clone(),
+        attachment_contents: Arc::new(Mutex::new(HashMap::from([(
+            file_reference.clone(),
+            ActiveSyncAttachmentContent {
+                file_reference: file_reference.clone(),
+                file_name: "agenda.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                blob_bytes: b"hello".to_vec(),
+                ..Default::default()
+            },
+        )]))),
+        ..Default::default()
+    });
+
+    let get = format!(
+        r#"<s:Envelope><s:Body><m:GetAttachment><m:AttachmentIds><t:AttachmentId Id="{file_reference}"/></m:AttachmentIds></m:GetAttachment></s:Body></s:Envelope>"#
+    );
+    let response = service.handle(&bearer_headers(), get.as_bytes()).await.unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:Name>agenda.pdf</t:Name>"));
+
+    let delete = format!(
+        r#"<s:Envelope><s:Body><m:DeleteAttachment><m:AttachmentIds><t:AttachmentId Id="{file_reference}"/></m:AttachmentIds></m:DeleteAttachment></s:Body></s:Envelope>"#
+    );
+    let response = service
+        .handle(&bearer_headers(), delete.as_bytes())
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains(&format!("RootItemId=\"event:{event_id}\"")));
+    assert!(attachments.lock().unwrap()[&event_id].is_empty());
+}
+
+#[tokio::test]
+async fn calendar_attachment_requires_effective_read_and_delete_rights() {
+    let event_id = Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap();
+    let attachment_id = Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap();
+    let file_reference = format!("calendar-attachment:{event_id}:{attachment_id}");
+    let mut rights = FakeStore::rights();
+    rights.may_read = false;
+    rights.may_delete = false;
+    let event = AccessibleEvent {
+        id: event_id,
+        uid: event_id.to_string(),
+        collection_id: "default".to_string(),
+        owner_account_id: FakeStore::account().account_id,
+        owner_email: "alice@example.test".to_string(),
+        owner_display_name: "Alice".to_string(),
+        rights,
+        date: "2026-05-04".to_string(),
+        time: "09:30".to_string(),
+        time_zone: "UTC".to_string(),
+        duration_minutes: 45,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
+        title: "Private".to_string(),
+        location: String::new(),
+        organizer_json: "{}".to_string(),
+        attendees: String::new(),
+        attendees_json: "[]".to_string(),
+        notes: String::new(),
+        body_html: String::new(),
+    };
+    let attachments = Arc::new(Mutex::new(HashMap::from([(
+        event_id,
+        vec![CalendarEventAttachment {
+            id: attachment_id,
+            event_id,
+            file_name: "private.pdf".to_string(),
+            media_type: "application/pdf".to_string(),
+            size_octets: 5,
+            file_reference: file_reference.clone(),
+        }],
+    )])));
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        events: Arc::new(Mutex::new(vec![event])),
+        calendar_attachments: attachments.clone(),
+        ..Default::default()
+    });
+
+    for request in [
+        format!(r#"<s:Envelope><s:Body><m:GetAttachment><m:AttachmentIds><t:AttachmentId Id="{file_reference}"/></m:AttachmentIds></m:GetAttachment></s:Body></s:Envelope>"#),
+        format!(r#"<s:Envelope><s:Body><m:DeleteAttachment><m:AttachmentIds><t:AttachmentId Id="{file_reference}"/></m:AttachmentIds></m:DeleteAttachment></s:Body></s:Envelope>"#),
+    ] {
+        let response = service.handle(&bearer_headers(), request.as_bytes()).await.unwrap();
+        let body = response_text(response).await;
+        assert!(body.contains("<m:ResponseCode>ErrorAttachmentNotFound</m:ResponseCode>"));
+    }
+    assert_eq!(attachments.lock().unwrap()[&event_id].len(), 1);
 }
 
 #[tokio::test]

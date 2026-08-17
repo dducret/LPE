@@ -59,19 +59,19 @@ preamble.
   MIME/blob, and canonical submission when sending. Route collaboration items
   through their canonical APIs. Accept sharing invitations only for same-tenant
   contact/calendar grants.
-- DeleteItem: preflight targets and modes. Calendar MoveToDeletedItems uses
+- DeleteItem: accept exactly one canonical target and preflight its mode.
+  Calendar MoveToDeletedItems uses
   the canonical deleted-event lifecycle and HardDelete is permanent; contacts
   allow HardDelete only. Keep canonical mail/task/public-folder delete paths.
 - FindItem/GetItem: require valid accessible canonical folders/items before
   query or projection. Return bounded canonical properties, body/MIME, and
   attachment references only; never fall back to an unscoped result.
-- SendItem: send only accessible canonical drafts through the canonical
+- SendItem: send exactly one accessible canonical draft through the canonical
   submission flow and authoritative Sent membership. A bad later ID must not
   submit an earlier draft.
 - UpdateItem: mail is limited to canonical IsRead and FlagStatus. Contact and
-  calendar writes require a current EWS ChangeKey, and multi-item
-  contact/calendar updates remain rejected until canonical atomic batching
-  exists.
+  calendar writes require a current EWS ChangeKey. Accept exactly one item
+  mutation until canonical atomic batching exists.
 
 Use canonical messages, mailbox_messages, recipients, protected Bcc, blobs,
 MIME, contacts, calendars/events, tasks, public_folder_items, submission,

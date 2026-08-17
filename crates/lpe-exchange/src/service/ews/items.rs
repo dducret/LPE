@@ -19,7 +19,11 @@ where
                 .await?;
             let item_changes = requested_update_item_changes(request)?;
             if item_changes.len() != 1 {
-                bail!("UpdateItem supports exactly one ItemChange until canonical atomic batching exists");
+                return Ok(operation_error_response(
+                    "UpdateItem",
+                    "ErrorInvalidOperation",
+                    "UpdateItem supports exactly one ItemChange until canonical atomic batching exists.",
+                ));
             }
             let item_references = item_changes
                 .iter()
@@ -962,9 +966,22 @@ where
         request: &str,
     ) -> Result<String> {
         let result = async {
-            let item_references = requested_operation_item_references(request, "DeleteItem")?;
+            let item_references = match requested_operation_item_references(request, "DeleteItem") {
+                Ok(item_references) => item_references,
+                Err(error) => {
+                    return Ok(operation_error_response(
+                        "DeleteItem",
+                        "ErrorInvalidOperation",
+                        &error.to_string(),
+                    ));
+                }
+            };
             if item_references.len() != 1 {
-                bail!("DeleteItem supports exactly one ItemId until canonical atomic batching exists");
+                return Ok(operation_error_response(
+                    "DeleteItem",
+                    "ErrorInvalidOperation",
+                    "DeleteItem supports exactly one ItemId until canonical atomic batching exists.",
+                ));
             }
             self.validate_mutating_item_change_keys(principal, request)
                 .await?;

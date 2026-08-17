@@ -231,10 +231,6 @@ pub(in crate::service) fn requested_folder_ids(request: &str) -> Vec<String> {
         .collect()
 }
 
-pub(in crate::service) fn request_contains_folder_reference(request: &str) -> bool {
-    request.contains("FolderId") || request.contains("DistinguishedFolderId")
-}
-
 pub(in crate::service) fn requested_collection_id(request: &str) -> Option<&str> {
     requested_collection_id_in(request, "")
 }
