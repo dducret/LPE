@@ -217,7 +217,7 @@ Current automated gate coverage:
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
 | `SyncFolderHierarchy` | Partial | `mailboxes`, collaboration collections/grants, public folders, change log | Canonical hierarchy sync projection API | Replays current canonical mailbox, accessible collaboration, and accessible public-folder hierarchy state from the preceding LPE EWS sync state; no full Exchange archive/voice/search hierarchy or adapter-local hierarchy store | P0 |
-| `SyncFolderItems` | Partial | Mail/collaboration/public-folder rows, `account_sync_state`, `mail_change_log`, tombstones; current EWS tokens are bounded | Canonical item sync API over current state and change logs | One-way bounded current-state sync, not full Exchange durable sync cursor semantics | P0 |
+| `SyncFolderItems` | Partial | Mail/collaboration/public-folder rows, `account_sync_state`, `mail_change_log`, tombstones; current EWS tokens are bounded | Canonical item sync API over current state and retained change logs | The first mailbox page is a bounded current-state projection; later mailbox pages and resumes replay retained canonical changes with account/folder-bound cursors. This is not full Exchange durable sync cursor semantics. | P0 |
 
 ## Time Zone Operation
 

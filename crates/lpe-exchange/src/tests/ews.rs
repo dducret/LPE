@@ -9165,8 +9165,7 @@ async fn sync_folder_items_returns_empty_sync_for_custom_mailbox_folder() {
     let body = response_text(response).await;
     assert!(body.contains("<m:SyncFolderItemsResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert!(body
-        .contains("<m:SyncState>mailbox:44444444-4444-4444-4444-444444444444:v2:0</m:SyncState>"));
+    assert!(body.contains("<m:SyncState>lpe-sync.v2."));
     assert!(body.contains("<m:Changes></m:Changes>"));
 }
 
@@ -9194,12 +9193,11 @@ async fn sync_folder_items_accepts_any_folder_id_namespace_prefix() {
     let body = response_text(response).await;
     assert!(body.contains("<m:SyncFolderItemsResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert!(body
-        .contains("<m:SyncState>mailbox:44444444-4444-4444-4444-444444444444:v2:0</m:SyncState>"));
+    assert!(body.contains("<m:SyncState>lpe-sync.v2."));
 }
 
 #[tokio::test]
-async fn sync_folder_items_uses_mailbox_id_from_sync_state_when_folder_id_is_omitted() {
+async fn sync_folder_items_uses_bound_mailbox_id_when_folder_id_is_omitted() {
     let emails = Arc::new(Mutex::new(vec![FakeStore::email(
         "99999999-9999-9999-9999-999999999999",
         "44444444-4444-4444-4444-444444444444",
@@ -9220,15 +9218,24 @@ async fn sync_folder_items_uses_mailbox_id_from_sync_state_when_folder_id_is_omi
     let response = service
         .handle(
             &bearer_headers(),
-            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncState>mailbox:44444444-4444-4444-4444-444444444444:</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#,
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="mailbox:44444444-4444-4444-4444-444444444444"/></m:SyncFolderId><m:MaxChangesReturned>1</m:MaxChangesReturned></m:SyncFolderItems></s:Body></s:Envelope>"#,
         )
         .await
         .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
+    let state = test_xml_text(&response_text(response).await, "SyncState").unwrap();
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncState>{state}</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
     let body = response_text(response).await;
-    assert!(body.contains("<t:Create><t:Message>"));
-    assert!(body.contains("message:99999999-9999-9999-9999-999999999999"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(!body.contains("<t:Create><t:Message>"));
 }
 
 #[tokio::test]
@@ -9353,6 +9360,11 @@ async fn find_item_pages_more_than_two_hundred_mailbox_messages() {
         .collect();
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            mailbox_id,
+            "custom",
+            "Mailbox sync",
+        )])),
         emails: Arc::new(Mutex::new(emails)),
         respect_jmap_query_pagination: true,
         ..Default::default()
@@ -9453,7 +9465,7 @@ async fn ews_mail_change_key_is_stable_for_a_non_primary_mailbox_membership() {
         .handle(
             &bearer_headers(),
             format!(
-                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="mailbox:{archive_id}"/></m:SyncFolderId><m:SyncState>mailbox:{archive_id}:0</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#
+                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="mailbox:{archive_id}"/></m:SyncFolderId></m:SyncFolderItems></s:Body></s:Envelope>"#
             )
             .as_bytes(),
         )
@@ -9503,15 +9515,37 @@ async fn find_item_lists_system_mailbox_messages_by_distinguished_id() {
 
 #[tokio::test]
 async fn sync_folder_items_reports_custom_mailbox_create_and_delete_changes() {
+    let mailbox_id = Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
+    let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
     let emails = Arc::new(Mutex::new(vec![FakeStore::email(
-        "99999999-9999-9999-9999-999999999999",
-        "44444444-4444-4444-4444-444444444444",
+        &message_id.to_string(),
+        &mailbox_id.to_string(),
         "custom",
         "RCA folder item",
     )]));
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &mailbox_id.to_string(),
+            "custom",
+            "RCA folder",
+        )])),
         emails: emails.clone(),
+        mapi_notification_cursor: Arc::new(Mutex::new(Some(7))),
+        ews_mailbox_item_sync_replays: Arc::new(Mutex::new(vec![EwsNotificationReplay {
+            expired: false,
+            current_cursor: Some(8),
+            next_cursor: 8,
+            more_events: false,
+            events: vec![EwsNotificationLogEvent {
+                cursor: 8,
+                mailbox_id,
+                message_id,
+                change_kind: "destroyed".to_string(),
+                modseq: 8,
+                created_at: "2026-08-17T08:00:00.000000Z".to_string(),
+            }],
+        }])),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -9526,8 +9560,7 @@ async fn sync_folder_items_reports_custom_mailbox_create_and_delete_changes() {
     let body = response_text(response).await;
     assert!(body.contains("<t:Create><t:Message>"));
     assert!(body.contains("message:99999999-9999-9999-9999-999999999999"));
-    assert!(body.contains("<m:SyncState>mailbox:44444444-4444-4444-4444-444444444444:v2:99999999-9999-9999-9999-999999999999=ck-v1-"));
-    let change_key = test_item_change_key(&body, "message:99999999-9999-9999-9999-999999999999");
+    assert!(body.contains("<m:SyncState>lpe-sync.v2."));
     let sync_state = test_xml_text(&body, "SyncState").unwrap();
 
     emails.lock().unwrap().clear();
@@ -9542,9 +9575,9 @@ async fn sync_folder_items_reports_custom_mailbox_create_and_delete_changes() {
         .await
         .unwrap();
     let body = response_text(response).await;
-    assert!(body.contains(&format!(
-        "<t:Delete><t:ItemId Id=\"message:99999999-9999-9999-9999-999999999999\" ChangeKey=\"{change_key}\"/>"
-    )));
+    assert!(
+        body.contains("<t:Delete><t:ItemId Id=\"message:99999999-9999-9999-9999-999999999999\"")
+    );
 }
 
 #[tokio::test]
@@ -9562,6 +9595,11 @@ async fn sync_folder_items_pages_more_than_two_hundred_mailbox_messages() {
         .collect();
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            mailbox_id,
+            "custom",
+            "Mailbox sync",
+        )])),
         emails: Arc::new(Mutex::new(emails)),
         respect_jmap_query_pagination: true,
         ..Default::default()
@@ -9599,6 +9637,89 @@ async fn sync_folder_items_pages_more_than_two_hundred_mailbox_messages() {
 }
 
 #[tokio::test]
+async fn sync_folder_items_rejects_malformed_and_folder_mismatched_cursor_tokens() {
+    let first_mailbox_id = "44444444-4444-4444-4444-444444444444";
+    let second_mailbox_id = "55555555-5555-5555-5555-555555555555";
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(first_mailbox_id, "custom", "First"),
+            FakeStore::mailbox(second_mailbox_id, "custom", "Second"),
+        ])),
+        ..Default::default()
+    });
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="mailbox:{first_mailbox_id}"/></m:SyncFolderId></m:SyncFolderItems></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let state = test_xml_text(&response_text(response).await, "SyncState").unwrap();
+
+    for (sync_state, folder_id) in [
+        ("not-a-token".to_string(), first_mailbox_id),
+        (state, second_mailbox_id),
+    ] {
+        let response = service
+            .handle(
+                &bearer_headers(),
+                format!(
+                    r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="mailbox:{folder_id}"/></m:SyncFolderId><m:SyncState>{sync_state}</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let body = response_text(response).await;
+        assert!(body.contains("ResponseClass=\"Error\""));
+        assert!(!body.contains("<t:Message>"));
+    }
+}
+
+#[tokio::test]
+async fn sync_folder_items_rejects_expired_canonical_replay_cursor() {
+    let mailbox_id = "66666666-6666-6666-6666-666666666666";
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            mailbox_id, "custom", "Replay",
+        )])),
+        mapi_notification_cursor: Arc::new(Mutex::new(Some(9))),
+        ..Default::default()
+    });
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="mailbox:{mailbox_id}"/></m:SyncFolderId></m:SyncFolderItems></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let state = test_xml_text(&response_text(response).await, "SyncState").unwrap();
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncState>{state}</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("canonical change-log retention"));
+    assert!(!body.contains("<t:Create>"));
+}
+
+#[tokio::test]
 async fn sync_folder_items_honors_max_changes_returned() {
     let mailbox_id = "44444444-4444-4444-4444-444444444444";
     let emails = vec![
@@ -9617,6 +9738,11 @@ async fn sync_folder_items_honors_max_changes_returned() {
     ];
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            mailbox_id,
+            "custom",
+            "Mailbox sync",
+        )])),
         emails: Arc::new(Mutex::new(emails)),
         respect_jmap_query_pagination: true,
         ..Default::default()
@@ -9684,7 +9810,7 @@ async fn sync_folder_items_reports_system_mailbox_messages() {
     assert!(body.contains("<m:SyncFolderItemsResponse>"));
     assert!(body.contains("<t:Create><t:Message>"));
     assert!(body.contains("message:88888888-8888-8888-8888-888888888888"));
-    assert!(body.contains("<m:SyncState>mailbox:55555555-5555-5555-5555-555555555555:v2:88888888-8888-8888-8888-888888888888=ck-v1-"));
+    assert!(body.contains("<m:SyncState>lpe-sync.v2."));
 }
 
 #[tokio::test]

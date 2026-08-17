@@ -1,3 +1,6 @@
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use sha2::{Digest, Sha256};
+
 use super::super::*;
 
 const COLLABORATION_SYNC_STATE_VERSION: &str = "v2";
@@ -16,7 +19,14 @@ where
         let mut changes = String::new();
         let mut includes_last = true;
         let max_changes = requested_max_changes(request)?;
-        let sync_state = match requested_folder_kind(request).unwrap_or(FolderKind::Contacts) {
+        let sync_state = match if requested_sync_state(request)
+            .as_deref()
+            .is_some_and(|state| state.starts_with("lpe-sync."))
+        {
+            FolderKind::Mailbox
+        } else {
+            requested_folder_kind(request).unwrap_or(FolderKind::Contacts)
+        } {
             FolderKind::Root => "root:0".to_string(),
             FolderKind::Contacts => {
                 let collection_id =
@@ -312,127 +322,145 @@ where
                 )
             }
             FolderKind::Mailbox => {
-                let Some(mailbox_id) = self
+                if element_contents(request, "SyncState").len() > 1 {
+                    bail!("SyncFolderItems accepts at most one SyncState");
+                }
+                let state = requested_sync_state(request)
+                    .map(|state| parse_mailbox_sync_state(&state, principal.account_id))
+                    .transpose()?;
+                let mailbox_ids = self
                     .requested_mailbox_folder_ids(principal, request)
-                    .await?
-                    .into_iter()
-                    .next()
-                else {
-                    return Ok(sync_folder_items_response("mailbox:0", String::new(), true));
+                    .await?;
+                if mailbox_ids.len() > 1 {
+                    bail!("SyncFolderItems requires exactly one mailbox folder");
+                }
+                let mailbox_id = match (mailbox_ids.first().copied(), state.as_ref()) {
+                    (Some(mailbox_id), Some(state)) if mailbox_id != state.mailbox_id => {
+                        bail!("SyncState does not belong to SyncFolderId")
+                    }
+                    (Some(mailbox_id), _) => mailbox_id,
+                    (None, Some(state)) => state.mailbox_id,
+                    (None, None) => bail!("SyncFolderItems requires a mailbox SyncFolderId"),
                 };
-                let mut ids = Vec::new();
-                let mut position = 0;
-                loop {
-                    let query = self
-                        .store
-                        .query_jmap_email_ids(
+                if !self
+                    .store
+                    .fetch_jmap_mailboxes(principal.account_id)
+                    .await?
+                    .iter()
+                    .any(|mailbox| mailbox.id == mailbox_id)
+                {
+                    bail!("SyncFolderItems mailbox folder is not visible to the authenticated account");
+                }
+                match state {
+                    Some(state) if state.snapshot_after.is_some() => {
+                        let (emails, fence) = mailbox_sync_snapshot(
+                            &self.store,
                             principal.account_id,
-                            Some(mailbox_id),
-                            None,
-                            position,
-                            MAILBOX_QUERY_LIMIT,
+                            mailbox_id,
+                            state.snapshot_after,
                         )
                         .await?;
-                    let returned = query.ids.len() as u64;
-                    ids.extend(query.ids);
-                    if returned == 0 || position.saturating_add(returned) >= query.total {
-                        break;
+                        includes_last = emails.len() <= max_changes;
+                        let page = emails.into_iter().take(max_changes).collect::<Vec<_>>();
+                        for email in &page {
+                            changes.push_str("<t:Create>");
+                            changes.push_str(&message_summary_xml_for_mailbox(email, mailbox_id));
+                            changes.push_str("</t:Create>");
+                        }
+                        let next = if includes_last {
+                            MailboxSyncState::replay(mailbox_id, fence)
+                        } else {
+                            MailboxSyncState::snapshot(
+                                mailbox_id,
+                                fence,
+                                page.last().map(|email| email.id),
+                            )
+                        };
+                        mailbox_sync_state(principal.account_id, &next)
                     }
-                    position += returned;
-                }
-                let emails = self
-                    .store
-                    .fetch_jmap_emails(principal.account_id, &ids)
-                    .await?
-                    .into_iter()
-                    .filter(|email| {
-                        email
-                            .mailbox_states
+                    Some(state) => {
+                        let replay = self
+                            .store
+                            .replay_ews_mailbox_item_sync(
+                                principal.account_id,
+                                mailbox_id,
+                                state.cursor.min(i64::MAX as u64) as i64,
+                                max_changes,
+                            )
+                            .await?;
+                        if replay.expired {
+                            bail!("SyncState is no longer available in canonical change-log retention");
+                        }
+                        includes_last = !replay.more_events;
+                        let ids = replay
+                            .events
                             .iter()
-                            .any(|state| state.mailbox_id == mailbox_id)
-                    })
-                    .collect::<Vec<_>>();
-                let collection_id = mailbox_id.to_string();
-                let current_set = emails.iter().map(|email| email.id).collect::<HashSet<_>>();
-                let previous_state = requested_sync_state(request)
-                    .map(|state| collaboration_sync_state_items(&state, "mailbox", &collection_id))
-                    .unwrap_or_default();
-                let mut next_by_id = sync_state_items_by_id(&previous_state.items);
-                let previous_by_id = next_by_id.clone();
-                let mut pending_changes = Vec::new();
-                for email in &emails {
-                    let current_change_key = message_change_key(email);
-                    match previous_by_id.get(&email.id) {
-                        None => {
-                            pending_changes.push((
-                                email.id,
-                                Some(current_change_key),
-                                format!(
-                                    "<t:Create>{}</t:Create>",
-                                    message_summary_xml_for_mailbox(email, mailbox_id),
-                                ),
-                            ));
+                            .filter(|event| {
+                                !matches!(event.change_kind.as_str(), "destroyed" | "expunged")
+                            })
+                            .map(|event| event.message_id)
+                            .collect::<Vec<_>>();
+                        let emails = self
+                            .store
+                            .fetch_jmap_emails(principal.account_id, &ids)
+                            .await?
+                            .into_iter()
+                            .filter(|email| {
+                                email
+                                    .mailbox_states
+                                    .iter()
+                                    .any(|item| item.mailbox_id == mailbox_id)
+                            })
+                            .map(|email| (email.id, email))
+                            .collect::<HashMap<_, _>>();
+                        for event in replay.events {
+                            match event.change_kind.as_str() {
+                                "created" | "updated" => {
+                                    let Some(email) = emails.get(&event.message_id) else { continue };
+                                    changes.push_str(if event.change_kind == "created" { "<t:Create>" } else { "<t:Update>" });
+                                    changes.push_str(&message_summary_xml_for_mailbox(email, mailbox_id));
+                                    changes.push_str(if event.change_kind == "created" { "</t:Create>" } else { "</t:Update>" });
+                                }
+                                "destroyed" | "expunged" => changes.push_str(&format!(
+                                    "<t:Delete><t:ItemId Id=\"message:{}\" ChangeKey=\"{}\"/></t:Delete>",
+                                    event.message_id,
+                                    escape_xml(&versioned_change_key("message", &event.message_id.to_string(), &event.modseq.to_string())),
+                                )),
+                                _ => {}
+                            }
                         }
-                        Some(None) => {
-                            pending_changes.push((
-                                email.id,
-                                Some(current_change_key),
-                                format!(
-                                    "<t:Update>{}</t:Update>",
-                                    message_summary_xml_for_mailbox(email, mailbox_id),
-                                ),
-                            ));
-                        }
-                        Some(Some(previous_change_key))
-                            if !previous_state.is_current_version
-                                || previous_change_key != &current_change_key =>
-                        {
-                            pending_changes.push((
-                                email.id,
-                                Some(current_change_key),
-                                format!(
-                                    "<t:Update>{}</t:Update>",
-                                    message_summary_xml_for_mailbox(email, mailbox_id),
-                                ),
-                            ));
-                        }
-                        _ => {}
+                        mailbox_sync_state(
+                            principal.account_id,
+                            &MailboxSyncState::replay(mailbox_id, replay.next_cursor.max(0) as u64),
+                        )
                     }
-                }
-                for item in previous_state.items {
-                    let message_id = item.id;
-                    if !current_set.contains(&message_id) {
-                        let change_key = item.change_key.as_deref().unwrap_or("deleted");
-                        pending_changes.push((
-                            message_id,
+                    None => {
+                        let (emails, fence) = mailbox_sync_snapshot(
+                            &self.store,
+                            principal.account_id,
+                            mailbox_id,
                             None,
-                            format!(
-                                "<t:Delete><t:ItemId Id=\"message:{message_id}\" ChangeKey=\"{}\"/></t:Delete>",
-                                escape_xml(change_key),
-                            ),
-                        ));
+                        )
+                        .await?;
+                        includes_last = emails.len() <= max_changes;
+                        let page = emails.into_iter().take(max_changes).collect::<Vec<_>>();
+                        for email in &page {
+                            changes.push_str("<t:Create>");
+                            changes.push_str(&message_summary_xml_for_mailbox(email, mailbox_id));
+                            changes.push_str("</t:Create>");
+                        }
+                        let next = if includes_last {
+                            MailboxSyncState::replay(mailbox_id, fence)
+                        } else {
+                            MailboxSyncState::snapshot(
+                                mailbox_id,
+                                fence,
+                                page.last().map(|email| email.id),
+                            )
+                        };
+                        mailbox_sync_state(principal.account_id, &next)
                     }
                 }
-                let max_changes = requested_max_changes(request)?;
-                includes_last = pending_changes.len() <= max_changes;
-                for (id, change_key, change) in pending_changes.into_iter().take(max_changes) {
-                    changes.push_str(&change);
-                    if let Some(change_key) = change_key {
-                        next_by_id.insert(id, Some(change_key));
-                    } else {
-                        next_by_id.remove(&id);
-                    }
-                }
-                collaboration_sync_state(
-                    "mailbox",
-                    &collection_id,
-                    &next_by_id
-                        .into_iter()
-                        .filter_map(|(id, change_key)| {
-                            change_key.map(|change_key| (id, change_key))
-                        })
-                        .collect::<Vec<_>>(),
-                )
             }
             FolderKind::PublicFolders => {
                 let Some(folder_id) = requested_public_folder_ids(request).into_iter().next()
@@ -651,6 +679,159 @@ pub(in crate::service) fn collaboration_sync_state(
     } else {
         format!("{kind}:{collection_id}:{COLLABORATION_SYNC_STATE_VERSION}:{item_list}")
     }
+}
+
+async fn mailbox_sync_snapshot<S>(
+    store: &S,
+    account_id: Uuid,
+    mailbox_id: Uuid,
+    after: Option<Uuid>,
+) -> Result<(Vec<JmapEmail>, u64)>
+where
+    S: ExchangeStore + ?Sized,
+{
+    let mut ids = Vec::new();
+    let mut position = 0;
+    loop {
+        let query = store
+            .query_jmap_email_ids(
+                account_id,
+                Some(mailbox_id),
+                None,
+                position,
+                MAILBOX_QUERY_LIMIT,
+            )
+            .await?;
+        let returned = query.ids.len() as u64;
+        ids.extend(query.ids);
+        if returned == 0 || position.saturating_add(returned) >= query.total {
+            break;
+        }
+        position += returned;
+    }
+    let replay = store
+        .replay_ews_mailbox_item_sync(account_id, mailbox_id, 0, 1)
+        .await?;
+    let mut emails = store
+        .fetch_jmap_emails(account_id, &ids)
+        .await?
+        .into_iter()
+        .filter(|email| {
+            email
+                .mailbox_states
+                .iter()
+                .any(|item| item.mailbox_id == mailbox_id)
+        })
+        .filter(|email| after.is_none_or(|after| email.id > after))
+        .collect::<Vec<_>>();
+    emails.sort_unstable_by_key(|email| email.id);
+    Ok((emails, replay.current_cursor.unwrap_or(0).max(0) as u64))
+}
+
+#[derive(Debug, Default)]
+struct MailboxSyncState {
+    mailbox_id: Uuid,
+    cursor: u64,
+    snapshot_after: Option<Uuid>,
+}
+
+impl MailboxSyncState {
+    fn replay(mailbox_id: Uuid, cursor: u64) -> Self {
+        Self {
+            mailbox_id,
+            cursor,
+            snapshot_after: None,
+        }
+    }
+
+    fn snapshot(mailbox_id: Uuid, cursor: u64, snapshot_after: Option<Uuid>) -> Self {
+        Self {
+            mailbox_id,
+            cursor,
+            snapshot_after,
+        }
+    }
+}
+
+fn mailbox_sync_state(account_id: Uuid, state: &MailboxSyncState) -> String {
+    let (mode, after) = match state.snapshot_after {
+        Some(after) => ("snapshot", after.to_string()),
+        None => ("replay", "-".to_string()),
+    };
+    let payload = URL_SAFE_NO_PAD.encode(format!(
+        "{account_id}|{}|{mode}|{}|{after}",
+        state.mailbox_id, state.cursor,
+    ));
+    format!(
+        "lpe-sync.v2.{payload}.{}",
+        mailbox_sync_state_digest(&payload)
+    )
+}
+
+fn parse_mailbox_sync_state(state: &str, account_id: Uuid) -> Result<MailboxSyncState> {
+    let parts = state.split('.').collect::<Vec<_>>();
+    let ["lpe-sync", "v2", payload, signature] = parts.as_slice() else {
+        bail!("SyncState is not a supported mailbox synchronization token");
+    };
+    if mailbox_sync_state_digest(payload) != *signature {
+        bail!("SyncState integrity validation failed");
+    }
+    let decoded = URL_SAFE_NO_PAD
+        .decode(payload.as_bytes())
+        .map_err(|_| anyhow!("SyncState payload is invalid"))?;
+    let decoded =
+        String::from_utf8(decoded).map_err(|_| anyhow!("SyncState payload is invalid"))?;
+    let mut values = decoded.split('|');
+    let token_account_id = values
+        .next()
+        .ok_or_else(|| anyhow!("SyncState account binding is missing"))
+        .and_then(|value| {
+            Uuid::parse_str(value).map_err(|_| anyhow!("SyncState account binding is invalid"))
+        })?;
+    if token_account_id != account_id {
+        bail!("SyncState belongs to another authenticated account");
+    }
+    let mailbox_id = values
+        .next()
+        .ok_or_else(|| anyhow!("SyncState mailbox binding is missing"))
+        .and_then(|value| {
+            Uuid::parse_str(value).map_err(|_| anyhow!("SyncState mailbox binding is invalid"))
+        })?;
+    let mode = values
+        .next()
+        .ok_or_else(|| anyhow!("SyncState mode is missing"))?;
+    let cursor = values
+        .next()
+        .ok_or_else(|| anyhow!("SyncState cursor is missing"))?
+        .parse::<u64>()
+        .map_err(|_| anyhow!("SyncState cursor is invalid"))?;
+    let snapshot_after = match (
+        mode,
+        values
+            .next()
+            .ok_or_else(|| anyhow!("SyncState snapshot cursor is missing"))?,
+    ) {
+        ("replay", "-") => None,
+        ("snapshot", value) => Some(
+            Uuid::parse_str(value).map_err(|_| anyhow!("SyncState snapshot cursor is invalid"))?,
+        ),
+        _ => bail!("SyncState mode is invalid"),
+    };
+    if values.next().is_some() {
+        bail!("SyncState payload is malformed");
+    }
+    Ok(MailboxSyncState {
+        mailbox_id,
+        cursor,
+        snapshot_after,
+    })
+}
+
+fn mailbox_sync_state_digest(payload: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"lpe-ews-mailbox-sync-v1\0");
+    digest.update(payload.as_bytes());
+    URL_SAFE_NO_PAD.encode(digest.finalize())
 }
 
 #[derive(Debug, Clone)]

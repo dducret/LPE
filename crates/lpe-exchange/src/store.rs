@@ -336,6 +336,14 @@ pub trait ExchangeStore: AccountAuthStore {
         limit: usize,
     ) -> StoreFuture<'a, EwsNotificationReplay>;
 
+    fn replay_ews_mailbox_item_sync<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        after_cursor: i64,
+        limit: usize,
+    ) -> StoreFuture<'a, EwsNotificationReplay>;
+
     fn fetch_ews_user_configuration<'a>(
         &'a self,
         account_id: Uuid,

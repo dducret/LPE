@@ -4313,6 +4313,7 @@ struct FakeStore {
     mapi_notification_polls: Arc<Mutex<Vec<MapiNotificationPoll>>>,
     mapi_notification_poll_after_cursors: Arc<Mutex<Vec<i64>>>,
     ews_notification_replays: Arc<Mutex<Vec<EwsNotificationReplay>>>,
+    ews_mailbox_item_sync_replays: Arc<Mutex<Vec<EwsNotificationReplay>>>,
     mapi_mail_store_load_notification: Arc<Mutex<Option<(i64, MapiNotificationPoll)>>>,
     ews_user_configurations: Arc<Mutex<Vec<EwsUserConfiguration>>>,
     ews_delegates: Arc<Mutex<Vec<EwsDelegate>>>,
@@ -8444,6 +8445,27 @@ impl ExchangeStore for FakeStore {
                     })
                     .flatten()
             })
+            .unwrap_or(EwsNotificationReplay {
+                expired: after_cursor > 0,
+                current_cursor,
+                next_cursor: after_cursor,
+                more_events: false,
+                events: Vec::new(),
+            });
+        Box::pin(async move { Ok(replay) })
+    }
+
+    fn replay_ews_mailbox_item_sync<'a>(
+        &'a self,
+        _account_id: Uuid,
+        _mailbox_id: Uuid,
+        after_cursor: i64,
+        _limit: usize,
+    ) -> StoreFuture<'a, EwsNotificationReplay> {
+        let current_cursor = *self.mapi_notification_cursor.lock().unwrap();
+        let replay = (after_cursor > 0)
+            .then(|| self.ews_mailbox_item_sync_replays.lock().unwrap().pop())
+            .flatten()
             .unwrap_or(EwsNotificationReplay {
                 expired: after_cursor > 0,
                 current_cursor,
