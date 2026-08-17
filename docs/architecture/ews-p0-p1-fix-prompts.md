@@ -81,6 +81,11 @@ items.rs, mail.rs, calendar.rs, contacts.rs, tasks.rs, public_folders.rs,
 fields.rs, ids.rs, the ExchangeStore traits/implementations, and the related
 EWS SOAP tests.
 
+`items.rs` is already over the 1,500-line production-source limit. Before
+adding behavior there, state and carry out a minimal split plan that puts new
+item-family behavior in an appropriately focused helper module; do not grow
+that file further without the documented justification.
+
 The supported scope is canonical mail, contacts, calendar events, tasks, and
 public-folder posts. CreateItem must create/import only those bounded item
 classes; SendItem must always use canonical submission and authoritative Sent
@@ -256,6 +261,11 @@ Close the P1 gaps in CopyItem, MoveItem, MarkAllItemsAsRead, EmptyFolder, and
 UpdateFolder. Inspect crates/lpe-exchange/src/service/ews/items.rs,
 folders.rs, public_folders.rs, recoverable-items and message/mailbox storage,
 and the focused SOAP tests.
+
+`items.rs` is already over the 1,500-line production-source limit. Before
+adding behavior there, state and carry out a minimal split plan that puts new
+item-family behavior in an appropriately focused helper module; do not grow
+that file further without the documented justification.
 
 Copy/move only the documented canonical message and public-folder item
 families. MarkAllItemsAsRead must use a bounded, safe canonical bulk mutation
