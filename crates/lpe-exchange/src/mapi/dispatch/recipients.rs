@@ -86,6 +86,8 @@ pub(super) async fn append_recipient_dispatch_response<S>(
         }
         Some(RopId::ReadRecipients) => {
             append_read_recipients_response(
+                store,
+                principal,
                 session,
                 handle_slots,
                 request,
@@ -93,13 +95,16 @@ pub(super) async fn append_recipient_dispatch_response<S>(
                 emails,
                 snapshot,
                 responses,
-            );
+            )
+            .await;
         }
         _ => {}
     }
 }
 
-pub(super) fn append_read_recipients_response(
+pub(super) async fn append_read_recipients_response<S>(
+    store: &S,
+    principal: &AccountPrincipal,
     session: &MapiSession,
     handle_slots: &[u32],
     request: &RopRequest,
@@ -107,7 +112,9 @@ pub(super) fn append_read_recipients_response(
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
     responses: &mut Vec<u8>,
-) {
+) where
+    S: ExchangeStore,
+{
     if request.read_recipients_reserved() != Some(0) {
         responses.extend_from_slice(&rop_error_response(
             0x0F,
@@ -168,8 +175,34 @@ pub(super) fn append_read_recipients_response(
             object => object,
         }
     };
+    let protected_emails = match object {
+        Some(MapiObject::Message {
+            folder_id,
+            message_id,
+            ..
+        }) if *folder_id == SENT_FOLDER_ID => {
+            if let Some(email) = message_for_id(*folder_id, *message_id, mailboxes, emails) {
+                store
+                    .fetch_jmap_emails_with_protected_bcc(principal.account_id, &[email.id])
+                    .await
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            }
+        }
+        _ => Vec::new(),
+    };
+    let recipient_emails = if protected_emails.is_empty() {
+        emails
+    } else {
+        &protected_emails
+    };
     responses.extend_from_slice(&rop_read_recipients_response(
-        request, object, mailboxes, emails, snapshot,
+        request,
+        object,
+        mailboxes,
+        recipient_emails,
+        snapshot,
     ));
 }
 

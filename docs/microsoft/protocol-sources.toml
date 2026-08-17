@@ -2439,6 +2439,7 @@ sections = [
   "2.2.4.11 t:ArrayOfRecipientsType Complex Type",
   "2.2.4.12 m:ArrayOfResponseMessagesType Complex Type",
   "2.2.4.16 t:BasePathToElementType Complex Type",
+  "2.2.5.9 t:DisposalType Simple Type",
 ]
 
 [[protocol]]

@@ -2126,7 +2126,8 @@ async fn mapi_over_http_microsoft_read_recipients_rejects_nonzero_reserved_field
 }
 
 #[tokio::test]
-async fn mapi_over_http_read_recipients_returns_owner_draft_and_sent_bcc() {
+async fn mapi_over_http_read_recipients_returns_owner_sent_bcc_but_hides_draft_bcc() {
+    // [MS-OXCROPS] section 2.2.6.6: RopReadRecipients returns recipient details for the open message.
     for (message_id, mailbox_id, role, display_name, folder_counter) in [
         (
             "23232323-2323-2323-2323-232323232323",
@@ -2192,8 +2193,12 @@ async fn mapi_over_http_read_recipients_returns_owner_draft_and_sent_bcc() {
         let response_rops = &rop_buffer[2..2 + response_rop_size];
 
         assert!(contains_bytes(response_rops, &utf16z("bob@example.test")));
-        assert!(contains_bytes(response_rops, &utf16z("erin@example.test")));
-        assert!(contains_bytes(response_rops, &utf16z("Erin")));
+        let exposes_bcc = role == "sent";
+        assert_eq!(
+            contains_bytes(response_rops, &utf16z("erin@example.test")),
+            exposes_bcc
+        );
+        assert_eq!(contains_bytes(response_rops, &utf16z("Erin")), exposes_bcc);
     }
 }
 

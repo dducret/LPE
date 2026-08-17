@@ -107,9 +107,10 @@ pub(in crate::service) fn resolve_names_response(
         .filter(|entry| {
             matches!(
                 entry.entry_kind,
-                ExchangeAddressBookEntryKind::Account | ExchangeAddressBookEntryKind::Contact
-            )
-                && (!contacts_only || entry.entry_kind == ExchangeAddressBookEntryKind::Contact)
+                ExchangeAddressBookEntryKind::Account
+                    | ExchangeAddressBookEntryKind::Contact
+                    | ExchangeAddressBookEntryKind::DistributionList
+            ) && (!contacts_only || entry.entry_kind == ExchangeAddressBookEntryKind::Contact)
                 && address_book_entry_matches(entry, &query, true)
         })
         .cloned()

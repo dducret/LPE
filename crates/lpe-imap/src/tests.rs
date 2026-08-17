@@ -63,7 +63,13 @@ fn assert_documented_capabilities(capability: &str) {
         );
     }
 
-    for unsupported in ["IMAP4rev1", "QRESYNC"] {
+    for unsupported in [
+        "IMAP4rev1",
+        "QRESYNC",
+        "AUTH=NTLM",
+        "AUTH=DELEGATE",
+        "XDELEGATE",
+    ] {
         assert!(
             !has_token(unsupported),
             "CAPABILITY advertised unsupported token {unsupported}: {capability}"
@@ -3599,6 +3605,30 @@ async fn plain_authenticate_with_initial_response_is_accepted() {
     .await;
 
     assert!(response.contains("A1 OK AUTHENTICATE completed"));
+    task.abort();
+}
+
+#[tokio::test]
+async fn ntlm_and_delegate_extensions_remain_unadvertised_and_unauthenticated() {
+    // [MS-OXIMAP4] sections 2.2.1 and 2.2.2: retain unsupported NTLM and delegate boundaries.
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store, Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+
+    let capability = send_command(&mut stream, "A1 CAPABILITY\r\n", "A1").await;
+    assert_documented_capabilities(&capability);
+
+    let ntlm = send_command(&mut stream, "A2 AUTHENTICATE NTLM\r\n", "A2").await;
+    assert!(ntlm.contains("A2 NO only AUTHENTICATE PLAIN, LOGIN, and XOAUTH2 are supported"));
+
+    let select = send_command(&mut stream, "A3 SELECT INBOX\r\n", "A3").await;
+    assert!(select.contains("A3 NO authentication required"));
+
     task.abort();
 }
 

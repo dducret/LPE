@@ -480,6 +480,15 @@ where
                     Ok(create_item_success_response(&email))
                 }
                 "SendOnly" | "SendAndSaveCopy" => {
+                    if saved_item_folder.is_some() {
+                        if disposition == "SendOnly" {
+                            bail!(
+                                "CreateItem SendOnly does not support SavedItemFolderId because it does not save a copy"
+                            );
+                        }
+                        self.validate_send_and_save_copy_target(principal, saved_item_folder.as_ref())
+                            .await?;
+                    }
                     let submitted = self
                         .store
                         .submit_message(
@@ -1034,6 +1043,14 @@ where
                 .transpose()?
                 .unwrap_or(EwsDeleteType::MoveToDeletedItems);
 
+            if delete_type == EwsDeleteType::SoftDelete {
+                return Ok(operation_error_response(
+                    "DeleteItem",
+                    "ErrorInvalidOperation",
+                    "DeleteItem does not support DeleteType=SoftDelete until EWS projects canonical recoverable items.",
+                ));
+            }
+
             if (!contact_ids.is_empty() || !event_ids.is_empty()) && ids.len() > 1 {
                 return Ok(operation_error_response(
                     "DeleteItem",
@@ -1395,6 +1412,36 @@ where
             bail!("submitted message was not visible in canonical Sent");
         }
         Ok(email)
+    }
+
+    async fn validate_send_and_save_copy_target(
+        &self,
+        principal: &AccountPrincipal,
+        target: Option<&CreateItemSavedFolderTarget>,
+    ) -> Result<()> {
+        let Some(target) = target else {
+            return Ok(());
+        };
+        let mailbox_id = match target {
+            CreateItemSavedFolderTarget::Mailbox(id) => *id,
+            CreateItemSavedFolderTarget::MailboxRole("sent") => return Ok(()),
+            CreateItemSavedFolderTarget::BareUuid(id) => Uuid::parse_str(id)?,
+            _ => bail!(
+                "CreateItem SendAndSaveCopy supports only the canonical Sent mailbox as SavedItemFolderId"
+            ),
+        };
+        let is_canonical_sent = self
+            .store
+            .fetch_jmap_mailboxes(principal.account_id)
+            .await?
+            .into_iter()
+            .any(|mailbox| mailbox.id == mailbox_id && mailbox.role == "sent");
+        if !is_canonical_sent {
+            bail!(
+                "CreateItem SendAndSaveCopy SavedItemFolderId is not the visible canonical Sent mailbox"
+            );
+        }
+        Ok(())
     }
 }
 

@@ -1971,7 +1971,9 @@ async fn resolve_names_returns_no_results_for_non_directory_names() {
 }
 
 #[tokio::test]
-async fn resolve_names_does_not_project_distribution_lists() {
+async fn resolve_names_projects_canonical_distribution_lists_only_for_active_directory() {
+    // [MS-OXWSRSLNM] sections 3.1.4.1, 3.1.4.1.3.5, and 3.1.4.1.4.1:
+    // ActiveDirectory resolution projects visible canonical distribution lists; Contacts does not.
     let service = ExchangeService::new(FakeStore {
         session: Some(FakeStore::account()),
         group_aliases: Arc::new(Mutex::new(vec![(
@@ -1991,8 +1993,22 @@ async fn resolve_names_does_not_project_distribution_lists() {
         .unwrap();
 
     let body = response_text(response).await;
-    assert!(body.contains("<m:ResponseCode>ErrorNameResolutionNoResults</m:ResponseCode>"));
-    assert!(!body.contains("all@example.test"));
+    assert!(body.contains("<m:ResolveNamesResponseMessage ResponseClass=\"Success\">"));
+    assert!(body.contains("<t:Name>All Hands</t:Name>"));
+    assert!(body.contains("<t:EmailAddress>all@example.test</t:EmailAddress>"));
+    assert!(body.contains("<t:MailboxType>PublicDL</t:MailboxType>"));
+
+    let contacts_response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:ResolveNames SearchScope="Contacts"><m:UnresolvedEntry>all@example.test</m:UnresolvedEntry></m:ResolveNames></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let contacts_body = response_text(contacts_response).await;
+    assert!(contacts_body.contains("<m:ResponseCode>ErrorNameResolutionNoResults</m:ResponseCode>"));
+    assert!(!contacts_body.contains("all@example.test"));
 }
 
 #[tokio::test]
@@ -3206,6 +3222,47 @@ async fn delete_item_moves_canonical_message_to_trash_by_default() {
 }
 
 #[tokio::test]
+async fn delete_item_rejects_soft_delete_without_mutating_canonical_mail() {
+    let message_id = Uuid::parse_str("88888888-8888-8888-8888-888888888888").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "77777777-7777-7777-7777-777777777777",
+            "trash",
+            "Deleted",
+        )])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "88888888-8888-8888-8888-888888888888",
+            "66666666-6666-6666-6666-666666666666",
+            "inbox",
+            "Inbox message",
+        )])),
+        ..Default::default()
+    };
+    let emails = store.emails.clone();
+    let moved_emails = store.moved_emails.clone();
+    let deleted_emails = store.deleted_emails.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:DeleteItem DeleteType="SoftDelete"><m:ItemIds><t:ItemId Id="message:88888888-8888-8888-8888-888888888888"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:DeleteItemResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(moved_emails.lock().unwrap().is_empty());
+    assert!(deleted_emails.lock().unwrap().is_empty());
+    assert!(emails.lock().unwrap().iter().any(|email| email.id == message_id));
+}
+
+#[tokio::test]
 async fn create_item_saveonly_stores_message_as_canonical_draft() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -3420,6 +3477,45 @@ async fn create_item_send_and_save_uses_canonical_submission() {
         Some("<p>Hello</p>")
     );
     assert_eq!(recorded[0].to[0].address, "carol@example.test");
+}
+
+#[tokio::test]
+async fn create_item_send_and_save_rejects_an_unsupported_saved_copy_target_before_submission() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let submitted_messages = store.submitted_messages.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:CreateItem MessageDisposition="SendAndSaveCopy">
+                  <m:SavedItemFolderId><t:FolderId Id="mailbox:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"/></m:SavedItemFolderId>
+                  <m:Items>
+                    <t:Message>
+                      <t:Subject>Unsupported saved copy target</t:Subject>
+                      <t:ToRecipients><t:Mailbox><t:EmailAddress>carol@example.test</t:EmailAddress></t:Mailbox></t:ToRecipients>
+                    </t:Message>
+                  </m:Items>
+                </m:CreateItem>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateItemResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(submitted_messages.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
