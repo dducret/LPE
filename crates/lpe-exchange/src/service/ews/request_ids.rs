@@ -13,6 +13,88 @@ pub(in crate::service) struct RequestedItemReference {
     pub change_key: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::service) enum CreateItemSavedFolderTarget {
+    Mailbox(Uuid),
+    MailboxRole(&'static str),
+    PublicFolder(Uuid),
+    Collection(String),
+    BareUuid(String),
+}
+
+/// [MS-OXWSMSG] section 3.1.4.2: a SavedItemFolderId is optional, but when
+/// present this bounded adapter must classify its one target before creation.
+/// In particular, malformed canonical mailbox and public-folder identifiers
+/// must not be treated as an omitted target.
+pub(in crate::service) fn requested_create_item_saved_folder_target(
+    request: &str,
+) -> Result<Option<CreateItemSavedFolderTarget>> {
+    let folders = element_contents(request, "SavedItemFolderId");
+    if folders.is_empty() {
+        return Ok(None);
+    }
+    if folders.len() != 1 {
+        bail!("CreateItem supports at most one SavedItemFolderId");
+    }
+
+    let folder_ids = attribute_values_for_tag(folders[0], "FolderId", "Id");
+    let distinguished_ids = attribute_values_for_tag(folders[0], "DistinguishedFolderId", "Id");
+    if folder_ids.len() + distinguished_ids.len() != 1 {
+        bail!("CreateItem SavedItemFolderId requires exactly one folder target");
+    }
+
+    if let Some(value) = folder_ids.first() {
+        if let Some(value) = value.strip_prefix("mailbox:") {
+            return Uuid::parse_str(value)
+                .map(CreateItemSavedFolderTarget::Mailbox)
+                .map(Some)
+                .map_err(|_| anyhow!("CreateItem SavedItemFolderId mailbox id is invalid"));
+        }
+        if let Some(value) = value.strip_prefix("public-folder:") {
+            return Uuid::parse_str(value)
+                .map(CreateItemSavedFolderTarget::PublicFolder)
+                .map(Some)
+                .map_err(|_| anyhow!("CreateItem SavedItemFolderId public-folder id is invalid"));
+        }
+        if Uuid::parse_str(value).is_ok() {
+            return Ok(Some(CreateItemSavedFolderTarget::BareUuid(
+                (*value).to_string(),
+            )));
+        }
+        if value.trim().is_empty() || value.contains(':') {
+            bail!("CreateItem SavedItemFolderId is not a supported collection id");
+        }
+        return Ok(Some(CreateItemSavedFolderTarget::Collection(
+            (*value).to_string(),
+        )));
+    }
+
+    let value = distinguished_ids[0];
+    if matches!(value, "contacts" | "calendar" | "tasks") {
+        return Ok(Some(CreateItemSavedFolderTarget::Collection(
+            DEFAULT_COLLECTION_ID.to_string(),
+        )));
+    }
+    ews_distinguished_mailbox_role(value)
+        .map(CreateItemSavedFolderTarget::MailboxRole)
+        .map(Some)
+        .ok_or_else(|| {
+            anyhow!("CreateItem SavedItemFolderId distinguished folder is not supported")
+        })
+}
+
+pub(in crate::service) fn create_item_collection_id(
+    target: Option<&CreateItemSavedFolderTarget>,
+) -> Result<Option<&str>> {
+    match target {
+        None => Ok(None),
+        Some(
+            CreateItemSavedFolderTarget::Collection(id) | CreateItemSavedFolderTarget::BareUuid(id),
+        ) => Ok(Some(id)),
+        Some(_) => bail!("CreateItem item type requires a canonical collection target"),
+    }
+}
+
 pub(in crate::service) fn requested_item_references(request: &str) -> Vec<RequestedItemReference> {
     let mut ids = Vec::new();
     let mut rest = request;
@@ -157,7 +239,7 @@ pub(in crate::service) fn ews_distinguished_mailbox_role(value: &str) -> Option<
 
 #[cfg(test)]
 mod tests {
-    use super::requested_item_references;
+    use super::{requested_create_item_saved_folder_target, requested_item_references};
 
     #[test]
     fn item_references_keep_supplied_change_keys_with_their_item_ids() {
@@ -168,5 +250,17 @@ mod tests {
         assert_eq!(references.len(), 2);
         assert_eq!(references[0].change_key.as_deref(), Some("current"));
         assert_eq!(references[1].change_key.as_deref(), Some("stale"));
+    }
+
+    #[test]
+    fn create_item_saved_folder_rejects_malformed_canonical_ids() {
+        for id in ["mailbox:not-a-uuid", "public-folder:not-a-uuid"] {
+            let error = requested_create_item_saved_folder_target(&format!(
+                "<m:SavedItemFolderId><t:FolderId Id=\"{id}\"/></m:SavedItemFolderId>"
+            ))
+            .unwrap_err();
+
+            assert!(error.to_string().contains("SavedItemFolderId"));
+        }
     }
 }

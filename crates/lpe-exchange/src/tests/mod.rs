@@ -69,9 +69,9 @@ use crate::{
         EwsMailAppManifest, EwsMailAppTokenEvent, EwsMessageTrackingEvent,
         EwsMessageTrackingReport, EwsMessageTrackingReportDetail, EwsNonIndexableReport,
         EwsNotificationEventType, EwsNotificationFolderScope, EwsNotificationLogEvent,
-        EwsNotificationReplay, EwsRetentionPolicyTag, EwsSearchableMailbox, EwsTransferEntry,
-        EwsTransferJob, EwsUnifiedMessagingCall, EwsUserConfiguration, EwsUserConfigurationKey,
-        ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry,
+        EwsNotificationReplay, EwsRetentionPolicyTag, EwsSearchableMailbox, EwsSyncCursor,
+        EwsTransferEntry, EwsTransferJob, EwsUnifiedMessagingCall, EwsUserConfiguration,
+        EwsUserConfigurationKey, ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry,
         ExchangeAddressBookEntryDetails, ExchangeAddressBookEntryKind, ExchangeStore,
         MapiCalendarPropertyValue, MapiCheckpointKind, MapiContactCreateOutcome,
         MapiContentTableQuery, MapiContentTableQueryResult, MapiContentTableSortField,
@@ -4288,6 +4288,7 @@ struct FakeStore {
     mapi_hierarchy_projection_versions: Arc<Mutex<HashMap<(Uuid, u64), u32>>>,
     mapi_folder_profile_property_reads: Arc<AtomicU64>,
     mapi_checkpoints: Arc<Mutex<HashMap<(Option<Uuid>, MapiCheckpointKind), MapiSyncCheckpoint>>>,
+    ews_sync_cursors: Arc<Mutex<HashMap<Uuid, (Uuid, EwsSyncCursor)>>>,
     stale_protocol_local_folder_properties: Arc<Mutex<HashMap<(u64, u32), Vec<u8>>>>,
     mapi_sync_changes: Arc<Mutex<MapiSyncChangeSet>>,
     mapi_mailbox_content_commit_times: Arc<Mutex<HashMap<Uuid, u64>>>,
@@ -7391,6 +7392,238 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(items) })
     }
 
+    fn copy_ews_public_folder_items<'a>(
+        &'a self,
+        account_id: Uuid,
+        item_ids: &'a [Uuid],
+        target_folder_id: Uuid,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, Vec<PublicFolderItem>> {
+        let result = (|| {
+            if item_ids.is_empty() || item_ids.len() > 100 {
+                return Err(anyhow::anyhow!(
+                    "public folder item batch must contain between one and 100 items"
+                ));
+            }
+            if item_ids
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                != item_ids.len()
+            {
+                return Err(anyhow::anyhow!(
+                    "public folder item batch contains duplicate items"
+                ));
+            }
+            self.ensure_public_folder_write(account_id, target_folder_id)?;
+            let sources = self
+                .public_folder_items
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|item| item_ids.contains(&item.id) && item.lifecycle_state == "active")
+                .cloned()
+                .collect::<Vec<_>>();
+            if sources.len() != item_ids.len() {
+                return Err(anyhow::anyhow!("public folder item not found"));
+            }
+            for source in &sources {
+                self.ensure_public_folder_read(account_id, source.public_folder_id)?;
+            }
+            let mut copies = Vec::with_capacity(sources.len());
+            for (index, source) in sources.into_iter().enumerate() {
+                let mut copy = source;
+                copy.id = if index == 0 {
+                    Uuid::parse_str("efefefef-efef-efef-efef-efefefefefef").unwrap()
+                } else {
+                    Uuid::new_v4()
+                };
+                copy.public_folder_id = target_folder_id;
+                copy.created_by_account_id = account_id;
+                copy.updated_by_account_id = account_id;
+                copy.change_counter = 1;
+                copies.push(copy);
+            }
+            self.public_folder_items
+                .lock()
+                .unwrap()
+                .extend(copies.clone());
+            Ok(copies)
+        })();
+        Box::pin(async move { result })
+    }
+
+    fn move_ews_public_folder_items<'a>(
+        &'a self,
+        account_id: Uuid,
+        item_ids: &'a [Uuid],
+        target_folder_id: Uuid,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, Vec<PublicFolderItem>> {
+        let result = (|| {
+            if item_ids.is_empty() || item_ids.len() > 100 {
+                return Err(anyhow::anyhow!(
+                    "public folder item batch must contain between one and 100 items"
+                ));
+            }
+            if item_ids
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                != item_ids.len()
+            {
+                return Err(anyhow::anyhow!(
+                    "public folder item batch contains duplicate items"
+                ));
+            }
+            self.ensure_public_folder_write(account_id, target_folder_id)?;
+            let sources = self
+                .public_folder_items
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|item| item_ids.contains(&item.id) && item.lifecycle_state == "active")
+                .cloned()
+                .collect::<Vec<_>>();
+            if sources.len() != item_ids.len() {
+                return Err(anyhow::anyhow!("public folder item not found"));
+            }
+            for source in &sources {
+                self.ensure_public_folder_read(account_id, source.public_folder_id)?;
+                self.ensure_public_folder_delete(account_id, source.public_folder_id)?;
+            }
+            let mut moved = Vec::with_capacity(sources.len());
+            for (index, source) in sources.iter().enumerate() {
+                let mut copy = source.clone();
+                copy.id = if index == 0 {
+                    Uuid::parse_str("efefefef-efef-efef-efef-efefefefefef").unwrap()
+                } else {
+                    Uuid::new_v4()
+                };
+                copy.public_folder_id = target_folder_id;
+                copy.created_by_account_id = account_id;
+                copy.updated_by_account_id = account_id;
+                copy.change_counter = 1;
+                moved.push(copy);
+            }
+            let mut items = self.public_folder_items.lock().unwrap();
+            for source in &sources {
+                items
+                    .iter_mut()
+                    .find(|item| item.id == source.id && item.lifecycle_state == "active")
+                    .expect("preflighted public folder item")
+                    .lifecycle_state = "deleted".to_string();
+            }
+            items.extend(moved.clone());
+            self.deleted_public_folder_items
+                .lock()
+                .unwrap()
+                .extend(sources.iter().map(|source| source.id));
+            Ok(moved)
+        })();
+        Box::pin(async move { result })
+    }
+
+    fn empty_ews_mailbox_folders<'a>(
+        &'a self,
+        _account_id: Uuid,
+        folder_ids: &'a [Uuid],
+        delete_subfolders: bool,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        let result = (|| {
+            let emails = self
+                .emails
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|email| folder_ids.contains(&email.mailbox_id))
+                .map(|email| email.id)
+                .collect::<Vec<_>>();
+            if emails.len() > 10_000 {
+                return Err(anyhow::anyhow!(
+                    "EmptyFolder supports at most 10,000 items per request"
+                ));
+            }
+            if emails
+                .iter()
+                .any(|id| self.failed_delete_email_ids.lock().unwrap().contains(id))
+            {
+                return Err(anyhow::anyhow!("forced delete failure"));
+            }
+            self.emails
+                .lock()
+                .unwrap()
+                .retain(|email| !folder_ids.contains(&email.mailbox_id));
+            self.deleted_emails.lock().unwrap().extend(emails);
+            if delete_subfolders {
+                let child_ids = folder_ids.iter().skip(1).copied().collect::<Vec<_>>();
+                self.mailboxes
+                    .lock()
+                    .unwrap()
+                    .retain(|mailbox| !child_ids.contains(&mailbox.id));
+                self.destroyed_mailboxes.lock().unwrap().extend(child_ids);
+            }
+            Ok(())
+        })();
+        Box::pin(async move { result })
+    }
+
+    fn empty_ews_public_folders<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_ids: &'a [Uuid],
+        delete_subfolders: bool,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        let result = (|| {
+            for folder_id in folder_ids {
+                self.ensure_public_folder_delete(account_id, *folder_id)?;
+            }
+            let item_ids = self
+                .public_folder_items
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|item| {
+                    folder_ids.contains(&item.public_folder_id) && item.lifecycle_state == "active"
+                })
+                .map(|item| item.id)
+                .collect::<Vec<_>>();
+            if item_ids.len() > 10_000 {
+                return Err(anyhow::anyhow!(
+                    "EmptyFolder supports at most 10,000 items per request"
+                ));
+            }
+            {
+                let mut items = self.public_folder_items.lock().unwrap();
+                for item in items.iter_mut().filter(|item| item_ids.contains(&item.id)) {
+                    item.lifecycle_state = "deleted".to_string();
+                }
+            }
+            self.deleted_public_folder_items
+                .lock()
+                .unwrap()
+                .extend(item_ids);
+            if delete_subfolders {
+                let child_ids = folder_ids.iter().skip(1).copied().collect::<Vec<_>>();
+                let mut folders = self.public_folders.lock().unwrap();
+                for folder in folders
+                    .iter_mut()
+                    .filter(|folder| child_ids.contains(&folder.id))
+                {
+                    folder.lifecycle_state = "deleted".to_string();
+                }
+                self.deleted_public_folders
+                    .lock()
+                    .unwrap()
+                    .extend(child_ids);
+            }
+            Ok(())
+        })();
+        Box::pin(async move { result })
+    }
+
     fn fetch_public_folder_permissions<'a>(
         &'a self,
         _principal_account_id: Uuid,
@@ -8111,6 +8344,41 @@ impl ExchangeStore for FakeStore {
             }
         };
         Box::pin(async move { Ok(checkpoint) })
+    }
+
+    fn fetch_ews_sync_cursor<'a>(
+        &'a self,
+        account_id: Uuid,
+        cursor_id: Uuid,
+    ) -> StoreFuture<'a, Option<EwsSyncCursor>> {
+        let cursor = self
+            .ews_sync_cursors
+            .lock()
+            .unwrap()
+            .get(&cursor_id)
+            .filter(|(stored_account_id, _)| *stored_account_id == account_id)
+            .map(|(_, cursor)| cursor.clone());
+        Box::pin(async move { Ok(cursor) })
+    }
+
+    fn store_ews_sync_cursor<'a>(
+        &'a self,
+        account_id: Uuid,
+        scope: &'a str,
+        snapshot_json: serde_json::Value,
+    ) -> StoreFuture<'a, Uuid> {
+        let cursor_id = Uuid::new_v4();
+        self.ews_sync_cursors.lock().unwrap().insert(
+            cursor_id,
+            (
+                account_id,
+                EwsSyncCursor {
+                    scope: scope.to_string(),
+                    snapshot_json,
+                },
+            ),
+        );
+        Box::pin(async move { Ok(cursor_id) })
     }
 
     fn fetch_mapi_ipm_subtree_ost_id<'a>(
@@ -10597,7 +10865,11 @@ impl ExchangeStore for FakeStore {
         let content = self.active_sieve_script.lock().unwrap().clone();
         Box::pin(async move {
             Ok(content.map(|content| SieveScriptDocument {
-                name: "jmap-vacation".to_string(),
+                name: if content.contains("# LPE-EWS-OOF-State:") {
+                    "ews-oof".to_string()
+                } else {
+                    "jmap-vacation".to_string()
+                },
                 content,
                 is_active: true,
                 updated_at: "2026-05-05T08:00:00Z".to_string(),
@@ -10692,19 +10964,6 @@ impl ExchangeStore for FakeStore {
             *active = replacement.map(str::to_string);
             Ok(())
         })
-    }
-
-    fn set_active_sieve_script<'a>(
-        &'a self,
-        _account_id: Uuid,
-        name: Option<&'a str>,
-        _audit: lpe_storage::AuditEntryInput,
-    ) -> StoreFuture<'a, Option<String>> {
-        if name.is_none() {
-            *self.active_sieve_script.lock().unwrap() = None;
-        }
-        let active_name = name.map(str::to_string);
-        Box::pin(async move { Ok(active_name) })
     }
 
     fn create_accessible_task<'a>(
@@ -12935,6 +13194,38 @@ impl ExchangeStore for FakeStore {
         }
         self.emails.lock().unwrap().push(copied.clone());
         Box::pin(async move { Ok(copied) })
+    }
+
+    fn copy_jmap_emails<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_ids: &'a [Uuid],
+        target_mailbox_id: Uuid,
+        audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            for message_id in message_ids {
+                self.copy_jmap_email(account_id, *message_id, target_mailbox_id, audit.clone())
+                    .await?;
+            }
+            Ok(())
+        })
+    }
+
+    fn move_jmap_emails<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_ids: &'a [Uuid],
+        target_mailbox_id: Uuid,
+        audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            for message_id in message_ids {
+                self.move_jmap_email(account_id, *message_id, target_mailbox_id, audit.clone())
+                    .await?;
+            }
+            Ok(())
+        })
     }
 
     fn mirror_jmap_email_into_mailbox<'a>(

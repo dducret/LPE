@@ -381,6 +381,14 @@ pub(crate) struct MapiSyncCheckpoint {
     pub(crate) cursor_json: serde_json::Value,
 }
 
+/// Protocol-local EWS synchronization state. The snapshot is derived from
+/// canonical state and is never a second mailbox or collaboration store.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct EwsSyncCursor {
+    pub(crate) scope: String,
+    pub(crate) snapshot_json: serde_json::Value,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MapiNotificationPoll {
     pub(crate) event_pending: bool,

@@ -7,6 +7,7 @@ include!("storage_impl/mapi_hierarchy_versions.rs");
 include!("storage_impl/delegate_freebusy_identity.rs");
 include!("storage_impl/mapi_metadata.rs");
 include!("storage_impl/mapi_sync_checkpoints.rs");
+include!("storage_impl/ews_sync_cursors.rs");
 include!("storage_impl/mapi_calendar_properties.rs");
 include!("storage_impl/mapi_permissions.rs");
 include!("storage_impl/mapi_special_folder_aliases.rs");
@@ -24,6 +25,7 @@ impl ExchangeStore for Storage {
     store_impl_mapi_hierarchy_versions!();
     store_impl_mapi_metadata!();
     store_impl_mapi_sync_checkpoints!();
+    store_impl_ews_sync_cursors!();
     store_impl_mapi_calendar_properties!();
     store_impl_mapi_permissions!();
     store_impl_mapi_special_folder_aliases!();

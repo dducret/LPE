@@ -3053,7 +3053,7 @@ async fn sync_folder_items_pages_task_changes() {
     let response = service
         .handle(
             &bearer_headers(),
-            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:DistinguishedFolderId Id="tasks"/></m:SyncFolderId><m:SyncState>tasks:tasks:v2:0</m:SyncState><m:MaxChangesReturned>1</m:MaxChangesReturned></m:SyncFolderItems></s:Body></s:Envelope>"#,
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:DistinguishedFolderId Id="tasks"/></m:SyncFolderId><m:MaxChangesReturned>1</m:MaxChangesReturned></m:SyncFolderItems></s:Body></s:Envelope>"#,
         )
         .await
         .unwrap();
@@ -5518,7 +5518,7 @@ async fn set_user_oof_settings_scheduled_round_trips_canonical_sieve_metadata() 
 #[tokio::test]
 async fn set_user_oof_settings_disables_active_sieve_script() {
     let active_sieve_script = Arc::new(Mutex::new(Some(
-        r#"require ["vacation"]; vacation "Away";"#.to_string(),
+        "# LPE-EWS-OOF-State: Enabled\r\n# LPE-EWS-OOF-ExternalAudience: All\r\nrequire [\"vacation\"];\r\nvacation \"Away\";\r\n".to_string(),
     )));
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -6255,7 +6255,7 @@ async fn perform_reminder_action_snoozes_calendar_and_task_canonical_reminders()
         .handle(
             &bearer_headers(),
             format!(
-                r#"<s:Envelope><s:Body><m:PerformReminderAction><m:ReminderItemActions><t:ReminderItemAction><t:ActionType>Snooze</t:ActionType><t:NewReminderTime>2026-05-09T16:00:00Z</t:NewReminderTime><t:ItemId Id="calendar:{event_id}:2026-05-09T09:00:00Z"/></t:ReminderItemAction><t:ReminderItemAction><t:ActionType>Snooze</t:ActionType><t:NewReminderTime>2026-05-09T16:00:00Z</t:NewReminderTime><t:ItemId Id="task:{task_id}:2026-05-09T15:00:00Z"/></t:ReminderItemAction></m:ReminderItemActions></m:PerformReminderAction></s:Body></s:Envelope>"#
+                r#"<s:Envelope><s:Body><m:PerformReminderAction><m:ReminderItemActions><t:ReminderItemAction><t:ActionType>Snooze</t:ActionType><t:NewReminderTime>2026-05-09T16:00:00Z</t:NewReminderTime><t:ItemId Id="calendar:{event_id}:2026-05-09T09:00:00Z"/></t:ReminderItemAction></m:ReminderItemActions></m:PerformReminderAction></s:Body></s:Envelope>"#
             )
             .as_bytes(),
         )
@@ -6263,6 +6263,19 @@ async fn perform_reminder_action_snoozes_calendar_and_task_canonical_reminders()
         .unwrap();
     let body = response_text(response).await;
     assert!(body.contains("<m:PerformReminderActionResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:PerformReminderAction><m:ReminderItemActions><t:ReminderItemAction><t:ActionType>Snooze</t:ActionType><t:NewReminderTime>2026-05-09T16:00:00Z</t:NewReminderTime><t:ItemId Id="task:{task_id}:2026-05-09T15:00:00Z"/></t:ReminderItemAction></m:ReminderItemActions></m:PerformReminderAction></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
 
     let stored = reminders.lock().unwrap();
@@ -8626,9 +8639,8 @@ async fn create_delete_contact_round_trips_through_sync_folder_items() {
     assert!(body.contains("<t:Create><t:Contact>"));
     assert!(body.contains("contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"));
     assert!(body.contains("<t:DisplayName>RCA Contact</t:DisplayName>"));
-    assert!(
-        body.contains("<m:SyncState>contacts:default:v2:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb=ck-")
-    );
+    let sync_state = test_xml_text(&body, "SyncState").unwrap();
+    assert!(sync_state.starts_with("lpe-ews-sync.v1.contacts."));
     let change_key = test_item_change_key(&body, "contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
 
     let response = service
@@ -8668,7 +8680,10 @@ async fn create_delete_contact_round_trips_through_sync_folder_items() {
     let response = service
         .handle(
             &bearer_headers(),
-            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>contacts:default:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#,
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>{sync_state}</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
         )
         .await
         .unwrap();
@@ -8676,7 +8691,9 @@ async fn create_delete_contact_round_trips_through_sync_folder_items() {
     assert!(
         body.contains("<t:Delete><t:ItemId Id=\"contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb\"")
     );
-    assert!(body.contains("<m:SyncState>contacts:default:v2:0</m:SyncState>"));
+    assert!(test_xml_text(&body, "SyncState")
+        .unwrap()
+        .starts_with("lpe-ews-sync.v1.contacts."));
 }
 
 #[tokio::test]
@@ -8817,7 +8834,7 @@ async fn create_contact_without_saved_folder_ignores_unrelated_folder_ids() {
 }
 
 #[tokio::test]
-async fn sync_folder_items_returns_contact_update_for_legacy_id_only_sync_state() {
+async fn sync_folder_items_rejects_nonempty_legacy_contact_sync_state() {
     let contact_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
     let collection = FakeStore::collection("default", "contacts", "Contacts");
     let store = FakeStore {
@@ -8851,16 +8868,15 @@ async fn sync_folder_items_returns_contact_update_for_legacy_id_only_sync_state(
         .unwrap();
 
     let body = response_text(response).await;
-    assert!(body.contains("<t:Update><t:Contact>"));
-    assert!(body.contains("contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"));
-    assert!(body.contains("<t:DisplayName>Updated RCA Contact</t:DisplayName>"));
     assert!(
-        body.contains("<m:SyncState>contacts:default:v2:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb=ck-")
+        body.contains("<m:ResponseClass>Error</m:ResponseClass>")
+            || body.contains("ResponseClass=\"Error\"")
     );
+    assert!(!body.contains("<t:Update><t:Contact>"));
 }
 
 #[tokio::test]
-async fn sync_folder_items_returns_contact_update_for_legacy_keyed_sync_state() {
+async fn sync_folder_items_rejects_keyed_legacy_contact_sync_state() {
     let contact_id = Uuid::parse_str("e77d919d-df4f-488d-bb4c-2defdfd8d6ec").unwrap();
     let collection = FakeStore::collection("default", "contacts", "Contacts");
     let store = FakeStore {
@@ -8894,11 +8910,11 @@ async fn sync_folder_items_returns_contact_update_for_legacy_keyed_sync_state() 
         .unwrap();
 
     let body = response_text(response).await;
-    assert!(body.contains("<t:Update><t:Contact>"));
-    assert!(body.contains("contact:e77d919d-df4f-488d-bb4c-2defdfd8d6ec"));
     assert!(
-        body.contains("<m:SyncState>contacts:default:v2:e77d919d-df4f-488d-bb4c-2defdfd8d6ec=ck-")
+        body.contains("<m:ResponseClass>Error</m:ResponseClass>")
+            || body.contains("ResponseClass=\"Error\"")
     );
+    assert!(!body.contains("<t:Update><t:Contact>"));
 }
 
 #[tokio::test]
@@ -8941,7 +8957,7 @@ async fn sync_folder_items_returns_no_contact_change_for_current_keyed_sync_stat
         .and_then(|rest| rest.split("</m:SyncState>").next())
         .unwrap()
         .to_string();
-    assert!(current_sync_state.starts_with("contacts:default:v2:"));
+    assert!(current_sync_state.starts_with("lpe-ews-sync.v1.contacts."));
 
     let request = format!(
         r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>{current_sync_state}</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#
@@ -8954,7 +8970,9 @@ async fn sync_folder_items_returns_no_contact_change_for_current_keyed_sync_stat
     assert!(!body.contains("<t:Create>"));
     assert!(!body.contains("<t:Update>"));
     assert!(!body.contains("<t:Delete>"));
-    assert!(body.contains(&format!("<m:SyncState>{current_sync_state}</m:SyncState>")));
+    let next_sync_state = test_xml_text(&body, "SyncState").unwrap();
+    assert!(next_sync_state.starts_with("lpe-ews-sync.v1.contacts."));
+    assert_ne!(next_sync_state, current_sync_state);
 }
 
 #[tokio::test]
@@ -9390,9 +9408,8 @@ async fn create_delete_calendar_item_round_trips_through_sync_folder_items() {
     assert!(body.contains("<t:EmailAddress>carol@example.test</t:EmailAddress>"));
     assert!(body.contains("<t:ResponseType>Accept</t:ResponseType>"));
     assert!(body.contains("<t:ResponseType>Tentative</t:ResponseType>"));
-    assert!(
-        body.contains("<m:SyncState>calendar:default:v2:cccccccc-cccc-cccc-cccc-cccccccccccc=ck-")
-    );
+    let sync_state = test_xml_text(&body, "SyncState").unwrap();
+    assert!(sync_state.starts_with("lpe-ews-sync.v1.calendar."));
     let change_key = test_item_change_key(&body, "event:cccccccc-cccc-cccc-cccc-cccccccccccc");
 
     let response = service
@@ -9472,13 +9489,18 @@ async fn create_delete_calendar_item_round_trips_through_sync_folder_items() {
     let response = service
         .handle(
             &bearer_headers(),
-            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>calendar:default:cccccccc-cccc-cccc-cccc-cccccccccccc</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#,
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>{sync_state}</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
         )
         .await
         .unwrap();
     let body = response_text(response).await;
     assert!(body.contains("<t:Delete><t:ItemId Id=\"event:cccccccc-cccc-cccc-cccc-cccccccccccc\""));
-    assert!(body.contains("<m:SyncState>calendar:default:v2:0</m:SyncState>"));
+    assert!(test_xml_text(&body, "SyncState")
+        .unwrap()
+        .starts_with("lpe-ews-sync.v1.calendar."));
 }
 
 #[tokio::test]
@@ -9575,7 +9597,7 @@ async fn sync_folder_items_returns_empty_sync_for_custom_mailbox_folder() {
     let body = response_text(response).await;
     assert!(body.contains("<m:SyncFolderItemsResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert!(body.contains("<m:SyncState>lpe-sync.v2."));
+    assert!(body.contains("<m:SyncState>lpe-ews-sync.v1.mailbox."));
     assert!(body.contains("<m:Changes></m:Changes>"));
 }
 
@@ -9603,7 +9625,7 @@ async fn sync_folder_items_accepts_any_folder_id_namespace_prefix() {
     let body = response_text(response).await;
     assert!(body.contains("<m:SyncFolderItemsResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert!(body.contains("<m:SyncState>lpe-sync.v2."));
+    assert!(body.contains("<m:SyncState>lpe-ews-sync.v1.mailbox."));
 }
 
 #[tokio::test]
@@ -9970,7 +9992,7 @@ async fn sync_folder_items_reports_custom_mailbox_create_and_delete_changes() {
     let body = response_text(response).await;
     assert!(body.contains("<t:Create><t:Message>"));
     assert!(body.contains("message:99999999-9999-9999-9999-999999999999"));
-    assert!(body.contains("<m:SyncState>lpe-sync.v2."));
+    assert!(body.contains("<m:SyncState>lpe-ews-sync.v1.mailbox."));
     let sync_state = test_xml_text(&body, "SyncState").unwrap();
 
     emails.lock().unwrap().clear();
@@ -10220,7 +10242,7 @@ async fn sync_folder_items_reports_system_mailbox_messages() {
     assert!(body.contains("<m:SyncFolderItemsResponse>"));
     assert!(body.contains("<t:Create><t:Message>"));
     assert!(body.contains("message:88888888-8888-8888-8888-888888888888"));
-    assert!(body.contains("<m:SyncState>lpe-sync.v2."));
+    assert!(body.contains("<m:SyncState>lpe-ews-sync.v1.mailbox."));
 }
 
 #[tokio::test]
@@ -10376,10 +10398,7 @@ async fn sync_folder_items_reports_public_folder_items() {
         "public-folder-item:abababab-abab-abab-abab-abababababab",
     );
     let first_sync_state = test_xml_text(&body, "SyncState").unwrap();
-    assert!(first_sync_state.starts_with(
-        "public-folder:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee:v3:abababab-abab-abab-abab-abababababab="
-    ));
-    assert!(first_sync_state.ends_with("|0"));
+    assert!(first_sync_state.starts_with("lpe-ews-sync.v1.public-folder."));
 
     public_folder_items.lock().unwrap()[0].is_read = true;
     let response = service
@@ -11549,7 +11568,7 @@ async fn copy_item_copies_custom_mailbox_message_to_target_folder() {
     let body = response_text(response).await;
     assert!(body.contains("<m:CopyItemResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert!(body.contains("message:77777777-7777-7777-7777-777777777777"));
+    assert!(body.contains("message:99999999-9999-9999-9999-999999999999"));
     assert!(body.contains("mailbox:55555555-5555-5555-5555-555555555555"));
     assert_eq!(
         copied_emails.lock().unwrap().as_slice(),

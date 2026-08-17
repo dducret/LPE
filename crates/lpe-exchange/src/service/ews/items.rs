@@ -330,8 +330,9 @@ where
                 return self.accept_sharing_invitation(principal, request).await;
             }
             validate_create_item_shape(request)?;
+            let saved_item_folder = requested_create_item_saved_folder_target(request)?;
             if element_content(request, "Contact").is_some() {
-                let collection_id = requested_collection_id_in(request, "SavedItemFolderId");
+                let collection_id = create_item_collection_id(saved_item_folder.as_ref())?;
                 let input = parse_create_contact_input(principal, request)?;
                 validate_contact_photo(&self.validator, &input)?;
                 let contact = self
@@ -350,7 +351,7 @@ where
                 ));
             }
             if element_content(request, "CalendarItem").is_some() {
-                let collection_id = requested_collection_id_in(request, "SavedItemFolderId");
+                let collection_id = create_item_collection_id(saved_item_folder.as_ref())?;
                 let event = self
                     .store
                     .create_accessible_event(
@@ -371,6 +372,7 @@ where
                 ));
             }
             if element_content(request, "Task").is_some() {
+                create_item_collection_id(saved_item_folder.as_ref())?;
                 let task = self
                     .store
                     .create_accessible_task(
@@ -397,8 +399,8 @@ where
 
             match disposition {
                 "SaveOnly" => {
-                    if let Some(public_folder_id) =
-                        requested_public_folder_ids(request).into_iter().next()
+                    if let Some(CreateItemSavedFolderTarget::PublicFolder(public_folder_id)) =
+                        saved_item_folder.as_ref()
                     {
                         let item = self
                             .store
@@ -406,7 +408,7 @@ where
                                 UpsertPublicFolderItemInput {
                                     id: None,
                                     account_id: principal.account_id,
-                                    public_folder_id,
+                                    public_folder_id: *public_folder_id,
                                     item_kind: "post".to_string(),
                                     message_class: "IPM.Post".to_string(),
                                     subject: input.subject,
@@ -423,12 +425,24 @@ where
                             .await?;
                         return Ok(create_public_folder_item_success_response(&item));
                     }
-                    if let Some(mailbox_id) = self
-                        .requested_mailbox_folder_ids(principal, request)
-                        .await?
-                        .into_iter()
-                        .next()
-                    {
+                    let mailbox_id = match saved_item_folder.as_ref() {
+                        Some(CreateItemSavedFolderTarget::Mailbox(id)) => Some(*id),
+                        Some(CreateItemSavedFolderTarget::BareUuid(id)) => {
+                            Some(Uuid::parse_str(id)?)
+                        }
+                        Some(CreateItemSavedFolderTarget::MailboxRole(role)) => self
+                            .store
+                            .fetch_jmap_mailboxes(principal.account_id)
+                            .await?
+                            .into_iter()
+                            .find(|mailbox| mailbox.role == *role)
+                            .map(|mailbox| mailbox.id),
+                        Some(CreateItemSavedFolderTarget::Collection(_)) => {
+                            bail!("CreateItem Message requires a canonical mailbox target")
+                        }
+                        Some(CreateItemSavedFolderTarget::PublicFolder(_)) | None => None,
+                    };
+                    if let Some(mailbox_id) = mailbox_id {
                         let imported = self
                             .store
                             .import_jmap_email(
@@ -702,34 +716,23 @@ where
                 if !target.rights.may_write {
                     bail!("public folder write access is not granted");
                 }
-                let existing_items = self
-                    .store
-                    .fetch_public_folder_items_by_ids(principal.account_id, &public_folder_item_ids)
-                    .await?;
-                if existing_items.len() != public_folder_item_ids.len() {
-                    return Ok(operation_error_response(
-                        "CopyItem",
-                        "ErrorItemNotFound",
-                        "public folder item not found",
-                    ));
-                }
+                // The store transaction preflights every source before writing
+                // any clone, so a later invalid source cannot partially copy.
                 let mut items = String::new();
-                for existing in existing_items {
-                    let copied = self
-                        .store
-                        .upsert_public_folder_item(
-                            public_folder_item_clone_input(
-                                principal,
-                                &existing,
-                                target_public_folder_id,
-                            ),
-                            AuditEntryInput {
-                                actor: principal.email.clone(),
-                                action: "ews-copy-public-folder-item".to_string(),
-                                subject: format!("{}->{target_public_folder_id}", existing.id),
-                            },
-                        )
-                        .await?;
+                for copied in self
+                    .store
+                    .copy_ews_public_folder_items(
+                        principal.account_id,
+                        &public_folder_item_ids,
+                        target_public_folder_id,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-copy-public-folder-item".to_string(),
+                            subject: format!("{}->{target_public_folder_id}", public_folder_item_ids.len()),
+                        },
+                    )
+                    .await?
+                {
                     items.push_str(&public_folder_item_xml(&copied));
                 }
                 return Ok(copy_item_success_response(items));
@@ -750,16 +753,16 @@ where
                 .store
                 .fetch_jmap_mailboxes(principal.account_id)
                 .await?;
-            if !mailboxes
+            let Some(target_mailbox) = mailboxes
                 .iter()
-                .any(|mailbox| mailbox.id == target_mailbox_id)
-            {
+                .find(|mailbox| mailbox.id == target_mailbox_id)
+            else {
                 return Ok(operation_error_response(
                     "CopyItem",
                     "ErrorFolderNotFound",
                     "target mailbox folder not found",
                 ));
-            }
+            };
 
             let source_messages = self
                 .store
@@ -775,21 +778,22 @@ where
                 bail!("message already exists in target mailbox");
             }
 
+            let response_items =
+                super::item_batch_responses::message_responses_in_target(source_messages, target_mailbox);
+            self.store
+                .copy_jmap_emails(
+                    principal.account_id,
+                    &message_ids,
+                    target_mailbox_id,
+                    AuditEntryInput {
+                        actor: principal.email.clone(),
+                        action: "ews-copy-message".to_string(),
+                        subject: format!("{}->{target_mailbox_id}", message_ids.len()),
+                    },
+                )
+                .await?;
             let mut items = String::new();
-            for message_id in message_ids {
-                let copied = self
-                    .store
-                    .copy_jmap_email(
-                        principal.account_id,
-                        message_id,
-                        target_mailbox_id,
-                        AuditEntryInput {
-                            actor: principal.email.clone(),
-                            action: "ews-copy-message".to_string(),
-                            subject: format!("{message_id}->{target_mailbox_id}"),
-                        },
-                    )
-                    .await?;
+            for copied in response_items {
                 items.push_str(&message_item_xml(&copied));
             }
 
@@ -854,55 +858,23 @@ where
                 if !target.rights.may_write {
                     bail!("public folder write access is not granted");
                 }
-                let existing_items = self
-                    .store
-                    .fetch_public_folder_items_by_ids(principal.account_id, &public_folder_item_ids)
-                    .await?;
-                if existing_items.len() != public_folder_item_ids.len() {
-                    return Ok(operation_error_response(
-                        "MoveItem",
-                        "ErrorItemNotFound",
-                        "public folder item not found",
-                    ));
-                }
-                for item in &existing_items {
-                    let source = self
-                        .store
-                        .fetch_public_folder(principal.account_id, item.public_folder_id)
-                        .await?;
-                    if !source.rights.may_delete {
-                        bail!("public folder delete access is not granted");
-                    }
-                }
+                // The store transaction preflights every source before writing
+                // a clone or deleting its source.
                 let mut items = String::new();
-                for existing in existing_items {
-                    let moved = self
-                        .store
-                        .upsert_public_folder_item(
-                            public_folder_item_clone_input(
-                                principal,
-                                &existing,
-                                target_public_folder_id,
-                            ),
-                            AuditEntryInput {
-                                actor: principal.email.clone(),
-                                action: "ews-move-public-folder-item-copy".to_string(),
-                                subject: format!("{}->{target_public_folder_id}", existing.id),
-                            },
-                        )
-                        .await?;
-                    self.store
-                        .delete_public_folder_item(
-                            principal.account_id,
-                            existing.public_folder_id,
-                            existing.id,
-                            AuditEntryInput {
-                                actor: principal.email.clone(),
-                                action: "ews-move-public-folder-item-delete".to_string(),
-                                subject: existing.id.to_string(),
-                            },
-                        )
-                        .await?;
+                for moved in self
+                    .store
+                    .move_ews_public_folder_items(
+                        principal.account_id,
+                        &public_folder_item_ids,
+                        target_public_folder_id,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-move-public-folder-item".to_string(),
+                            subject: format!("{}->{target_public_folder_id}", public_folder_item_ids.len()),
+                        },
+                    )
+                    .await?
+                {
                     items.push_str(&public_folder_item_xml(&moved));
                 }
                 return Ok(move_item_success_response(items));
@@ -923,16 +895,16 @@ where
                 .store
                 .fetch_jmap_mailboxes(principal.account_id)
                 .await?;
-            if !mailboxes
+            let Some(target_mailbox) = mailboxes
                 .iter()
-                .any(|mailbox| mailbox.id == target_mailbox_id)
-            {
+                .find(|mailbox| mailbox.id == target_mailbox_id)
+            else {
                 return Ok(operation_error_response(
                     "MoveItem",
                     "ErrorFolderNotFound",
                     "target mailbox folder not found",
                 ));
-            }
+            };
 
             let source_messages = self
                 .store
@@ -948,21 +920,22 @@ where
                 bail!("message already exists in target mailbox");
             }
 
+            let response_items =
+                super::item_batch_responses::message_responses_in_target(source_messages, target_mailbox);
+            self.store
+                .move_jmap_emails(
+                    principal.account_id,
+                    &message_ids,
+                    target_mailbox_id,
+                    AuditEntryInput {
+                        actor: principal.email.clone(),
+                        action: "ews-move-message".to_string(),
+                        subject: format!("{}->{target_mailbox_id}", message_ids.len()),
+                    },
+                )
+                .await?;
             let mut items = String::new();
-            for message_id in message_ids {
-                let moved = self
-                    .store
-                    .move_jmap_email(
-                        principal.account_id,
-                        message_id,
-                        target_mailbox_id,
-                        AuditEntryInput {
-                            actor: principal.email.clone(),
-                            action: "ews-move-message".to_string(),
-                            subject: format!("{message_id}->{target_mailbox_id}"),
-                        },
-                    )
-                    .await?;
+            for moved in response_items {
                 items.push_str(&message_item_xml(&moved));
             }
 
@@ -1416,18 +1389,7 @@ fn validate_create_item_shape(request: &str) -> Result<()> {
         bail!("CreateItem requires exactly one supported canonical item");
     }
 
-    let saved_item_folders = element_contents(request, "SavedItemFolderId");
-    if saved_item_folders.len() > 1 {
-        bail!("CreateItem supports at most one SavedItemFolderId");
-    }
-    if let Some(saved_item_folder) = saved_item_folders.first() {
-        let target_count = attribute_values_for_tag(saved_item_folder, "FolderId", "Id").len()
-            + attribute_values_for_tag(saved_item_folder, "DistinguishedFolderId", "Id").len();
-        if target_count != 1 {
-            bail!("CreateItem SavedItemFolderId requires exactly one folder target");
-        }
-    }
-    Ok(())
+    requested_create_item_saved_folder_target(request).map(|_| ())
 }
 
 fn validate_supplied_item_change_key(

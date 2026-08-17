@@ -1,5 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 use super::super::*;
 use super::folder_requests::{requested_find_folder_parent, FindFolderParent};
+use super::sync_state::{ews_sync_cursor_token, parse_ews_sync_cursor_token, requested_sync_state};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::service) enum FolderKind {
@@ -220,6 +223,72 @@ where
         principal: &AccountPrincipal,
         request: &str,
     ) -> Result<String> {
+        let max_changes = match requested_hierarchy_max_changes(request) {
+            Ok(value) => value,
+            Err(error) => {
+                return Ok(operation_error_response(
+                    "SyncFolderHierarchy",
+                    "ErrorInvalidSyncStateData",
+                    &error.to_string(),
+                ))
+            }
+        };
+        let state = match match requested_sync_state(request) {
+            Some(sync_state) if sync_state.starts_with("lpe-ews-sync.v1") => {
+                let (kind, cursor_id) = parse_ews_sync_cursor_token(&sync_state)?;
+                if kind != "hierarchy" {
+                    bail!("SyncState does not belong to SyncFolderHierarchy");
+                }
+                let cursor = self
+                    .store
+                    .fetch_ews_sync_cursor(principal.account_id, cursor_id)
+                    .await?
+                    .ok_or_else(|| anyhow!("SyncState is no longer available"))?;
+                if cursor.scope != "hierarchy" {
+                    bail!("SyncState does not belong to SyncFolderHierarchy");
+                }
+                serde_json::from_value(cursor.snapshot_json)
+                    .map(Some)
+                    .map_err(|_| anyhow!("SyncState snapshot is invalid"))
+            }
+            Some(_) => bail!("SyncState is not a supported LPE synchronization cursor"),
+            None => Ok(None),
+        } {
+            Ok(state) => state,
+            Err(error) => {
+                return Ok(operation_error_response(
+                    "SyncFolderHierarchy",
+                    "ErrorInvalidSyncStateData",
+                    &error.to_string(),
+                ))
+            }
+        };
+        let previous = match state {
+            Some(HierarchySyncState::Current(entries)) => entries.into_iter().collect(),
+            None => HashMap::new(),
+            Some(HierarchySyncState::Continuation {
+                current,
+                changes,
+                next_change,
+            }) => {
+                return Ok(self
+                    .hierarchy_sync_page_response(
+                        principal,
+                        current,
+                        changes,
+                        next_change,
+                        max_changes,
+                    )
+                    .await
+                    .unwrap_or_else(|error| {
+                        operation_error_response(
+                            "SyncFolderHierarchy",
+                            "ErrorInvalidSyncStateData",
+                            &error.to_string(),
+                        )
+                    }))
+            }
+        };
         let mut folders = Vec::new();
         for mailbox in self
             .store
@@ -277,52 +346,84 @@ where
                 self.public_folder_projection(principal, &folder).await?,
             ));
         }
-        let previous = requested_sync_state(request)
-            .map(|state| hierarchy_sync_state_items(&state))
-            .unwrap_or_default();
         let current = folders
             .iter()
             .map(|folder| (folder.key.as_str(), folder))
             .collect::<HashMap<_, _>>();
-        let mut changes = String::new();
+        let mut changes = Vec::new();
         for folder in &folders {
             match previous.get(&folder.key) {
-                None => changes.push_str(&format!("<t:Create>{}</t:Create>", folder.xml)),
+                None => changes.push(format!("<t:Create>{}</t:Create>", folder.xml)),
                 Some(fingerprint) if fingerprint != &folder.fingerprint => {
-                    changes.push_str(&format!("<t:Update>{}</t:Update>", folder.xml));
+                    changes.push(format!("<t:Update>{}</t:Update>", folder.xml));
                 }
                 _ => {}
             }
         }
-        for key in previous
+        let mut deleted = previous
             .keys()
             .filter(|key| !current.contains_key(key.as_str()))
-        {
+            .collect::<Vec<_>>();
+        deleted.sort_unstable();
+        for key in deleted {
             if let Some((_, id)) = key.split_once('|') {
-                changes.push_str(&format!(
+                changes.push(format!(
                     "<t:Delete><t:FolderId Id=\"{}\" ChangeKey=\"{}\"/></t:Delete>",
                     escape_xml(id),
                     escape_xml(&folder_change_key(id)),
                 ));
             }
         }
-        let sync_state = hierarchy_sync_state(&folders);
+        Ok(self
+            .hierarchy_sync_page_response(
+                principal,
+                hierarchy_sync_entries(&folders),
+                changes,
+                0,
+                max_changes,
+            )
+            .await
+            .unwrap_or_else(|error| {
+                operation_error_response(
+                    "SyncFolderHierarchy",
+                    "ErrorInvalidSyncStateData",
+                    &error.to_string(),
+                )
+            }))
+    }
 
-        Ok(format!(
-            concat!(
-                "<m:SyncFolderHierarchyResponse>",
-                "<m:ResponseMessages>",
-                "<m:SyncFolderHierarchyResponseMessage ResponseClass=\"Success\">",
-                "<m:ResponseCode>NoError</m:ResponseCode>",
-                "<m:SyncState>{sync_state}</m:SyncState>",
-                "<m:IncludesLastFolderInRange>true</m:IncludesLastFolderInRange>",
-                "<m:Changes>{changes}</m:Changes>",
-                "</m:SyncFolderHierarchyResponseMessage>",
-                "</m:ResponseMessages>",
-                "</m:SyncFolderHierarchyResponse>"
-            ),
-            sync_state = escape_xml(&sync_state),
-            changes = changes,
+    async fn hierarchy_sync_page_response(
+        &self,
+        principal: &AccountPrincipal,
+        current: Vec<(String, String)>,
+        changes: Vec<String>,
+        next_change: usize,
+        max_changes: usize,
+    ) -> Result<String> {
+        validate_hierarchy_sync_token_contents(&current, &changes)?;
+        let end = next_change.saturating_add(max_changes).min(changes.len());
+        let includes_last = end == changes.len();
+        let state = if includes_last {
+            HierarchySyncState::Current(current)
+        } else {
+            HierarchySyncState::Continuation {
+                current,
+                changes: changes.clone(),
+                next_change: end,
+            }
+        };
+        let cursor_id = self
+            .store
+            .store_ews_sync_cursor(
+                principal.account_id,
+                "hierarchy",
+                serde_json::to_value(state)?,
+            )
+            .await?;
+        Ok(hierarchy_sync_response(
+            &ews_sync_cursor_token("hierarchy", cursor_id),
+            includes_last,
+            &changes[next_change..end],
         ))
     }
 
@@ -382,6 +483,12 @@ where
         principal: &AccountPrincipal,
         request: &str,
     ) -> Result<String> {
+        if let Err(error) = validate_get_folder_canonical_ids(request) {
+            return Ok(get_folder_error_response(
+                "ErrorFolderNotFound",
+                &error.to_string(),
+            ));
+        }
         let mailbox_ids = self
             .requested_mailbox_folder_ids(principal, request)
             .await?;
@@ -601,7 +708,11 @@ where
     }
 }
 
-const HIERARCHY_SYNC_STATE_VERSION: &str = "folder-hierarchy:v1:";
+const HIERARCHY_SYNC_PAGE_LIMIT: usize = 200;
+const HIERARCHY_SYNC_TOKEN_MAX_ENTRIES: usize = 1_024;
+const HIERARCHY_SYNC_TOKEN_MAX_CHANGES: usize = 1_024;
+const HIERARCHY_SYNC_TOKEN_MAX_CHANGE_BYTES: usize = 8_192;
+const HIERARCHY_SYNC_TOKEN_MAX_ENTRY_BYTES: usize = 512;
 
 struct HierarchySyncFolder {
     key: String,
@@ -619,23 +730,109 @@ impl HierarchySyncFolder {
     }
 }
 
-fn hierarchy_sync_state(folders: &[HierarchySyncFolder]) -> String {
-    let mut entries = folders
-        .iter()
-        .map(|folder| format!("{}={}", folder.key, folder.fingerprint))
-        .collect::<Vec<_>>();
-    entries.sort();
-    format!("{HIERARCHY_SYNC_STATE_VERSION}{}", entries.join(","))
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+enum HierarchySyncState {
+    Current(Vec<(String, String)>),
+    Continuation {
+        current: Vec<(String, String)>,
+        changes: Vec<String>,
+        next_change: usize,
+    },
 }
 
-fn hierarchy_sync_state_items(sync_state: &str) -> HashMap<String, String> {
-    sync_state
-        .strip_prefix(HIERARCHY_SYNC_STATE_VERSION)
-        .into_iter()
-        .flat_map(|values| values.split(','))
-        .filter_map(|value| value.split_once('='))
-        .map(|(key, fingerprint)| (key.to_string(), fingerprint.to_string()))
-        .collect()
+fn requested_hierarchy_max_changes(request: &str) -> Result<usize> {
+    match element_contents(request, "MaxChangesReturned").as_slice() {
+        [] => Ok(HIERARCHY_SYNC_PAGE_LIMIT),
+        [value] => xml_text(value)
+            .parse::<usize>()
+            .ok()
+            .filter(|value| *value > 0)
+            .map(|value| value.min(HIERARCHY_SYNC_PAGE_LIMIT))
+            .ok_or_else(|| anyhow!("MaxChangesReturned must be a positive integer")),
+        _ => bail!("SyncFolderHierarchy accepts at most one MaxChangesReturned"),
+    }
+}
+
+fn hierarchy_sync_entries(folders: &[HierarchySyncFolder]) -> Vec<(String, String)> {
+    let mut entries = folders
+        .iter()
+        .map(|folder| (folder.key.clone(), folder.fingerprint.clone()))
+        .collect::<Vec<_>>();
+    entries.sort_unstable();
+    entries
+}
+
+fn hierarchy_sync_response(sync_state: &str, includes_last: bool, changes: &[String]) -> String {
+    format!(
+        concat!(
+            "<m:SyncFolderHierarchyResponse>",
+            "<m:ResponseMessages>",
+            "<m:SyncFolderHierarchyResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:SyncState>{sync_state}</m:SyncState>",
+            "<m:IncludesLastFolderInRange>{includes_last}</m:IncludesLastFolderInRange>",
+            "<m:Changes>{changes}</m:Changes>",
+            "</m:SyncFolderHierarchyResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:SyncFolderHierarchyResponse>"
+        ),
+        sync_state = escape_xml(sync_state),
+        includes_last = includes_last,
+        changes = changes.join(""),
+    )
+}
+
+fn validate_hierarchy_sync_token_contents(
+    current: &[(String, String)],
+    changes: &[String],
+) -> Result<()> {
+    if current.len() > HIERARCHY_SYNC_TOKEN_MAX_ENTRIES {
+        bail!("SyncState contains too many hierarchy entries");
+    }
+    if current.iter().any(|(key, fingerprint)| {
+        key.is_empty()
+            || fingerprint.is_empty()
+            || key.len() + fingerprint.len() + 1 > HIERARCHY_SYNC_TOKEN_MAX_ENTRY_BYTES
+    }) {
+        bail!("SyncState hierarchy entry is invalid");
+    }
+    if changes.len() > HIERARCHY_SYNC_TOKEN_MAX_CHANGES {
+        bail!("SyncState contains too many hierarchy changes");
+    }
+    for change in changes {
+        validate_hierarchy_sync_change(change)?;
+    }
+    Ok(())
+}
+
+fn validate_hierarchy_sync_change(change: &str) -> Result<()> {
+    if change.len() > HIERARCHY_SYNC_TOKEN_MAX_CHANGE_BYTES
+        || ![
+            ("<t:Create>", "</t:Create>"),
+            ("<t:Update>", "</t:Update>"),
+            ("<t:Delete>", "</t:Delete>"),
+        ]
+        .iter()
+        .any(|(start, end)| change.starts_with(start) && change.ends_with(end))
+    {
+        bail!("SyncState change page is invalid");
+    }
+    Ok(())
+}
+
+// [MS-OXWSFOLD] sections 2.2.4.4 and 3.1.4.6: a malformed explicit
+// canonical folder ID must be rejected, never collapsed into an unscoped
+// GetFolder projection.
+fn validate_get_folder_canonical_ids(request: &str) -> Result<()> {
+    for id in requested_folder_ids(request) {
+        if let Some(id) = id.strip_prefix("mailbox:") {
+            Uuid::parse_str(id).map_err(|_| anyhow!("GetFolder mailbox folder id is invalid"))?;
+        }
+        if let Some(id) = id.strip_prefix("public-folder:") {
+            Uuid::parse_str(id).map_err(|_| anyhow!("GetFolder public folder id is invalid"))?;
+        }
+    }
+    Ok(())
 }
 
 pub(in crate::service) fn mailbox_by_id(
@@ -929,4 +1126,51 @@ pub(in crate::service) fn public_folder_change_key(folder: &PublicFolder) -> Str
 
 fn collection_folder_change_key(collection: &CollaborationCollection, revision: u64) -> String {
     versioned_change_key("collection-folder", &collection.id, &revision.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{requested_hierarchy_max_changes, validate_get_folder_canonical_ids};
+    use crate::service::ews::sync_state::{ews_sync_cursor_token, parse_ews_sync_cursor_token};
+    use uuid::Uuid;
+
+    fn account(id: &str) -> Uuid {
+        Uuid::parse_str(id).unwrap()
+    }
+
+    #[test]
+    fn hierarchy_uses_opaque_server_cursor_tokens() {
+        let cursor_id = account("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        let token = ews_sync_cursor_token("hierarchy", cursor_id);
+        assert_eq!(
+            parse_ews_sync_cursor_token(&token).unwrap(),
+            ("hierarchy".to_string(), cursor_id)
+        );
+    }
+
+    #[test]
+    fn hierarchy_max_changes_is_positive_and_capped() {
+        assert_eq!(
+            requested_hierarchy_max_changes(
+                "<m:SyncFolderHierarchy><m:MaxChangesReturned>999</m:MaxChangesReturned></m:SyncFolderHierarchy>"
+            )
+            .unwrap(),
+            200
+        );
+        assert!(requested_hierarchy_max_changes(
+            "<m:SyncFolderHierarchy><m:MaxChangesReturned>0</m:MaxChangesReturned></m:SyncFolderHierarchy>"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn get_folder_rejects_malformed_canonical_ids() {
+        assert!(
+            validate_get_folder_canonical_ids(r#"<t:FolderId Id="mailbox:not-a-uuid"/>"#).is_err()
+        );
+        assert!(validate_get_folder_canonical_ids(
+            r#"<t:FolderId Id="public-folder:not-a-uuid"/>"#
+        )
+        .is_err());
+    }
 }

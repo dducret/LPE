@@ -1508,6 +1508,7 @@ dependencies = [
  "lpe-magika",
  "lpe-mail-auth",
  "lpe-storage",
+ "serde",
  "serde_json",
  "sha2",
  "sqlx",

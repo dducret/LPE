@@ -243,6 +243,19 @@ pub trait ExchangeStore: AccountAuthStore {
         cursor_json: serde_json::Value,
     ) -> StoreFuture<'a, MapiSyncCheckpoint>;
 
+    fn fetch_ews_sync_cursor<'a>(
+        &'a self,
+        account_id: Uuid,
+        cursor_id: Uuid,
+    ) -> StoreFuture<'a, Option<EwsSyncCursor>>;
+
+    fn store_ews_sync_cursor<'a>(
+        &'a self,
+        account_id: Uuid,
+        scope: &'a str,
+        snapshot_json: serde_json::Value,
+    ) -> StoreFuture<'a, Uuid>;
+
     fn fetch_mapi_ipm_subtree_ost_id<'a>(
         &'a self,
         account_id: Uuid,
@@ -647,6 +660,60 @@ pub trait ExchangeStore: AccountAuthStore {
         item_ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<PublicFolderItem>>;
 
+    fn copy_ews_public_folder_items<'a>(
+        &'a self,
+        _account_id: Uuid,
+        _item_ids: &'a [Uuid],
+        _target_folder_id: Uuid,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Vec<PublicFolderItem>> {
+        Box::pin(async {
+            anyhow::bail!("atomic public-folder CopyItem batches are not implemented by this store")
+        })
+    }
+
+    fn move_ews_public_folder_items<'a>(
+        &'a self,
+        _account_id: Uuid,
+        _item_ids: &'a [Uuid],
+        _target_folder_id: Uuid,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Vec<PublicFolderItem>> {
+        Box::pin(async {
+            anyhow::bail!("atomic public-folder MoveItem batches are not implemented by this store")
+        })
+    }
+
+    /// EmptyFolder is limited to at most 10,000 items. Stores that cannot
+    /// validate and mutate the complete request atomically reject it.
+    fn empty_ews_mailbox_folders<'a>(
+        &'a self,
+        _account_id: Uuid,
+        _folder_ids: &'a [Uuid],
+        _delete_subfolders: bool,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async {
+            anyhow::bail!("atomic EmptyFolder mailbox mutation is not implemented by this store")
+        })
+    }
+
+    /// EmptyFolder is limited to at most 10,000 items. Stores that cannot
+    /// validate and mutate the complete request atomically reject it.
+    fn empty_ews_public_folders<'a>(
+        &'a self,
+        _account_id: Uuid,
+        _folder_ids: &'a [Uuid],
+        _delete_subfolders: bool,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async {
+            anyhow::bail!(
+                "atomic EmptyFolder public-folder mutation is not implemented by this store"
+            )
+        })
+    }
+
     fn fetch_public_folder_permissions<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -944,13 +1011,6 @@ pub trait ExchangeStore: AccountAuthStore {
         activate: bool,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, SieveScriptDocument>;
-
-    fn set_active_sieve_script<'a>(
-        &'a self,
-        account_id: Uuid,
-        name: Option<&'a str>,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, Option<String>>;
 
     fn delete_sieve_script<'a>(
         &'a self,
@@ -1293,6 +1353,22 @@ pub trait ExchangeStore: AccountAuthStore {
         target_mailbox_id: Uuid,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, JmapEmail>;
+
+    fn copy_jmap_emails<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_ids: &'a [Uuid],
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
+
+    fn move_jmap_emails<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_ids: &'a [Uuid],
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
 
     fn mirror_jmap_email_into_mailbox<'a>(
         &'a self,

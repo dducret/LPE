@@ -156,7 +156,15 @@ where
         principal: &AccountPrincipal,
         request: &str,
     ) -> Result<String> {
-        match requested_folder_kind(request).unwrap_or(FolderKind::Contacts) {
+        let folder_kind = requested_folder_kind(request).unwrap_or(FolderKind::Contacts);
+        if let Err(error) = validate_find_item_folder_ids(request, folder_kind) {
+            return Ok(operation_error_response(
+                "FindItem",
+                "ErrorFolderNotFound",
+                &error.to_string(),
+            ));
+        }
+        match folder_kind {
             FolderKind::Root => Ok(find_item_response(String::new())),
             FolderKind::Contacts => {
                 let collection_id = requested_collection_id(request).unwrap_or(CONTACTS_FOLDER_ID);
@@ -279,5 +287,49 @@ where
                 ))
             }
         }
+    }
+}
+
+// [MS-OXWSMSG] section 3.1.4.5: malformed explicit folder references must
+// not be treated as an empty result set.
+fn validate_find_item_folder_ids(request: &str, folder_kind: FolderKind) -> Result<()> {
+    let ids = requested_folder_ids(request);
+    match folder_kind {
+        FolderKind::Mailbox => {
+            for id in ids {
+                let id = id.strip_prefix("mailbox:").unwrap_or(&id);
+                Uuid::parse_str(id)
+                    .map_err(|_| anyhow!("FindItem mailbox folder id is invalid"))?;
+            }
+        }
+        FolderKind::PublicFolders => {
+            for id in ids {
+                let id = id
+                    .strip_prefix("public-folder:")
+                    .ok_or_else(|| anyhow!("FindItem public folder id is invalid"))?;
+                Uuid::parse_str(id).map_err(|_| anyhow!("FindItem public folder id is invalid"))?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{validate_find_item_folder_ids, FolderKind};
+
+    #[test]
+    fn find_item_rejects_malformed_canonical_folder_ids() {
+        assert!(validate_find_item_folder_ids(
+            r#"<t:FolderId Id="mailbox:not-a-uuid"/>"#,
+            FolderKind::Mailbox,
+        )
+        .is_err());
+        assert!(validate_find_item_folder_ids(
+            r#"<t:FolderId Id="public-folder:not-a-uuid"/>"#,
+            FolderKind::PublicFolders,
+        )
+        .is_err());
     }
 }

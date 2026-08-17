@@ -47,6 +47,8 @@ const EXCHANGE_STORE_MAPI_METADATA: &str =
     include_str!("../../lpe-exchange/src/store/storage_impl/mapi_metadata.rs");
 const EXCHANGE_STORE_MAPI_SYNC_CHECKPOINTS: &str =
     include_str!("../../lpe-exchange/src/store/storage_impl/mapi_sync_checkpoints.rs");
+const EXCHANGE_STORE_EWS_SYNC_CURSORS: &str =
+    include_str!("../../lpe-exchange/src/store/storage_impl/ews_sync_cursors.rs");
 const EXCHANGE_STORE_DELEGATE_FREEBUSY_IDENTITY: &str =
     include_str!("../../lpe-exchange/src/store/storage_impl/delegate_freebusy_identity.rs");
 const EXCHANGE_STORE_EWS_DELEGATION: &str =
@@ -3341,6 +3343,7 @@ fn bcc_is_absent_from_search_log_cursor_and_ai_projection_tables() {
         "jmap_query_states",
         "activesync_devices",
         "activesync_sync_cursors",
+        "ews_sync_cursors",
         "mapi_sync_checkpoints",
     ] {
         let definition = table_definition(table_name).to_ascii_lowercase();
@@ -3357,6 +3360,7 @@ fn protocol_cursor_tables_do_not_store_canonical_content() {
         "jmap_query_states",
         "activesync_devices",
         "activesync_sync_cursors",
+        "ews_sync_cursors",
         "mapi_sync_checkpoints",
     ] {
         let definition = table_definition(table_name).to_ascii_lowercase();
@@ -3451,6 +3455,26 @@ fn activesync_sync_state_uses_v2_cursor_table() {
             "ActiveSync cursor cleanup must not delete canonical mailbox data"
         );
     }
+}
+
+#[test]
+fn ews_sync_cursors_store_only_bounded_protocol_snapshots() {
+    assert_schema_contains_all(&[
+        "CREATE TABLE ews_sync_cursors",
+        "scope TEXT NOT NULL CHECK (btrim(scope) <> '' AND length(scope) <= 512)",
+        "snapshot_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+        "CHECK (jsonb_typeof(snapshot_json) = 'object')",
+        "CREATE INDEX ews_sync_cursors_account_idx",
+        "CREATE INDEX ews_sync_cursors_expiry_idx",
+    ]);
+    assert!(
+        EXCHANGE_STORE.contains("fetch_ews_sync_cursor")
+            && EXCHANGE_STORE.contains("store_ews_sync_cursor")
+            && EXCHANGE_STORE_EWS_SYNC_CURSORS.contains("FROM ews_sync_cursors")
+            && EXCHANGE_STORE_EWS_SYNC_CURSORS.contains("INSERT INTO ews_sync_cursors")
+            && EXCHANGE_STORE_EWS_SYNC_CURSORS.contains("expires_at > NOW()"),
+        "EWS must use scoped, expiring protocol cursor rows"
+    );
 }
 
 #[test]

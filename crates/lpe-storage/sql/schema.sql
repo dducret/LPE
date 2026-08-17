@@ -2128,6 +2128,26 @@ CREATE INDEX activesync_sync_cursors_account_idx
 CREATE INDEX activesync_sync_cursors_expiry_idx
     ON activesync_sync_cursors (tenant_id, expires_at);
 
+CREATE TABLE ews_sync_cursors (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    scope TEXT NOT NULL CHECK (btrim(scope) <> '' AND length(scope) <= 512),
+    snapshot_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    CHECK (expires_at > created_at),
+    CHECK (jsonb_typeof(snapshot_json) = 'object'),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX ews_sync_cursors_account_idx
+    ON ews_sync_cursors (tenant_id, account_id, updated_at DESC);
+
+CREATE INDEX ews_sync_cursors_expiry_idx
+    ON ews_sync_cursors (tenant_id, expires_at);
+
 CREATE TABLE mapi_sync_checkpoints (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,

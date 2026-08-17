@@ -1,10 +1,13 @@
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use sha2::{Digest, Sha256};
+use serde::{Deserialize, Serialize};
 
 use super::super::*;
+use crate::store::EwsSyncCursor;
 
-const COLLABORATION_SYNC_STATE_VERSION: &str = "v2";
-const PUBLIC_FOLDER_SYNC_STATE_VERSION: &str = "v3";
+const LEGACY_COLLABORATION_SYNC_STATE_VERSION: &str = "v2";
+const LEGACY_PUBLIC_FOLDER_SYNC_STATE_VERSION: &str = "v3";
+const EWS_SYNC_CURSOR_TOKEN_VERSION: &str = "lpe-ews-sync.v1";
+const EWS_SYNC_CURSOR_MAX_ITEMS: usize = 1_024;
+const EWS_SYNC_CURSOR_MAX_ITEM_BYTES: usize = 512;
 
 impl<S, V> ExchangeService<S, V>
 where
@@ -19,18 +22,42 @@ where
         let mut changes = String::new();
         let mut includes_last = true;
         let max_changes = requested_max_changes(request)?;
-        let sync_state = match if requested_sync_state(request)
+        if element_contents(request, "SyncState").len() > 1 {
+            bail!("SyncFolderItems accepts at most one SyncState");
+        }
+        let requested_state = requested_sync_state(request);
+        let cursor = match requested_state
             .as_deref()
-            .is_some_and(|state| state.starts_with("lpe-sync."))
+            .filter(|state| state.starts_with(EWS_SYNC_CURSOR_TOKEN_VERSION))
         {
-            FolderKind::Mailbox
-        } else {
-            requested_folder_kind(request).unwrap_or(FolderKind::Contacts)
+            Some(state) => {
+                let (kind, cursor_id) = parse_ews_sync_cursor_token(state)?;
+                let cursor = self
+                    .store
+                    .fetch_ews_sync_cursor(principal.account_id, cursor_id)
+                    .await?
+                    .ok_or_else(|| anyhow!("SyncState is no longer available"))?;
+                Some((kind, cursor))
+            }
+            None => None,
+        };
+        let sync_state = match match cursor.as_ref().map(|(kind, _)| kind.as_str()) {
+            Some("mailbox") => FolderKind::Mailbox,
+            Some("contacts") => FolderKind::Contacts,
+            Some("calendar") => FolderKind::Calendar,
+            Some("tasks") => FolderKind::Tasks,
+            Some("public-folder") => FolderKind::PublicFolders,
+            Some(_) => bail!("SyncState kind is invalid"),
+            None => requested_folder_kind(request).unwrap_or(FolderKind::Contacts),
         } {
             FolderKind::Root => "root:0".to_string(),
             FolderKind::Contacts => {
-                let collection_id =
-                    requested_sync_collection_id(request, "contacts", CONTACTS_FOLDER_ID);
+                let collection_id = requested_cursor_collection_id(
+                    request,
+                    cursor.as_ref().map(|(_, cursor)| cursor),
+                    "contacts",
+                    CONTACTS_FOLDER_ID,
+                )?;
                 let contacts = self
                     .store
                     .fetch_accessible_contacts_in_collection(principal.account_id, &collection_id)
@@ -50,9 +77,22 @@ where
                     .iter()
                     .map(|(id, _)| *id)
                     .collect::<HashSet<_>>();
-                let previous_state = requested_sync_state(request)
-                    .map(|state| collaboration_sync_state_items(&state, "contacts", &collection_id))
-                    .unwrap_or_default();
+                let scope = format!("contacts:{collection_id}");
+                let previous_state = match cursor.as_ref() {
+                    Some((_, cursor)) => cursor_snapshot(cursor, &scope)?,
+                    None => requested_state
+                        .as_deref()
+                        .map(|state| {
+                            collaboration_sync_state_items(
+                                state,
+                                principal.account_id,
+                                "contacts",
+                                &collection_id,
+                            )
+                        })
+                        .transpose()?
+                        .unwrap_or_default(),
+                };
                 let mut next_by_id = sync_state_items_by_id(&previous_state.items);
                 let previous_by_id = next_by_id.clone();
                 let mut pending_changes = Vec::new();
@@ -115,20 +155,36 @@ where
                     max_changes,
                     &mut next_by_id,
                 );
-                collaboration_sync_state(
-                    "contacts",
-                    &collection_id,
-                    &next_by_id
+                let snapshot = CollaborationSyncState {
+                    is_current_version: true,
+                    items: next_by_id
                         .into_iter()
                         .filter_map(|(id, change_key)| {
-                            change_key.map(|change_key| (id, change_key))
+                            change_key.map(|change_key| SyncStateItem {
+                                id,
+                                change_key: Some(change_key),
+                            })
                         })
-                        .collect::<Vec<_>>(),
-                )
+                        .collect(),
+                };
+                validate_collaboration_sync_snapshot(&snapshot)?;
+                let cursor_id = self
+                    .store
+                    .store_ews_sync_cursor(
+                        principal.account_id,
+                        &scope,
+                        serde_json::to_value(snapshot)?,
+                    )
+                    .await?;
+                ews_sync_cursor_token("contacts", cursor_id)
             }
             FolderKind::Calendar => {
-                let collection_id =
-                    requested_sync_collection_id(request, "calendar", CALENDAR_FOLDER_ID);
+                let collection_id = requested_cursor_collection_id(
+                    request,
+                    cursor.as_ref().map(|(_, cursor)| cursor),
+                    "calendar",
+                    CALENDAR_FOLDER_ID,
+                )?;
                 let events = self
                     .store
                     .fetch_accessible_events_in_collection(principal.account_id, &collection_id)
@@ -148,9 +204,22 @@ where
                     .iter()
                     .map(|(id, _)| *id)
                     .collect::<HashSet<_>>();
-                let previous_state = requested_sync_state(request)
-                    .map(|state| collaboration_sync_state_items(&state, "calendar", &collection_id))
-                    .unwrap_or_default();
+                let scope = format!("calendar:{collection_id}");
+                let previous_state = match cursor.as_ref() {
+                    Some((_, cursor)) => cursor_snapshot(cursor, &scope)?,
+                    None => requested_state
+                        .as_deref()
+                        .map(|state| {
+                            collaboration_sync_state_items(
+                                state,
+                                principal.account_id,
+                                "calendar",
+                                &collection_id,
+                            )
+                        })
+                        .transpose()?
+                        .unwrap_or_default(),
+                };
                 let mut next_by_id = sync_state_items_by_id(&previous_state.items);
                 let previous_by_id = next_by_id.clone();
                 let mut pending_changes = Vec::new();
@@ -213,19 +282,36 @@ where
                     max_changes,
                     &mut next_by_id,
                 );
-                collaboration_sync_state(
-                    "calendar",
-                    &collection_id,
-                    &next_by_id
+                let snapshot = CollaborationSyncState {
+                    is_current_version: true,
+                    items: next_by_id
                         .into_iter()
                         .filter_map(|(id, change_key)| {
-                            change_key.map(|change_key| (id, change_key))
+                            change_key.map(|change_key| SyncStateItem {
+                                id,
+                                change_key: Some(change_key),
+                            })
                         })
-                        .collect::<Vec<_>>(),
-                )
+                        .collect(),
+                };
+                validate_collaboration_sync_snapshot(&snapshot)?;
+                let cursor_id = self
+                    .store
+                    .store_ews_sync_cursor(
+                        principal.account_id,
+                        &scope,
+                        serde_json::to_value(snapshot)?,
+                    )
+                    .await?;
+                ews_sync_cursor_token("calendar", cursor_id)
             }
             FolderKind::Tasks => {
-                let collection_id = requested_sync_collection_id(request, "tasks", TASKS_FOLDER_ID);
+                let collection_id = requested_cursor_collection_id(
+                    request,
+                    cursor.as_ref().map(|(_, cursor)| cursor),
+                    "tasks",
+                    TASKS_FOLDER_ID,
+                )?;
                 let tasks = self
                     .store
                     .fetch_accessible_tasks_in_collection(principal.account_id, &collection_id)
@@ -245,9 +331,22 @@ where
                     .iter()
                     .map(|(id, _)| *id)
                     .collect::<HashSet<_>>();
-                let previous_state = requested_sync_state(request)
-                    .map(|state| collaboration_sync_state_items(&state, "tasks", &collection_id))
-                    .unwrap_or_default();
+                let scope = format!("tasks:{collection_id}");
+                let previous_state = match cursor.as_ref() {
+                    Some((_, cursor)) => cursor_snapshot(cursor, &scope)?,
+                    None => requested_state
+                        .as_deref()
+                        .map(|state| {
+                            collaboration_sync_state_items(
+                                state,
+                                principal.account_id,
+                                "tasks",
+                                &collection_id,
+                            )
+                        })
+                        .transpose()?
+                        .unwrap_or_default(),
+                };
                 let mut next_by_id = sync_state_items_by_id(&previous_state.items);
                 let previous_by_id = next_by_id.clone();
                 let mut pending_changes = Vec::new();
@@ -310,24 +409,41 @@ where
                     max_changes,
                     &mut next_by_id,
                 );
-                collaboration_sync_state(
-                    "tasks",
-                    &collection_id,
-                    &next_by_id
+                let snapshot = CollaborationSyncState {
+                    is_current_version: true,
+                    items: next_by_id
                         .into_iter()
                         .filter_map(|(id, change_key)| {
-                            change_key.map(|change_key| (id, change_key))
+                            change_key.map(|change_key| SyncStateItem {
+                                id,
+                                change_key: Some(change_key),
+                            })
                         })
-                        .collect::<Vec<_>>(),
-                )
+                        .collect(),
+                };
+                validate_collaboration_sync_snapshot(&snapshot)?;
+                let cursor_id = self
+                    .store
+                    .store_ews_sync_cursor(
+                        principal.account_id,
+                        &scope,
+                        serde_json::to_value(snapshot)?,
+                    )
+                    .await?;
+                ews_sync_cursor_token("tasks", cursor_id)
             }
             FolderKind::Mailbox => {
-                if element_contents(request, "SyncState").len() > 1 {
-                    bail!("SyncFolderItems accepts at most one SyncState");
-                }
-                let state = requested_sync_state(request)
-                    .map(|state| parse_mailbox_sync_state(&state, principal.account_id))
-                    .transpose()?;
+                let state = match cursor.as_ref() {
+                    Some((_, cursor)) => {
+                        serde_json::from_value::<MailboxSyncState>(cursor.snapshot_json.clone())
+                            .map(Some)
+                            .map_err(|_| anyhow!("SyncState snapshot is invalid"))?
+                    }
+                    None if requested_state.is_some() => {
+                        bail!("SyncState is not a supported LPE synchronization cursor")
+                    }
+                    None => None,
+                };
                 let mailbox_ids = self
                     .requested_mailbox_folder_ids(principal, request)
                     .await?;
@@ -342,6 +458,11 @@ where
                     (None, Some(state)) => state.mailbox_id,
                     (None, None) => bail!("SyncFolderItems requires a mailbox SyncFolderId"),
                 };
+                if let Some((_, cursor)) = cursor.as_ref() {
+                    if cursor.scope != format!("mailbox:{mailbox_id}") {
+                        bail!("SyncState does not belong to SyncFolderId");
+                    }
+                }
                 if !self
                     .store
                     .fetch_jmap_mailboxes(principal.account_id)
@@ -376,7 +497,15 @@ where
                                 page.last().map(|email| email.id),
                             )
                         };
-                        mailbox_sync_state(principal.account_id, &next)
+                        let cursor_id = self
+                            .store
+                            .store_ews_sync_cursor(
+                                principal.account_id,
+                                &format!("mailbox:{mailbox_id}"),
+                                serde_json::to_value(next)?,
+                            )
+                            .await?;
+                        ews_sync_cursor_token("mailbox", cursor_id)
                     }
                     Some(state) => {
                         let replay = self
@@ -429,10 +558,18 @@ where
                                 _ => {}
                             }
                         }
-                        mailbox_sync_state(
-                            principal.account_id,
-                            &MailboxSyncState::replay(mailbox_id, replay.next_cursor.max(0) as u64),
-                        )
+                        let cursor_id = self
+                            .store
+                            .store_ews_sync_cursor(
+                                principal.account_id,
+                                &format!("mailbox:{mailbox_id}"),
+                                serde_json::to_value(MailboxSyncState::replay(
+                                    mailbox_id,
+                                    replay.next_cursor.max(0) as u64,
+                                ))?,
+                            )
+                            .await?;
+                        ews_sync_cursor_token("mailbox", cursor_id)
                     }
                     None => {
                         let (emails, fence) = mailbox_sync_snapshot(
@@ -458,18 +595,36 @@ where
                                 page.last().map(|email| email.id),
                             )
                         };
-                        mailbox_sync_state(principal.account_id, &next)
+                        let cursor_id = self
+                            .store
+                            .store_ews_sync_cursor(
+                                principal.account_id,
+                                &format!("mailbox:{mailbox_id}"),
+                                serde_json::to_value(next)?,
+                            )
+                            .await?;
+                        ews_sync_cursor_token("mailbox", cursor_id)
                     }
                 }
             }
             FolderKind::PublicFolders => {
-                let Some(folder_id) = requested_public_folder_ids(request).into_iter().next()
-                else {
-                    return Ok(sync_folder_items_response(
-                        "public-folder:0",
-                        String::new(),
-                        true,
-                    ));
+                let folder_id = match requested_public_folder_ids(request).into_iter().next() {
+                    Some(folder_id) => folder_id,
+                    None => match cursor.as_ref().map(|(_, cursor)| cursor.scope.as_str()) {
+                        Some(scope) => Uuid::parse_str(
+                            scope
+                                .strip_prefix("public-folder:")
+                                .ok_or_else(|| anyhow!("SyncState kind is invalid"))?,
+                        )
+                        .map_err(|_| anyhow!("SyncState snapshot is invalid"))?,
+                        None => {
+                            return Ok(sync_folder_items_response(
+                                "public-folder:0",
+                                String::new(),
+                                true,
+                            ))
+                        }
+                    },
                 };
                 let items = self
                     .store
@@ -484,9 +639,21 @@ where
                     .map(|(id, _, _)| *id)
                     .collect::<HashSet<_>>();
                 let collection_id = folder_id.to_string();
-                let previous_state = requested_sync_state(request)
-                    .map(|state| public_folder_sync_state_items(&state, &collection_id))
-                    .unwrap_or_default();
+                let scope = format!("public-folder:{collection_id}");
+                let previous_state = match cursor.as_ref() {
+                    Some((_, cursor)) => cursor_snapshot(cursor, &scope)?,
+                    None => requested_state
+                        .as_deref()
+                        .map(|state| {
+                            public_folder_sync_state_items(
+                                state,
+                                principal.account_id,
+                                &collection_id,
+                            )
+                        })
+                        .transpose()?
+                        .unwrap_or_default(),
+                };
                 let previous_by_id = previous_state
                     .items
                     .iter()
@@ -534,7 +701,27 @@ where
                         changes.push_str("</t:Delete>");
                     }
                 }
-                public_folder_sync_state(&collection_id, &current_items)
+                let snapshot = PublicFolderSyncState {
+                    is_current_version: true,
+                    items: current_items
+                        .into_iter()
+                        .map(|(id, change_key, is_read)| PublicFolderSyncStateItem {
+                            id,
+                            change_key: Some(change_key),
+                            is_read: Some(is_read),
+                        })
+                        .collect(),
+                };
+                validate_public_folder_sync_snapshot(&snapshot)?;
+                let cursor_id = self
+                    .store
+                    .store_ews_sync_cursor(
+                        principal.account_id,
+                        &scope,
+                        serde_json::to_value(snapshot)?,
+                    )
+                    .await?;
+                ews_sync_cursor_token("public-folder", cursor_id)
             }
         };
 
@@ -544,6 +731,58 @@ where
             includes_last,
         ))
     }
+}
+
+pub(in crate::service) fn ews_sync_cursor_token(kind: &str, cursor_id: Uuid) -> String {
+    format!("{EWS_SYNC_CURSOR_TOKEN_VERSION}.{kind}.{cursor_id}")
+}
+
+pub(in crate::service) fn parse_ews_sync_cursor_token(value: &str) -> Result<(String, Uuid)> {
+    let parts = value.split('.').collect::<Vec<_>>();
+    let ["lpe-ews-sync", "v1", kind, cursor_id] = parts.as_slice() else {
+        bail!("SyncState is not a supported LPE synchronization cursor");
+    };
+    if !matches!(
+        *kind,
+        "hierarchy" | "mailbox" | "contacts" | "calendar" | "tasks" | "public-folder"
+    ) {
+        bail!("SyncState kind is invalid");
+    }
+    Ok((
+        (*kind).to_string(),
+        Uuid::parse_str(cursor_id).map_err(|_| anyhow!("SyncState cursor is invalid"))?,
+    ))
+}
+
+fn cursor_snapshot<T>(cursor: &EwsSyncCursor, scope: &str) -> Result<T>
+where
+    T: serde::de::DeserializeOwned,
+{
+    if cursor.scope != scope {
+        bail!("SyncState does not belong to the requested folder");
+    }
+    serde_json::from_value(cursor.snapshot_json.clone())
+        .map_err(|_| anyhow!("SyncState snapshot is invalid"))
+}
+
+fn requested_cursor_collection_id(
+    request: &str,
+    cursor: Option<&EwsSyncCursor>,
+    kind: &str,
+    default_id: &str,
+) -> Result<String> {
+    if let Some(collection_id) = requested_collection_id_in(request, "SyncFolderId") {
+        return Ok(collection_id.to_string());
+    }
+    if let Some(cursor) = cursor {
+        return cursor
+            .scope
+            .strip_prefix(&format!("{kind}:"))
+            .filter(|collection_id| !collection_id.is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| anyhow!("SyncState does not belong to the requested folder"));
+    }
+    Ok(requested_sync_collection_id(request, kind, default_id))
 }
 
 pub(in crate::service) async fn contact_change_keys<S>(
@@ -664,23 +903,6 @@ fn change_key_version<'a>(
         .ok_or_else(|| anyhow!("missing durable {item_kind} version for EWS ChangeKey"))
 }
 
-pub(in crate::service) fn collaboration_sync_state(
-    kind: &str,
-    collection_id: &str,
-    items: &[(Uuid, String)],
-) -> String {
-    let item_list = items
-        .iter()
-        .map(|(id, change_key)| format!("{id}={change_key}"))
-        .collect::<Vec<_>>()
-        .join(",");
-    if item_list.is_empty() {
-        format!("{kind}:{collection_id}:{COLLABORATION_SYNC_STATE_VERSION}:0")
-    } else {
-        format!("{kind}:{collection_id}:{COLLABORATION_SYNC_STATE_VERSION}:{item_list}")
-    }
-}
-
 async fn mailbox_sync_snapshot<S>(
     store: &S,
     account_id: Uuid,
@@ -728,7 +950,7 @@ where
     Ok((emails, replay.current_cursor.unwrap_or(0).max(0) as u64))
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct MailboxSyncState {
     mailbox_id: Uuid,
     cursor: u64,
@@ -753,95 +975,14 @@ impl MailboxSyncState {
     }
 }
 
-fn mailbox_sync_state(account_id: Uuid, state: &MailboxSyncState) -> String {
-    let (mode, after) = match state.snapshot_after {
-        Some(after) => ("snapshot", after.to_string()),
-        None => ("replay", "-".to_string()),
-    };
-    let payload = URL_SAFE_NO_PAD.encode(format!(
-        "{account_id}|{}|{mode}|{}|{after}",
-        state.mailbox_id, state.cursor,
-    ));
-    format!(
-        "lpe-sync.v2.{payload}.{}",
-        mailbox_sync_state_digest(&payload)
-    )
-}
-
-fn parse_mailbox_sync_state(state: &str, account_id: Uuid) -> Result<MailboxSyncState> {
-    let parts = state.split('.').collect::<Vec<_>>();
-    let ["lpe-sync", "v2", payload, signature] = parts.as_slice() else {
-        bail!("SyncState is not a supported mailbox synchronization token");
-    };
-    if mailbox_sync_state_digest(payload) != *signature {
-        bail!("SyncState integrity validation failed");
-    }
-    let decoded = URL_SAFE_NO_PAD
-        .decode(payload.as_bytes())
-        .map_err(|_| anyhow!("SyncState payload is invalid"))?;
-    let decoded =
-        String::from_utf8(decoded).map_err(|_| anyhow!("SyncState payload is invalid"))?;
-    let mut values = decoded.split('|');
-    let token_account_id = values
-        .next()
-        .ok_or_else(|| anyhow!("SyncState account binding is missing"))
-        .and_then(|value| {
-            Uuid::parse_str(value).map_err(|_| anyhow!("SyncState account binding is invalid"))
-        })?;
-    if token_account_id != account_id {
-        bail!("SyncState belongs to another authenticated account");
-    }
-    let mailbox_id = values
-        .next()
-        .ok_or_else(|| anyhow!("SyncState mailbox binding is missing"))
-        .and_then(|value| {
-            Uuid::parse_str(value).map_err(|_| anyhow!("SyncState mailbox binding is invalid"))
-        })?;
-    let mode = values
-        .next()
-        .ok_or_else(|| anyhow!("SyncState mode is missing"))?;
-    let cursor = values
-        .next()
-        .ok_or_else(|| anyhow!("SyncState cursor is missing"))?
-        .parse::<u64>()
-        .map_err(|_| anyhow!("SyncState cursor is invalid"))?;
-    let snapshot_after = match (
-        mode,
-        values
-            .next()
-            .ok_or_else(|| anyhow!("SyncState snapshot cursor is missing"))?,
-    ) {
-        ("replay", "-") => None,
-        ("snapshot", value) => Some(
-            Uuid::parse_str(value).map_err(|_| anyhow!("SyncState snapshot cursor is invalid"))?,
-        ),
-        _ => bail!("SyncState mode is invalid"),
-    };
-    if values.next().is_some() {
-        bail!("SyncState payload is malformed");
-    }
-    Ok(MailboxSyncState {
-        mailbox_id,
-        cursor,
-        snapshot_after,
-    })
-}
-
-fn mailbox_sync_state_digest(payload: &str) -> String {
-    let mut digest = Sha256::new();
-    digest.update(b"lpe-ews-mailbox-sync-v1\0");
-    digest.update(payload.as_bytes());
-    URL_SAFE_NO_PAD.encode(digest.finalize())
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct PublicFolderSyncStateItem {
     id: Uuid,
     change_key: Option<String>,
     is_read: Option<bool>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct PublicFolderSyncState {
     is_current_version: bool,
     items: Vec<PublicFolderSyncStateItem>,
@@ -856,72 +997,39 @@ impl Default for PublicFolderSyncState {
     }
 }
 
-fn public_folder_sync_state(collection_id: &str, items: &[(Uuid, String, bool)]) -> String {
-    let item_list = items
-        .iter()
-        .map(|(id, change_key, is_read)| format!("{id}={change_key}|{}", u8::from(*is_read)))
-        .collect::<Vec<_>>()
-        .join(",");
-    if item_list.is_empty() {
-        format!("public-folder:{collection_id}:{PUBLIC_FOLDER_SYNC_STATE_VERSION}:0")
-    } else {
-        format!("public-folder:{collection_id}:{PUBLIC_FOLDER_SYNC_STATE_VERSION}:{item_list}")
-    }
-}
-
-fn public_folder_sync_state_items(sync_state: &str, collection_id: &str) -> PublicFolderSyncState {
-    let prefix = format!("public-folder:{collection_id}:");
-    let Some(values) = sync_state.strip_prefix(&prefix) else {
-        return PublicFolderSyncState::default();
-    };
-    let Some(values) = values.strip_prefix(&format!("{PUBLIC_FOLDER_SYNC_STATE_VERSION}:")) else {
-        let legacy = collaboration_sync_state_items(sync_state, "public-folder", collection_id);
-        return PublicFolderSyncState {
-            is_current_version: false,
-            items: legacy
-                .items
-                .into_iter()
-                .map(|item| PublicFolderSyncStateItem {
-                    id: item.id,
-                    change_key: item.change_key,
-                    is_read: None,
-                })
-                .collect(),
-        };
-    };
-    let items = values
-        .split(',')
-        .filter(|value| !value.is_empty() && *value != "0")
-        .filter_map(|value| {
-            let (id, value) = value.split_once('=')?;
-            let (change_key, is_read) = value.rsplit_once('|')?;
-            let is_read = match is_read {
-                "0" => false,
-                "1" => true,
-                _ => return None,
-            };
-            Uuid::parse_str(id)
-                .ok()
-                .map(|id| PublicFolderSyncStateItem {
-                    id,
-                    change_key: Some(change_key.to_string()),
-                    is_read: Some(is_read),
-                })
+fn validate_public_folder_sync_snapshot(state: &PublicFolderSyncState) -> Result<()> {
+    if state.items.len() > EWS_SYNC_CURSOR_MAX_ITEMS
+        || state.items.iter().any(|item| {
+            item.id.to_string().len() + item.change_key.as_deref().unwrap_or_default().len() + 3
+                > EWS_SYNC_CURSOR_MAX_ITEM_BYTES
         })
-        .collect();
-    PublicFolderSyncState {
-        is_current_version: true,
-        items,
+    {
+        bail!("SyncState contains too many or oversized item entries");
     }
+    Ok(())
 }
 
-#[derive(Debug, Clone)]
+fn public_folder_sync_state_items(
+    sync_state: &str,
+    _account_id: Uuid,
+    collection_id: &str,
+) -> Result<PublicFolderSyncState> {
+    if sync_state == format!("public-folder:{collection_id}:0")
+        || sync_state
+            == format!("public-folder:{collection_id}:{LEGACY_PUBLIC_FOLDER_SYNC_STATE_VERSION}:0")
+    {
+        return Ok(PublicFolderSyncState::default());
+    }
+    bail!("nonempty legacy public-folder SyncState is not supported")
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(in crate::service) struct SyncStateItem {
     pub(in crate::service) id: Uuid,
     pub(in crate::service) change_key: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(in crate::service) struct CollaborationSyncState {
     pub(in crate::service) is_current_version: bool,
     pub(in crate::service) items: Vec<SyncStateItem>,
@@ -936,42 +1044,31 @@ impl Default for CollaborationSyncState {
     }
 }
 
+fn validate_collaboration_sync_snapshot(state: &CollaborationSyncState) -> Result<()> {
+    if state.items.len() > EWS_SYNC_CURSOR_MAX_ITEMS
+        || state.items.iter().any(|item| {
+            item.id.to_string().len() + item.change_key.as_deref().unwrap_or_default().len() + 1
+                > EWS_SYNC_CURSOR_MAX_ITEM_BYTES
+        })
+    {
+        bail!("SyncState contains too many or oversized item entries");
+    }
+    Ok(())
+}
+
 pub(in crate::service) fn collaboration_sync_state_items(
     sync_state: &str,
+    _account_id: Uuid,
     kind: &str,
     collection_id: &str,
-) -> CollaborationSyncState {
-    let prefix = format!("{kind}:{collection_id}:");
-    let Some(values) = sync_state.strip_prefix(&prefix) else {
-        return CollaborationSyncState::default();
-    };
-    let (is_current_version, values) = if let Some(values) =
-        values.strip_prefix(&format!("{COLLABORATION_SYNC_STATE_VERSION}:"))
+) -> Result<CollaborationSyncState> {
+    if sync_state == format!("{kind}:{collection_id}:0")
+        || sync_state
+            == format!("{kind}:{collection_id}:{LEGACY_COLLABORATION_SYNC_STATE_VERSION}:0")
     {
-        (true, values)
-    } else {
-        (false, values)
-    };
-    let items = values
-        .split(',')
-        .filter(|value| !value.is_empty() && *value != "0")
-        .filter_map(|value| {
-            if let Some((id, change_key)) = value.split_once('=') {
-                return Uuid::parse_str(id).ok().map(|id| SyncStateItem {
-                    id,
-                    change_key: Some(change_key.to_string()),
-                });
-            }
-            Uuid::parse_str(value).ok().map(|id| SyncStateItem {
-                id,
-                change_key: None,
-            })
-        })
-        .collect();
-    CollaborationSyncState {
-        is_current_version,
-        items,
+        return Ok(CollaborationSyncState::default());
     }
+    bail!("nonempty legacy collaboration SyncState is not supported")
 }
 
 pub(in crate::service) fn collaboration_sync_state_collection_id<'a>(
@@ -1050,4 +1147,56 @@ pub(in crate::service) fn sync_state_items_by_id(
         .iter()
         .map(|item| (item.id, item.change_key.clone()))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        collaboration_sync_state_items, ews_sync_cursor_token, parse_ews_sync_cursor_token,
+        public_folder_sync_state_items,
+    };
+    use uuid::Uuid;
+
+    fn uuid(value: &str) -> Uuid {
+        Uuid::parse_str(value).unwrap()
+    }
+
+    #[test]
+    fn opaque_sync_cursor_token_is_bounded_to_a_known_kind() {
+        let cursor_id = uuid("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        let state = ews_sync_cursor_token("contacts", cursor_id);
+        assert_eq!(
+            parse_ews_sync_cursor_token(&state).unwrap(),
+            ("contacts".to_string(), cursor_id)
+        );
+        assert!(parse_ews_sync_cursor_token(
+            "lpe-ews-sync.v1.unknown.bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn legacy_empty_sync_states_reset_but_nonempty_states_are_rejected() {
+        let account_id = uuid("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        assert!(collaboration_sync_state_items(
+            "contacts:default:v2:0",
+            account_id,
+            "contacts",
+            "default"
+        )
+        .is_ok());
+        assert!(collaboration_sync_state_items(
+            "contacts:default:v2:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb=ck-contact",
+            account_id,
+            "contacts",
+            "default",
+        )
+        .is_err());
+        assert!(public_folder_sync_state_items(
+            "public-folder:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb:v3:cccccccc-cccc-cccc-cccc-cccccccccccc=ck-public|1",
+            account_id,
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        )
+        .is_err());
+    }
 }

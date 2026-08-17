@@ -505,15 +505,6 @@ macro_rules! store_impl_collaboration {
         })
     }
 
-    fn set_active_sieve_script<'a>(
-        &'a self,
-        account_id: Uuid,
-        name: Option<&'a str>,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, Option<String>> {
-        Box::pin(async move { self.set_active_sieve_script(account_id, name, audit).await })
-    }
-
     fn delete_sieve_script<'a>(
         &'a self,
         account_id: Uuid,

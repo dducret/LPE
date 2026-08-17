@@ -74,6 +74,7 @@ mod ews {
     pub(super) mod folder_requests;
     pub(super) mod folders;
     pub(super) mod ids;
+    pub(super) mod item_batch_responses;
     pub(super) mod item_reads;
     pub(super) mod items;
     pub(super) mod mail;
@@ -885,43 +886,18 @@ where
                 index += 1;
             }
         }
-        for current_id in &folder_ids {
-            let message_ids = self
-                .store
-                .query_jmap_email_ids(principal.account_id, Some(*current_id), None, 0, 10_000)
-                .await?
-                .ids;
-            for message_id in message_ids {
-                self.store
-                    .delete_jmap_email_from_mailbox(
-                        principal.account_id,
-                        *current_id,
-                        message_id,
-                        AuditEntryInput {
-                            actor: principal.email.clone(),
-                            action: "ews-empty-folder-message".to_string(),
-                            subject: message_id.to_string(),
-                        },
-                    )
-                    .await?;
-            }
-        }
-        if delete_subfolders {
-            for child_id in folder_ids.into_iter().skip(1).rev() {
-                self.store
-                    .destroy_jmap_mailbox(
-                        principal.account_id,
-                        child_id,
-                        AuditEntryInput {
-                            actor: principal.email.clone(),
-                            action: "ews-empty-folder-delete-subfolder".to_string(),
-                            subject: child_id.to_string(),
-                        },
-                    )
-                    .await?;
-            }
-        }
-        Ok(())
+        self.store
+            .empty_ews_mailbox_folders(
+                principal.account_id,
+                &folder_ids,
+                delete_subfolders,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-empty-folder".to_string(),
+                    subject: format!("{} folders", folder_ids.len()),
+                },
+            )
+            .await
     }
 
     async fn copy_public_folder_tree(
@@ -1019,7 +995,6 @@ where
             .store
             .fetch_public_folder_trees(principal.account_id)
             .await?;
-        let mut items_by_folder = Vec::new();
         for current_id in &folder_ids {
             let folder = self
                 .store
@@ -1036,45 +1011,19 @@ where
             {
                 bail!("public folder tree administration is required to delete subfolders");
             }
-            items_by_folder.push((
-                *current_id,
-                self.store
-                    .fetch_public_folder_items(principal.account_id, *current_id)
-                    .await?,
-            ));
         }
-        for (current_id, items) in items_by_folder {
-            for item in items {
-                self.store
-                    .delete_public_folder_item(
-                        principal.account_id,
-                        current_id,
-                        item.id,
-                        AuditEntryInput {
-                            actor: principal.email.clone(),
-                            action: "ews-empty-public-folder-item".to_string(),
-                            subject: item.id.to_string(),
-                        },
-                    )
-                    .await?;
-            }
-        }
-        if delete_subfolders {
-            for child_id in folder_ids.into_iter().skip(1).rev() {
-                self.store
-                    .delete_public_folder(
-                        principal.account_id,
-                        child_id,
-                        AuditEntryInput {
-                            actor: principal.email.clone(),
-                            action: "ews-empty-public-folder-delete-subfolder".to_string(),
-                            subject: child_id.to_string(),
-                        },
-                    )
-                    .await?;
-            }
-        }
-        Ok(())
+        self.store
+            .empty_ews_public_folders(
+                principal.account_id,
+                &folder_ids,
+                delete_subfolders,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-empty-public-folder".to_string(),
+                    subject: format!("{} folders", folder_ids.len()),
+                },
+            )
+            .await
     }
 
     async fn delete_folder(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {

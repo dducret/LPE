@@ -350,6 +350,32 @@ macro_rules! store_impl_messages {
         })
     }
 
+    fn copy_jmap_emails<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_ids: &'a [Uuid],
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.copy_jmap_emails(account_id, message_ids, target_mailbox_id, audit)
+                .await
+        })
+    }
+
+    fn move_jmap_emails<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_ids: &'a [Uuid],
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.move_jmap_emails(account_id, message_ids, target_mailbox_id, audit)
+                .await
+        })
+    }
+
     fn mirror_jmap_email_into_mailbox<'a>(
         &'a self,
         account_id: Uuid,
@@ -449,6 +475,25 @@ macro_rules! store_impl_messages {
         Box::pin(async move {
             self.delete_jmap_email_from_mailbox(account_id, mailbox_id, message_id, audit)
                 .await
+        })
+    }
+
+    fn empty_ews_mailbox_folders<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_ids: &'a [Uuid],
+        delete_subfolders: bool,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            Storage::empty_ews_mailbox_folders(
+                self,
+                account_id,
+                folder_ids,
+                delete_subfolders,
+                audit,
+            )
+            .await
         })
     }
 

@@ -2,6 +2,8 @@ use super::super::*;
 use crate::ews_types::{EwsExternalAudience, EwsOofState};
 use lpe_core::sieve::{Action, Statement};
 
+const EWS_OOF_SCRIPT_NAME: &str = "ews-oof";
+
 impl<S, V> ExchangeService<S, V>
 where
     S: ExchangeStore + Clone + Send + Sync + 'static,
@@ -29,6 +31,10 @@ where
     ) -> Result<String> {
         let result = async {
             ensure_oof_mailbox_is_principal(principal, request)?;
+            let active_script = self
+                .store
+                .fetch_active_sieve_script(principal.account_id)
+                .await?;
             let settings = element_content(request, "UserOofSettings")
                 .or_else(|| element_content(request, "OofSettings"))
                 .unwrap_or(request);
@@ -36,17 +42,22 @@ where
                 element_text(settings, "OofState").unwrap_or_else(|| "Disabled".to_string());
             match state.trim().to_ascii_lowercase().as_str() {
                 "disabled" => {
-                    self.store
-                        .set_active_sieve_script(
-                            principal.account_id,
-                            None,
-                            AuditEntryInput {
-                                actor: principal.email.clone(),
-                                action: "ews-oof-disable".to_string(),
-                                subject: principal.account_id.to_string(),
-                            },
-                        )
-                        .await?;
+                    if let Some(script) = active_script.as_ref() {
+                        ensure_ews_oof_owns_active_script(script)?;
+                        self.store
+                            .replace_active_sieve_script(
+                                principal.account_id,
+                                EWS_OOF_SCRIPT_NAME,
+                                Some(&script.content),
+                                None,
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "ews-oof-disable".to_string(),
+                                    subject: principal.account_id.to_string(),
+                                },
+                            )
+                            .await?;
+                    }
                 }
                 "enabled" | "scheduled" => {
                     let state = parse_oof_state(&state)?;
@@ -69,17 +80,25 @@ where
                         EwsOofState::Enabled => None,
                         EwsOofState::Disabled => unreachable!("disabled OOF is handled separately"),
                     };
+                    let expected_content = active_script
+                        .as_ref()
+                        .map(|script| {
+                            ensure_ews_oof_owns_active_script(script)?;
+                            Ok::<_, anyhow::Error>(script.content.as_str())
+                        })
+                        .transpose()?;
+                    let replacement = vacation_sieve_script(
+                        &message,
+                        state,
+                        external_audience,
+                        duration.as_ref(),
+                    );
                     self.store
-                        .put_sieve_script(
+                        .replace_active_sieve_script(
                             principal.account_id,
-                            "ews-oof",
-                            &vacation_sieve_script(
-                                &message,
-                                state,
-                                external_audience,
-                                duration.as_ref(),
-                            ),
-                            true,
+                            EWS_OOF_SCRIPT_NAME,
+                            expected_content,
+                            Some(&replacement),
                             AuditEntryInput {
                                 actor: principal.email.clone(),
                                 action: "ews-oof-enable".to_string(),
@@ -98,6 +117,17 @@ where
             set_user_oof_settings_error_response("ErrorInvalidOperation", &error.to_string())
         }))
     }
+}
+
+fn ensure_ews_oof_owns_active_script(script: &lpe_storage::SieveScriptDocument) -> Result<()> {
+    if script.name.eq_ignore_ascii_case(EWS_OOF_SCRIPT_NAME)
+        && script.content.contains("# LPE-EWS-OOF-State:")
+    {
+        return Ok(());
+    }
+    bail!(
+        "EWS OOF cannot replace or deactivate the active canonical Sieve script; preserve that script through its owning rule workflow."
+    )
 }
 
 fn ensure_oof_mailbox_is_principal(principal: &AccountPrincipal, request: &str) -> Result<()> {
@@ -324,4 +354,28 @@ pub(in crate::service) fn vacation_sieve_script(
 
 fn sieve_quote(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ews_oof_script_marker_is_required_before_replacement() {
+        let script = lpe_storage::SieveScriptDocument {
+            name: EWS_OOF_SCRIPT_NAME.to_string(),
+            content: vacation_sieve_script("Away", EwsOofState::Enabled, "All", None),
+            is_active: true,
+            updated_at: "2026-08-17T00:00:00Z".to_string(),
+        };
+        assert!(ensure_ews_oof_owns_active_script(&script).is_ok());
+
+        let inbox_rules = lpe_storage::SieveScriptDocument {
+            name: "lpe-ews-inbox-rules-v1".to_string(),
+            content: "require [\"fileinto\"];\r\n".to_string(),
+            is_active: true,
+            updated_at: "2026-08-17T00:00:00Z".to_string(),
+        };
+        assert!(ensure_ews_oof_owns_active_script(&inbox_rules).is_err());
+    }
 }

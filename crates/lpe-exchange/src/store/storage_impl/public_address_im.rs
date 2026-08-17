@@ -99,6 +99,63 @@ macro_rules! store_impl_public_address_im {
         })
     }
 
+    fn copy_ews_public_folder_items<'a>(
+        &'a self,
+        account_id: Uuid,
+        item_ids: &'a [Uuid],
+        target_folder_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Vec<PublicFolderItem>> {
+        Box::pin(async move {
+            Storage::copy_ews_public_folder_items(
+                self,
+                account_id,
+                item_ids,
+                target_folder_id,
+                audit,
+            )
+            .await
+        })
+    }
+
+    fn move_ews_public_folder_items<'a>(
+        &'a self,
+        account_id: Uuid,
+        item_ids: &'a [Uuid],
+        target_folder_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Vec<PublicFolderItem>> {
+        Box::pin(async move {
+            Storage::move_ews_public_folder_items(
+                self,
+                account_id,
+                item_ids,
+                target_folder_id,
+                audit,
+            )
+            .await
+        })
+    }
+
+    fn empty_ews_public_folders<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_ids: &'a [Uuid],
+        delete_subfolders: bool,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            Storage::empty_ews_public_folders(
+                self,
+                account_id,
+                folder_ids,
+                delete_subfolders,
+                audit,
+            )
+            .await
+        })
+    }
+
     fn fetch_public_folder_permissions<'a>(
         &'a self,
         principal_account_id: Uuid,

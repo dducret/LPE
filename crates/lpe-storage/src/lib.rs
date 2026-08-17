@@ -8,6 +8,7 @@ pub mod change;
 pub mod collaboration;
 pub mod conversation_actions;
 pub mod core;
+mod ews_item_batches;
 pub mod imap;
 pub mod inbound;
 pub mod jmap_blobs;
