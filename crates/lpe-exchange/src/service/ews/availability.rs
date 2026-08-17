@@ -28,29 +28,24 @@ where
             .store
             .fetch_accessible_calendar_collections(principal.account_id)
             .await?;
-        let collection_ids = collections
-            .into_iter()
-            .filter(|collection| {
-                collection.rights.may_read
-                    && collection.owner_email.eq_ignore_ascii_case(&mailbox_email)
-            })
-            .map(|collection| collection.id)
-            .collect::<std::collections::BTreeSet<_>>();
-        if collection_ids.is_empty() {
+        let collection_id = collections.into_iter().find_map(|collection| {
+            (collection.rights.may_read
+                && collection.owner_email.eq_ignore_ascii_case(&mailbox_email)
+                && ((collection.owner_account_id == principal.account_id
+                    && collection.id == "default")
+                    || collection.id == format!("shared-calendar-{}", collection.owner_account_id)))
+            .then_some(collection.id)
+        });
+        let Some(collection_id) = collection_id else {
             return Ok(get_user_availability_error_response(
                 "No readable canonical calendar is available for the requested mailbox.",
             ));
-        }
+        };
 
-        let mut events = Vec::new();
-        for collection_id in collection_ids {
-            events.extend(
-                self.store
-                    .fetch_accessible_events_in_collection(principal.account_id, &collection_id)
-                    .await?,
-            );
-        }
-        let mut events = events
+        let mut events = self
+            .store
+            .fetch_accessible_events_in_collection(principal.account_id, &collection_id)
+            .await?
             .into_iter()
             .filter(|event| {
                 event.rights.may_read
@@ -235,7 +230,11 @@ fn requested_server_time_zone_ids(
     {
         return Err("Ids contains an unsupported or duplicate time-zone identifier.".to_string());
     }
-    Ok(Some(ids))
+    Ok(Some(
+        ids.into_iter()
+            .filter_map(|id| canonical_ews_time_zone(&id).map(str::to_string))
+            .collect(),
+    ))
 }
 
 fn parse_availability_request(request: &str) -> std::result::Result<(String, i64, i64), String> {

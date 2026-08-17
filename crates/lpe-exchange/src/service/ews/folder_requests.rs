@@ -36,8 +36,11 @@ pub(in crate::service) enum FindFolderParent {
 pub(in crate::service) fn parse_create_folder_request(
     request: &str,
 ) -> Result<CreateFolderRequest> {
-    let folders = element_content(request, "Folders")
-        .ok_or_else(|| anyhow!("CreateFolder requires one Folder"))?;
+    let folders = element_contents(request, "Folders");
+    if folders.len() != 1 {
+        bail!("CreateFolder requires exactly one Folders collection");
+    }
+    let folders = folders[0];
     let folder_values = element_contents(folders, "Folder");
     if folder_values.len() != 1
         || [
@@ -78,16 +81,19 @@ pub(in crate::service) fn parse_delete_folder_target(
     {
         bail!("DeleteFolder supports only HardDelete");
     }
-    parse_single_folder_target(
-        element_content(request, "FolderIds")
-            .ok_or_else(|| anyhow!("DeleteFolder requires one FolderId"))?,
-        "DeleteFolder",
-    )
+    let folder_ids = element_contents(request, "FolderIds");
+    if folder_ids.len() != 1 {
+        bail!("DeleteFolder requires exactly one FolderIds collection");
+    }
+    parse_single_folder_target(folder_ids[0], "DeleteFolder")
 }
 
 fn parse_create_folder_parent(request: &str) -> Result<CreateFolderParent> {
-    let parent = element_content(request, "ParentFolderId")
-        .ok_or_else(|| anyhow!("CreateFolder requires one ParentFolderId"))?;
+    let parents = element_contents(request, "ParentFolderId");
+    if parents.len() != 1 {
+        bail!("CreateFolder requires exactly one ParentFolderId");
+    }
+    let parent = parents[0];
     let mut folder_ids = attribute_values_for_tag(parent, "FolderId", "Id").into_iter();
     let mut distinguished_ids =
         attribute_values_for_tag(parent, "DistinguishedFolderId", "Id").into_iter();
@@ -125,9 +131,14 @@ fn parse_create_folder_parent(request: &str) -> Result<CreateFolderParent> {
 pub(in crate::service) fn requested_find_folder_parent(
     request: &str,
 ) -> Result<Option<FindFolderParent>> {
-    let Some(parent) = element_content(request, "ParentFolderIds") else {
+    let parents = element_contents(request, "ParentFolderIds");
+    if parents.is_empty() {
         return Ok(None);
-    };
+    }
+    if parents.len() != 1 {
+        bail!("FindFolder requires exactly one ParentFolderIds collection");
+    }
+    let parent = parents[0];
     let mut folder_ids = attribute_values_for_tag(parent, "FolderId", "Id").into_iter();
     let mut distinguished_ids =
         attribute_values_for_tag(parent, "DistinguishedFolderId", "Id").into_iter();

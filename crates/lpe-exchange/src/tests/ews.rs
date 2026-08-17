@@ -1001,6 +1001,8 @@ async fn create_and_delete_folder_reject_unsupported_or_batch_shapes_without_mut
         r#"<s:Envelope><s:Body><m:CreateFolder><m:ParentFolderId><t:DistinguishedFolderId Id="msgfolderroot"/></m:ParentFolderId><m:Folders><t:Folder><t:DisplayName>Inbox</t:DisplayName></t:Folder></m:Folders></m:CreateFolder></s:Body></s:Envelope>"#,
         r#"<s:Envelope><s:Body><m:CreateFolder><m:ParentFolderId><t:FolderId Id="public-folder:not-a-uuid"/></m:ParentFolderId><m:Folders><t:Folder><t:DisplayName>Escape</t:DisplayName></t:Folder></m:Folders></m:CreateFolder></s:Body></s:Envelope>"#,
         r#"<s:Envelope><s:Body><m:CreateFolder><m:ParentFolderId><t:DistinguishedFolderId Id="msgfolderroot"/></m:ParentFolderId><m:Folders><t:CalendarFolder><t:DisplayName>Calendar Copy</t:DisplayName></t:CalendarFolder></m:Folders></m:CreateFolder></s:Body></s:Envelope>"#,
+        r#"<s:Envelope><s:Body><m:CreateFolder><m:ParentFolderId><t:DistinguishedFolderId Id="msgfolderroot"/></m:ParentFolderId><m:Folders><t:Folder><t:DisplayName>First</t:DisplayName></t:Folder></m:Folders><m:Folders><t:Folder><t:DisplayName>Second</t:DisplayName></t:Folder></m:Folders></m:CreateFolder></s:Body></s:Envelope>"#,
+        r#"<s:Envelope><s:Body><m:CreateFolder><m:ParentFolderId><t:DistinguishedFolderId Id="msgfolderroot"/></m:ParentFolderId><m:ParentFolderId><t:FolderId Id="mailbox:44444444-4444-4444-4444-444444444444"/></m:ParentFolderId><m:Folders><t:Folder><t:DisplayName>Duplicate Parent</t:DisplayName></t:Folder></m:Folders></m:CreateFolder></s:Body></s:Envelope>"#,
     ] {
         let response = service
             .handle(&bearer_headers(), request.as_bytes())
@@ -1024,6 +1026,31 @@ async fn create_and_delete_folder_reject_unsupported_or_batch_shapes_without_mut
     let body = response_text(response).await;
     assert!(body.contains("<m:ResponseCode>ErrorFolderNotFound</m:ResponseCode>"));
     assert!(destroyed_mailboxes.lock().unwrap().is_empty());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:DeleteFolder DeleteType="HardDelete"><m:FolderIds><t:FolderId Id="mailbox:{first_id}"/></m:FolderIds><m:FolderIds><t:FolderId Id="mailbox:{second_id}"/></m:FolderIds></m:DeleteFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorFolderNotFound</m:ResponseCode>"));
+    assert!(destroyed_mailboxes.lock().unwrap().is_empty());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:FindFolder><m:ParentFolderIds><t:DistinguishedFolderId Id="msgfolderroot"/></m:ParentFolderIds><m:ParentFolderIds><t:DistinguishedFolderId Id="inbox"/></m:ParentFolderIds></m:FindFolder></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:FindFolderResponseMessage ResponseClass=\"Error\">"));
+    assert!(body.contains("<m:ResponseCode>ErrorFolderNotFound</m:ResponseCode>"));
 }
 
 #[tokio::test]
@@ -1740,6 +1767,38 @@ async fn get_server_time_zones_projects_only_requested_compact_catalog_entries()
 }
 
 #[tokio::test]
+async fn get_server_time_zones_normalizes_known_ids_and_rejects_invalid_requests() {
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    });
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetServerTimeZones ReturnFullTimeZoneData="false"><t:Ids><t:Id>utc</t:Id></t:Ids></m:GetServerTimeZones></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:TimeZoneDefinition Id=\"UTC\""));
+    assert!(!body.contains("Europe/Berlin"));
+
+    for request in [
+        br#"<s:Envelope><s:Body><m:GetServerTimeZones /></s:Body></s:Envelope>"#.as_slice(),
+        br#"<s:Envelope><s:Body><m:GetServerTimeZones ReturnFullTimeZoneData="true" /></s:Body></s:Envelope>"#.as_slice(),
+        br#"<s:Envelope><s:Body><m:GetServerTimeZones ReturnFullTimeZoneData="false"><t:Ids /></m:GetServerTimeZones></s:Body></s:Envelope>"#.as_slice(),
+        br#"<s:Envelope><s:Body><m:GetServerTimeZones ReturnFullTimeZoneData="false"><t:Ids><t:Id>UTC</t:Id><t:Id>utc</t:Id></t:Ids></m:GetServerTimeZones></s:Body></s:Envelope>"#.as_slice(),
+        br#"<s:Envelope><s:Body><m:GetServerTimeZones ReturnFullTimeZoneData="false"><t:Ids><t:Id>UTC</t:Id></t:Ids><t:Ids><t:Id>Europe/Berlin</t:Id></t:Ids></m:GetServerTimeZones></s:Body></s:Envelope>"#.as_slice(),
+    ] {
+        let response = service.handle(&bearer_headers(), request).await.unwrap();
+        let body = response_text(response).await;
+        assert!(body.contains("<m:ResponseCode>ErrorInvalidRequest</m:ResponseCode>"));
+        assert!(!body.contains("TimeZoneDefinition Id="));
+    }
+}
+
+#[tokio::test]
 async fn resolve_names_returns_authenticated_mailbox_match() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -2295,6 +2354,63 @@ async fn get_user_availability_enforces_calendar_grants_and_redacts_failures() {
     let denied_body = response_text(denied).await;
     assert!(denied_body.contains("<m:ResponseCode>ErrorFreeBusyGenerationFailed</m:ResponseCode>"));
     assert!(!denied_body.contains("Protected subject"));
+}
+
+#[tokio::test]
+async fn get_user_availability_uses_only_the_default_readable_calendar() {
+    let default_calendar = FakeStore::collection("default", "calendar", "Calendar");
+    let custom_calendar = FakeStore::collection(
+        "cccccccc-cccc-cccc-cccc-cccccccccccc",
+        "calendar",
+        "Private planning",
+    );
+    let default_event = AccessibleEvent {
+        id: Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeee1").unwrap(),
+        uid: "default-calendar-busy".to_string(),
+        collection_id: default_calendar.id.clone(),
+        owner_account_id: FakeStore::account().account_id,
+        owner_email: "alice@example.test".to_string(),
+        owner_display_name: "Alice".to_string(),
+        rights: FakeStore::rights(),
+        date: "2026-05-04".to_string(),
+        time: "09:00".to_string(),
+        time_zone: "UTC".to_string(),
+        duration_minutes: 30,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
+        title: "Default calendar busy".to_string(),
+        location: String::new(),
+        organizer_json: "{}".to_string(),
+        attendees: String::new(),
+        attendees_json: "[]".to_string(),
+        notes: String::new(),
+        body_html: String::new(),
+    };
+    let mut custom_event = default_event.clone();
+    custom_event.id = Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeee2").unwrap();
+    custom_event.collection_id = custom_calendar.id.clone();
+    custom_event.time = "12:00".to_string();
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        calendar_collections: Arc::new(Mutex::new(vec![default_calendar, custom_calendar])),
+        events: Arc::new(Mutex::new(vec![default_event, custom_event])),
+        ..Default::default()
+    });
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetUserAvailabilityRequest><m:MailboxDataArray><t:MailboxData><t:Email><t:Address>alice@example.test</t:Address></t:Email></t:MailboxData></m:MailboxDataArray><t:FreeBusyViewOptions><t:TimeWindow><t:StartTime>2026-05-04T00:00:00Z</t:StartTime><t:EndTime>2026-05-05T00:00:00Z</t:EndTime></t:TimeWindow></t:FreeBusyViewOptions></m:GetUserAvailabilityRequest></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("2026-05-04T09:00:00Z"));
+    assert!(!body.contains("2026-05-04T12:00:00Z"));
 }
 
 #[tokio::test]
@@ -5141,6 +5257,64 @@ async fn send_item_submits_existing_draft_through_canonical_submission() {
                 .any(|recipient| recipient.address == "protected@example.test")
     }));
     assert!(!stored.iter().any(|email| email.mailbox_role == "outbox"));
+    drop(stored);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:GetItem><m:ItemIds><t:ItemId Id="message:ffffffff-ffff-ffff-ffff-ffffffffffff"/></m:ItemIds></m:GetItem></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let sent = response_text(response).await;
+    assert!(sent.contains("<m:GetItemResponse>"));
+    assert!(sent.contains("message:ffffffff-ffff-ffff-ffff-ffffffffffff"));
+}
+
+#[tokio::test]
+// [MS-OXWSMSG] section 3.1.4.2: unsupported multi-item canonical shapes
+// fail before any contact or calendar creation begins.
+async fn create_item_rejects_multiple_contact_or_calendar_items_without_mutation() {
+    for items in [
+        concat!(
+            "<t:Contact><t:DisplayName>First</t:DisplayName></t:Contact>",
+            "<t:Contact><t:DisplayName>Second</t:DisplayName></t:Contact>",
+        ),
+        concat!(
+            "<t:CalendarItem><t:Subject>First</t:Subject><t:Start>2026-05-01T10:00:00Z</t:Start><t:End>2026-05-01T11:00:00Z</t:End></t:CalendarItem>",
+            "<t:CalendarItem><t:Subject>Second</t:Subject><t:Start>2026-05-02T10:00:00Z</t:Start><t:End>2026-05-02T11:00:00Z</t:End></t:CalendarItem>",
+        ),
+    ] {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+                "default", "contacts", "Contacts",
+            )])),
+            calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+                "default", "calendar", "Calendar",
+            )])),
+            ..Default::default()
+        };
+        let contacts = store.contacts.clone();
+        let events = store.events.clone();
+        let service = ExchangeService::new(store);
+        let request = format!(
+            "<s:Envelope><s:Body><m:CreateItem><m:Items>{items}</m:Items></m:CreateItem></s:Body></s:Envelope>"
+        );
+
+        let response = service
+            .handle(&bearer_headers(), request.as_bytes())
+            .await
+            .unwrap();
+
+        let body = response_text(response).await;
+        assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+        assert!(contacts.lock().unwrap().is_empty());
+        assert!(events.lock().unwrap().is_empty());
+    }
 }
 
 #[tokio::test]
@@ -5484,6 +5658,63 @@ async fn inbox_rules_are_scoped_to_the_authenticated_mailbox() {
         active_sieve_script.lock().unwrap().as_deref(),
         Some("require [\"fileinto\"];\nif true { fileinto \"Private\"; }\n")
     );
+}
+
+#[tokio::test]
+async fn update_inbox_rules_refuses_unmanaged_or_oof_sieve_without_mutation() {
+    for script in [
+        "require [\"fileinto\"];\nif true { fileinto \"Private\"; }\n",
+        "require [\"vacation\"];\nvacation \"Away\";\n",
+    ] {
+        let active_sieve_script = Arc::new(Mutex::new(Some(script.to_string())));
+        let service = ExchangeService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            active_sieve_script: active_sieve_script.clone(),
+            ..Default::default()
+        });
+        let response = service
+            .handle(
+                &bearer_headers(),
+                br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:CreateRuleOperation><t:Rule><t:DisplayName>Discard invoices</t:DisplayName><t:Conditions><t:SubjectContainsWords><t:String>invoice</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:Delete/></t:Actions></t:Rule></t:CreateRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#,
+            )
+            .await
+            .unwrap();
+        let body = response_text(response).await;
+        assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+        assert_eq!(active_sieve_script.lock().unwrap().as_deref(), Some(script));
+    }
+}
+
+#[tokio::test]
+async fn update_inbox_rules_rolls_back_an_invalid_later_operation() {
+    let active_sieve_script = Arc::new(Mutex::new(None));
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        active_sieve_script: active_sieve_script.clone(),
+        ..Default::default()
+    });
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:CreateRuleOperation><t:Rule><t:DisplayName>Discard invoices</t:DisplayName><t:Conditions><t:SubjectContainsWords><t:String>invoice</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:Delete/></t:Actions></t:Rule></t:CreateRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    assert!(response_text(response)
+        .await
+        .contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    let before = active_sieve_script.lock().unwrap().clone();
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:CreateRuleOperation><t:Rule><t:DisplayName>Discard reports</t:DisplayName><t:Conditions><t:SubjectContainsWords><t:String>report</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:Delete/></t:Actions></t:Rule></t:CreateRuleOperation><t:CreateRuleOperation><t:Rule><t:DisplayName>Move invoices</t:DisplayName><t:Conditions><t:SubjectContainsWords><t:String>invoice</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:MoveToFolder><t:FolderId Id="mailbox:cccccccc-cccc-cccc-cccc-cccccccccccc"/></t:MoveToFolder></t:Actions></t:Rule></t:CreateRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert_eq!(*active_sieve_script.lock().unwrap(), before);
 }
 
 #[tokio::test]
@@ -9457,6 +9688,43 @@ async fn sync_folder_items_reports_system_mailbox_messages() {
 }
 
 #[tokio::test]
+async fn sync_folder_items_excludes_protected_bcc_recipients() {
+    let mut message = FakeStore::email(
+        "88888888-8888-8888-8888-888888888888",
+        "55555555-5555-5555-5555-555555555555",
+        "inbox",
+        "Inbox message",
+    );
+    message.bcc.push(JmapEmailAddress {
+        address: "protected@example.test".to_string(),
+        display_name: Some("Protected Recipient".to_string()),
+    });
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        emails: Arc::new(Mutex::new(vec![message])),
+        ..Default::default()
+    });
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:DistinguishedFolderId Id="inbox"/></m:SyncFolderId></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<t:Create><t:Message>"));
+    assert!(!body.contains("<t:BccRecipients>"));
+    assert!(!body.contains("protected@example.test"));
+}
+
+#[tokio::test]
 async fn find_item_lists_public_folder_items() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -10275,6 +10543,35 @@ async fn create_attachment_rejects_magika_blocked_payload() {
     assert!(body.contains("<m:CreateAttachmentResponse>"));
     assert!(body.contains("ResponseClass=\"Error\""));
     assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(created_attachments.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn create_attachment_rejects_stale_parent_change_key_without_mutation() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "99999999-9999-9999-9999-999999999999",
+            "44444444-4444-4444-4444-444444444444",
+            "custom",
+            "Attachment parent",
+        )])),
+        ..Default::default()
+    };
+    let created_attachments = store.created_attachments.clone();
+    let service =
+        ExchangeService::new_with_validator(store, Validator::new(FakeDetector::pdf(), 0.8));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:CreateAttachment><m:ParentItemId><t:ItemId Id="message:99999999-9999-9999-9999-999999999999" ChangeKey="stale"/></m:ParentItemId><m:Attachments><t:FileAttachment><t:Name>brief.pdf</t:Name><t:ContentType>application/pdf</t:ContentType><t:Content>aGVsbG8=</t:Content></t:FileAttachment></m:Attachments></m:CreateAttachment></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorIrresolvableConflict</m:ResponseCode>"));
     assert!(created_attachments.lock().unwrap().is_empty());
 }
 

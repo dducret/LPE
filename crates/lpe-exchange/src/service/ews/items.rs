@@ -327,6 +327,7 @@ where
             if element_content(request, "AcceptSharingInvitation").is_some() {
                 return self.accept_sharing_invitation(principal, request).await;
             }
+            validate_create_item_shape(request)?;
             if element_content(request, "Contact").is_some() {
                 let collection_id = requested_collection_id_in(request, "SavedItemFolderId");
                 let input = parse_create_contact_input(principal, request)?;
@@ -472,12 +473,12 @@ where
                         )
                         .await?;
                     let email = self
-                        .store
-                        .fetch_jmap_emails(principal.account_id, &[submitted.message_id])
-                        .await?
-                        .into_iter()
-                        .next()
-                        .ok_or_else(|| anyhow!("submitted message was not found after creation"))?;
+                        .submitted_message_in_canonical_sent(
+                            principal.account_id,
+                            submitted.message_id,
+                            submitted.sent_mailbox_id,
+                        )
+                        .await?;
                     Ok(create_item_success_response(&email))
                 }
                 other => Ok(operation_error_response(
@@ -540,7 +541,8 @@ where
                 bail!("SendItem requires accessible canonical drafts.");
             }
             for draft_id in draft_ids {
-                self.store
+                let submitted = self
+                    .store
                     .submit_draft_message(
                         principal.account_id,
                         draft_id,
@@ -553,6 +555,12 @@ where
                         },
                     )
                     .await?;
+                self.submitted_message_in_canonical_sent(
+                    principal.account_id,
+                    submitted.message_id,
+                    submitted.sent_mailbox_id,
+                )
+                .await?;
             }
             Ok(simple_operation_success_response("SendItem"))
         }
@@ -1364,6 +1372,60 @@ where
         }
         Ok(())
     }
+
+    async fn submitted_message_in_canonical_sent(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        sent_mailbox_id: Uuid,
+    ) -> Result<JmapEmail> {
+        let email = self
+            .store
+            .fetch_jmap_emails(account_id, &[message_id])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("submitted message was not found in canonical Sent"))?;
+        if email.mailbox_role != "sent"
+            || !email
+                .mailbox_states
+                .iter()
+                .any(|state| state.mailbox_id == sent_mailbox_id && state.role == "sent")
+        {
+            bail!("submitted message was not visible in canonical Sent");
+        }
+        Ok(email)
+    }
+}
+
+// [MS-OXWSMSG] section 3.1.4.2: this bounded adapter accepts exactly one
+// supported canonical item and one unambiguous saved-item parent before it
+// starts the corresponding canonical creation transaction.
+fn validate_create_item_shape(request: &str) -> Result<()> {
+    let item_collections = element_contents(request, "Items");
+    let [items] = item_collections.as_slice() else {
+        bail!("CreateItem requires exactly one Items collection");
+    };
+    let item_count = ["Message", "Contact", "CalendarItem", "Task"]
+        .into_iter()
+        .map(|name| element_contents(items, name).len())
+        .sum::<usize>();
+    if item_count != 1 {
+        bail!("CreateItem requires exactly one supported canonical item");
+    }
+
+    let saved_item_folders = element_contents(request, "SavedItemFolderId");
+    if saved_item_folders.len() > 1 {
+        bail!("CreateItem supports at most one SavedItemFolderId");
+    }
+    if let Some(saved_item_folder) = saved_item_folders.first() {
+        let target_count = attribute_values_for_tag(saved_item_folder, "FolderId", "Id").len()
+            + attribute_values_for_tag(saved_item_folder, "DistinguishedFolderId", "Id").len();
+        if target_count != 1 {
+            bail!("CreateItem SavedItemFolderId requires exactly one folder target");
+        }
+    }
+    Ok(())
 }
 
 fn validate_supplied_item_change_key(
