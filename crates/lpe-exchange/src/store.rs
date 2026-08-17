@@ -1128,6 +1128,15 @@ pub trait ExchangeStore: AccountAuthStore {
         dismissed_at: &'a str,
     ) -> StoreFuture<'a, ()>;
 
+    fn snooze_reminder_occurrence<'a>(
+        &'a self,
+        account_id: Uuid,
+        source_type: &'a str,
+        source_id: Uuid,
+        occurrence_start_at: &'a str,
+        snoozed_until: &'a str,
+    ) -> StoreFuture<'a, ()>;
+
     fn create_jmap_mailbox<'a>(
         &'a self,
         input: JmapMailboxCreateInput,
@@ -1295,6 +1304,41 @@ pub trait ExchangeStore: AccountAuthStore {
         flagged: Option<bool>,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, JmapEmail>;
+
+    fn mark_all_jmap_mailbox_messages_read<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        unread: bool,
+        maximum: usize,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, usize> {
+        Box::pin(async move {
+            let query = self
+                .query_jmap_email_ids(
+                    account_id,
+                    Some(mailbox_id),
+                    None,
+                    0,
+                    maximum.saturating_add(1) as u64,
+                )
+                .await?;
+            if query.ids.len() > maximum {
+                anyhow::bail!("mailbox read-state mutation exceeds the supported item limit");
+            }
+            for message_id in &query.ids {
+                self.update_jmap_email_flags(
+                    account_id,
+                    *message_id,
+                    Some(unread),
+                    None,
+                    audit.clone(),
+                )
+                .await?;
+            }
+            Ok(query.ids.len())
+        })
+    }
 
     fn update_jmap_email_followup_flags<'a>(
         &'a self,

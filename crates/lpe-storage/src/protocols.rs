@@ -1171,6 +1171,20 @@ impl Storage {
         .await
     }
 
+    pub async fn mark_all_jmap_mailbox_messages_read(
+        &self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        unread: bool,
+        maximum: usize,
+        audit: AuditEntryInput,
+    ) -> Result<usize> {
+        crate::mail_items::mark_all_mailbox_messages_read(
+            self, account_id, mailbox_id, unread, maximum, audit,
+        )
+        .await
+    }
+
     pub async fn expunge_imap_deleted(
         &self,
         account_id: Uuid,

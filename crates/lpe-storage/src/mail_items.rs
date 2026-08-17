@@ -80,6 +80,105 @@ pub async fn update_message_flags(
         .await
 }
 
+pub async fn mark_all_mailbox_messages_read(
+    storage: &Storage,
+    account_id: Uuid,
+    mailbox_id: Uuid,
+    unread: bool,
+    maximum: usize,
+    audit: AuditEntryInput,
+) -> Result<usize> {
+    if maximum == 0 {
+        bail!("mailbox read-state mutation limit must be positive");
+    }
+    let tenant_id = storage.tenant_id_for_account_id(account_id).await?;
+    let mut tx = storage.pool.begin().await?;
+    let rows = sqlx::query(
+        r#"
+            SELECT id, message_id, thread_id, imap_uid
+            FROM mailbox_messages
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND mailbox_id = $3
+              AND visibility = 'visible'
+              AND is_seen IS DISTINCT FROM NOT $4
+            ORDER BY imap_uid ASC
+            LIMIT $5
+            FOR UPDATE
+        "#,
+    )
+    .bind(&tenant_id)
+    .bind(account_id)
+    .bind(mailbox_id)
+    .bind(unread)
+    .bind(i64::try_from(maximum.saturating_add(1))?)
+    .fetch_all(&mut *tx)
+    .await?;
+    if rows.len() > maximum {
+        bail!("mailbox read-state mutation exceeds the supported item limit");
+    }
+    if rows.is_empty() {
+        tx.commit().await?;
+        return Ok(0);
+    }
+    let modseq = storage
+        .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+        .await?;
+    let membership_ids = rows
+        .iter()
+        .map(|row| row.try_get::<Uuid, _>("id").map_err(Into::into))
+        .collect::<Result<Vec<_>>>()?;
+    sqlx::query(
+        r#"
+            UPDATE mailbox_messages
+            SET is_seen = NOT $4,
+                modseq = $5,
+                updated_at = NOW()
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND mailbox_id = $3
+              AND id = ANY($6)
+              AND visibility = 'visible'
+        "#,
+    )
+    .bind(&tenant_id)
+    .bind(account_id)
+    .bind(mailbox_id)
+    .bind(unread)
+    .bind(modseq)
+    .bind(&membership_ids)
+    .execute(&mut *tx)
+    .await?;
+    let principals =
+        Storage::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
+    for row in &rows {
+        Storage::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(account_id),
+            Some(mailbox_id),
+            "mailbox_message",
+            row.try_get("id")?,
+            "updated",
+            modseq,
+            &principals,
+            serde_json::json!({
+                "messageId": row.try_get::<Uuid, _>("message_id")?,
+                "threadId": row.try_get::<Uuid, _>("thread_id")?,
+                "imapUid": row.try_get::<i64, _>("imap_uid")?,
+                "flagsChanged": true
+            }),
+        )
+        .await?;
+    }
+    Storage::recalculate_mailbox_counts_in_tx(&mut tx, &tenant_id, account_id, mailbox_id, modseq)
+        .await?;
+    storage.insert_audit(&mut tx, &tenant_id, audit).await?;
+    Storage::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
+    tx.commit().await?;
+    Ok(rows.len())
+}
+
 pub async fn update_imap_flags(
     storage: &Storage,
     account_id: Uuid,

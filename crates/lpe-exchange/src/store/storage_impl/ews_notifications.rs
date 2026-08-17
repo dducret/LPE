@@ -198,7 +198,7 @@ macro_rules! store_impl_ews_notifications {
                   AND cursor > $4
                   AND ($5::bigint IS NULL OR cursor <= $5)
                   AND (retained_until IS NULL OR retained_until > NOW())
-                  AND change_kind IN ('created', 'updated', 'destroyed', 'expunged')
+                  AND change_kind IN ('created', 'moved', 'updated', 'destroyed', 'expunged')
                 ORDER BY cursor ASC
                 LIMIT $6
                 "#,

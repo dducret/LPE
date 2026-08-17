@@ -661,11 +661,14 @@ Journal entries store subject/body, entry type, MAPI message-class projection
 metadata, start/end/occurred timestamps, company/contact metadata, and source
 metadata.
 
-Reminders do not have a canonical table. They are a computed API/search-folder
-view over reminder-bearing canonical calendar events and tasks. Active reminder
-queries exclude rows without `reminder_set`, rows with dismissed reminders,
-completed tasks, and cancelled task/calendar state; diagnostic queries can
-include inactive rows with explicit statuses.
+Reminders do not have a canonical reminder-object table. They are a computed
+API/search-folder view over reminder-bearing canonical calendar events, tasks,
+and visible message follow-up metadata. `reminder_occurrence_dismissals` keeps
+calendar/task occurrence dismissal or snooze state keyed by the generated start
+without shifting a recurring source's base reminder. Active reminder queries
+exclude rows without `reminder_set`, rows with dismissed reminders, completed
+tasks, and cancelled task/calendar state; diagnostic queries can include inactive
+rows with explicit statuses.
 
 Canonical delegate/free-busy properties do not have a dedicated protocol-local
 content table. They are computed from canonical `calendar_grants`, `sender_rights`,

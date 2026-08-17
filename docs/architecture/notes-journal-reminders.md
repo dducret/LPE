@@ -32,9 +32,10 @@ objects that carry reminder metadata.
 - `calendar_events` and `tasks` carry `reminder_set`, `reminder_at`, and
   `reminder_dismissed_at`. `tasks` also carries `reminder_reset` for recurring
   task reminder projection.
-- `reminder_occurrence_dismissals` stores per-occurrence dismissals for
-  recurring calendar and task reminders. It is not a reminder object table; it
-  only records that a generated occurrence has been dismissed.
+- `reminder_occurrence_dismissals` stores per-occurrence dismissal and snooze
+  state for recurring and single-occurrence calendar and task reminders. It is
+  not a reminder object table; its key keeps a generated occurrence identity
+  separate from the base object's reminder fields.
 - There is no `reminders` table. Reminder APIs query canonical tasks and
   calendar events.
 
@@ -69,7 +70,8 @@ exception metadata can suppress cancelled occurrences. The reminder signal time
 keeps the same offset from each occurrence anchor as the canonical base reminder
 has from the base event start, task due time, or task reminder time.
 Occurrence-level dismissal records suppress only the matching generated
-occurrence.
+occurrence. Snoozing records a replacement reminder time for that same key and
+does not shift the rest of a recurring series.
 
 ## JMAP Foundation
 
@@ -108,12 +110,13 @@ canonical create-style writes using the same payloads as each object's `set`
 create branch. Reminder mutation, import, and copy methods update reminder
 metadata on the canonical source object. Supported sources are canonical tasks,
 calendar events, and mail follow-up rows; reminders themselves remain computed
-and do not have a separate reminder table. Setting a new reminder time clears
-dismissal state for that source, which provides canonical snooze/reactivation
-behavior. For recurring calendar and task reminders, private Reminder ids include
-the generated occurrence start so dismissing one occurrence does not dismiss the
-series. Destroying a base reminder clears the source object's reminder flag and
-reminder timestamps.
+and do not have a separate reminder table. Setting a new base reminder time
+clears dismissal state for that source. EWS Snooze records a replacement
+reminder time for the requested calendar or task occurrence instead. For
+recurring calendar and task reminders, private Reminder ids include the
+generated occurrence start so dismissing or snoozing one occurrence does not
+affect the series. Destroying a base reminder clears the source object's reminder
+flag and reminder timestamps.
 
 Notes and Journal writes allocate account/category modseqs in `account_sync_state`,
 append object-level `mail_change_log` rows, and write tombstones for deletes.

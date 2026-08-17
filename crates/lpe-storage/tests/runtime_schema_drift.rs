@@ -1525,6 +1525,44 @@ async fn exercise_notes_journal_reminder_path(
                 && reminder.occurrence_start_at.is_some()),
         "recurring task reminders must expand into occurrence rows"
     );
+    let occurrence = all
+        .iter()
+        .find(|reminder| {
+            reminder.title == "Recurring calendar reminder"
+                && reminder.dismissed_at.is_none()
+                && reminder.occurrence_start_at.is_some()
+        })
+        .context("seeded recurring calendar reminder must have an active occurrence")?;
+    let occurrence_start_at = occurrence.occurrence_start_at.clone().unwrap();
+    storage
+        .snooze_reminder_occurrence(
+            fixture.account_id,
+            "calendar",
+            occurrence.source_id,
+            &occurrence_start_at,
+            "2099-01-01T00:00:00Z",
+        )
+        .await
+        .context("snooze one recurring reminder occurrence")?;
+    let snoozed = storage
+        .query_client_reminders(
+            fixture.account_id,
+            ReminderQuery {
+                include_inactive: true,
+            },
+        )
+        .await
+        .context("query persisted recurring reminder snooze")?;
+    anyhow::ensure!(
+        snoozed.iter().any(|reminder| {
+            reminder.source_type == "calendar"
+                && reminder.source_id == occurrence.source_id
+                && reminder.occurrence_start_at.as_deref() == Some(occurrence_start_at.as_str())
+                && reminder.reminder_at == "2099-01-01T00:00:00Z"
+                && reminder.dismissed_at.is_none()
+        }),
+        "recurring reminder snooze must persist against only its occurrence identity"
+    );
 
     storage
         .delete_client_note(fixture.account_id, note.id)

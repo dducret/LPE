@@ -12071,6 +12071,30 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(()) })
     }
 
+    fn snooze_reminder_occurrence<'a>(
+        &'a self,
+        _account_id: Uuid,
+        source_type: &'a str,
+        source_id: Uuid,
+        occurrence_start_at: &'a str,
+        snoozed_until: &'a str,
+    ) -> StoreFuture<'a, ()> {
+        let source_type = source_type.to_string();
+        let occurrence_start_at = occurrence_start_at.to_string();
+        let snoozed_until = snoozed_until.to_string();
+        let mut reminders = self.reminders.lock().unwrap();
+        for reminder in reminders.iter_mut().filter(|reminder| {
+            reminder.source_type == source_type
+                && reminder.source_id == source_id
+                && reminder.occurrence_start_at.as_deref() == Some(occurrence_start_at.as_str())
+        }) {
+            reminder.reminder_at = snoozed_until.clone();
+            reminder.dismissed_at = None;
+            reminder.status = "pending".to_string();
+        }
+        Box::pin(async move { Ok(()) })
+    }
+
     fn create_jmap_mailbox<'a>(
         &'a self,
         input: JmapMailboxCreateInput,
@@ -12942,6 +12966,42 @@ impl ExchangeStore for FakeStore {
         }
         let updated = email.clone();
         Box::pin(async move { Ok(updated) })
+    }
+
+    fn mark_all_jmap_mailbox_messages_read<'a>(
+        &'a self,
+        _account_id: Uuid,
+        mailbox_id: Uuid,
+        unread: bool,
+        maximum: usize,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, usize> {
+        let mut emails = self.emails.lock().unwrap();
+        let matching = emails
+            .iter()
+            .filter(|email| email.mailbox_ids.contains(&mailbox_id))
+            .count();
+        if matching > maximum {
+            return Box::pin(async move {
+                anyhow::bail!("mailbox read-state mutation exceeds the supported item limit")
+            });
+        }
+        for email in emails
+            .iter_mut()
+            .filter(|email| email.mailbox_ids.contains(&mailbox_id))
+        {
+            if email.mailbox_id == mailbox_id {
+                email.unread = unread;
+            }
+            if let Some(state) = email
+                .mailbox_states
+                .iter_mut()
+                .find(|state| state.mailbox_id == mailbox_id)
+            {
+                state.unread = unread;
+            }
+        }
+        Box::pin(async move { Ok(matching) })
     }
 
     fn update_jmap_email_followup_flags<'a>(

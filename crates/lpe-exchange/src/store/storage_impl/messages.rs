@@ -383,6 +383,26 @@ macro_rules! store_impl_messages {
         })
     }
 
+    fn mark_all_jmap_mailbox_messages_read<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        unread: bool,
+        maximum: usize,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, usize> {
+        Box::pin(async move {
+            self.mark_all_jmap_mailbox_messages_read(
+                account_id,
+                mailbox_id,
+                unread,
+                maximum,
+                audit,
+            )
+            .await
+        })
+    }
+
     fn update_jmap_email_followup_flags<'a>(
         &'a self,
         account_id: Uuid,

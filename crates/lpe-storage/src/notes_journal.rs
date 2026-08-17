@@ -142,7 +142,7 @@ impl Storage {
             )
             VALUES ($1, $2, $3, $4, NULLIF($5, '')::timestamptz, NULLIF($6, '')::timestamptz)
             ON CONFLICT (tenant_id, owner_account_id, source_type, source_id, occurrence_start_at)
-            DO UPDATE SET dismissed_at = EXCLUDED.dismissed_at, updated_at = NOW()
+            DO UPDATE SET dismissed_at = EXCLUDED.dismissed_at, snoozed_until = NULL, updated_at = NOW()
             "#,
         )
         .bind(&tenant_id)
@@ -151,6 +151,40 @@ impl Storage {
         .bind(source_id)
         .bind(occurrence_start_at)
         .bind(dismissed_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn snooze_reminder_occurrence(
+        &self,
+        account_id: Uuid,
+        source_type: &str,
+        source_id: Uuid,
+        occurrence_start_at: &str,
+        snoozed_until: &str,
+    ) -> Result<()> {
+        if !matches!(source_type, "calendar" | "task") {
+            return Ok(());
+        }
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        sqlx::query(
+            r#"
+            INSERT INTO reminder_occurrence_dismissals (
+                tenant_id, owner_account_id, source_type, source_id,
+                occurrence_start_at, snoozed_until
+            )
+            VALUES ($1, $2, $3, $4, NULLIF($5, '')::timestamptz, NULLIF($6, '')::timestamptz)
+            ON CONFLICT (tenant_id, owner_account_id, source_type, source_id, occurrence_start_at)
+            DO UPDATE SET dismissed_at = NULL, snoozed_until = EXCLUDED.snoozed_until, updated_at = NOW()
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(source_type)
+        .bind(source_id)
+        .bind(occurrence_start_at)
+        .bind(snoozed_until)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -641,7 +675,10 @@ impl Storage {
                         COALESCE(rod.dismissed_at, e.reminder_dismissed_at) AS reminder_dismissed_at,
                         occurrence_start,
                         occurrence_start + (e.ends_at - e.starts_at) AS occurrence_end,
-                        occurrence_start + (e.reminder_at - e.starts_at) AS occurrence_reminder_at
+                        COALESCE(
+                            rod.snoozed_until,
+                            occurrence_start + (e.reminder_at - e.starts_at)
+                        ) AS occurrence_reminder_at
                     FROM calendar_events e
                     CROSS JOIN LATERAL (
                         SELECT e.starts_at AS occurrence_start
@@ -747,7 +784,10 @@ impl Storage {
                         COALESCE(rod.dismissed_at, t.reminder_dismissed_at) AS reminder_dismissed_at,
                         occurrence_anchor,
                         CASE WHEN t.due_at IS NULL THEN NULL ELSE occurrence_anchor + (t.due_at - COALESCE(t.due_at, t.reminder_at)) END AS occurrence_due_at,
-                        occurrence_anchor + (t.reminder_at - COALESCE(t.due_at, t.reminder_at)) AS occurrence_reminder_at
+                        COALESCE(
+                            rod.snoozed_until,
+                            occurrence_anchor + (t.reminder_at - COALESCE(t.due_at, t.reminder_at))
+                        ) AS occurrence_reminder_at
                     FROM tasks t
                     CROSS JOIN LATERAL (
                         SELECT COALESCE(t.due_at, t.reminder_at) AS occurrence_anchor

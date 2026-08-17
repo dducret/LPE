@@ -409,12 +409,15 @@ fn notes_journal_and_reminders_stay_canonical() {
         "CREATE INDEX journal_entries_owner_time_idx",
         "CREATE INDEX calendar_events_owner_reminder_idx",
         "CREATE INDEX tasks_owner_reminder_idx",
+        "CREATE TABLE reminder_occurrence_dismissals",
+        "snoozed_until TIMESTAMPTZ",
     ]);
     assert!(
         NOTES_JOURNAL_STORAGE.contains("FROM calendar_events")
             && NOTES_JOURNAL_STORAGE.contains("FROM tasks")
             && NOTES_JOURNAL_STORAGE.contains(") mail_reminders")
             && NOTES_JOURNAL_STORAGE.contains("UNION ALL")
+            && NOTES_JOURNAL_STORAGE.contains("rod.snoozed_until")
             && !SCHEMA.contains("CREATE TABLE reminders"),
         "reminders must be a computed query over canonical reminder-bearing objects, not a table"
     );

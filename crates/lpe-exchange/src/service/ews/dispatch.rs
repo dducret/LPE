@@ -122,7 +122,7 @@ where
                         &error.to_string(),
                     )
                 }),
-            "GetUserOofSettings" => self.get_user_oof_settings(&principal).await?,
+            "GetUserOofSettings" => self.get_user_oof_settings(&principal, &body).await?,
             "SetUserOofSettings" => self.set_user_oof_settings(&principal, &body).await?,
             "GetInboxRules" => self
                 .get_inbox_rules(&principal, &body)

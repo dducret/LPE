@@ -59,6 +59,7 @@ use crate::{
 mod ews {
     pub(super) mod attachments;
     pub(super) mod availability;
+    pub(super) mod bulk_read;
     pub(super) mod bulk_transfer;
     pub(super) mod calendar;
     pub(super) mod compliance;
@@ -638,29 +639,26 @@ where
         let result = async {
             let delete_subfolders = request.contains("DeleteSubFolders=\"true\"")
                 || request.contains("DeleteSubFolders=\"1\"");
-            let public_folder_ids = requested_public_folder_ids_in(request, "FolderIds");
-            if !public_folder_ids.is_empty() {
-                for folder_id in public_folder_ids {
+            match parse_empty_folder_target(request)? {
+                FolderOperationTarget::PublicFolder(folder_id) => {
                     self.empty_public_folder(principal, folder_id, delete_subfolders)
                         .await?;
                 }
-                return Ok(simple_operation_success_response("EmptyFolder"));
-            }
-
-            let mailbox_ids = requested_mailbox_folder_ids_in(request, "FolderIds");
-            if mailbox_ids.is_empty() {
-                bail!("EmptyFolder requires at least one mailbox or public folder id.");
-            }
-            for mailbox_id in mailbox_ids {
-                self.empty_mailbox_folder(principal, mailbox_id, delete_subfolders)
-                    .await?;
+                FolderOperationTarget::Mailbox(mailbox_id) => {
+                    self.empty_mailbox_folder(principal, mailbox_id, delete_subfolders)
+                        .await?;
+                }
             }
             Ok(simple_operation_success_response("EmptyFolder"))
         }
         .await;
 
         Ok(result.unwrap_or_else(|error: anyhow::Error| {
-            operation_error_response("EmptyFolder", "ErrorInvalidOperation", &error.to_string())
+            operation_error_response(
+                "EmptyFolder",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )
         }))
     }
 
@@ -712,18 +710,14 @@ where
 
     async fn update_folder(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
         let result = async {
-            let display_name = element_text(request, "DisplayName")
-                .ok_or_else(|| anyhow!("UpdateFolder currently requires DisplayName."))?;
-            let supplied_change_key = attribute_values_for_tag(request, "FolderId", "ChangeKey")
-                .into_iter()
-                .next();
-            if let Some(folder_id) = requested_public_folder_ids(request).into_iter().next() {
+            let update = parse_update_folder_request(request)?;
+            if let FolderOperationTarget::PublicFolder(folder_id) = update.target {
                 let current = self
                     .store
                     .fetch_public_folder(principal.account_id, folder_id)
                     .await?;
                 validate_supplied_folder_change_key(
-                    supplied_change_key,
+                    update.change_key.as_deref(),
                     &public_folder_change_key(&current),
                     &format!("public-folder:{folder_id}"),
                 )?;
@@ -734,7 +728,7 @@ where
                             account_id: principal.account_id,
                             folder_id,
                             parent_folder_id: None,
-                            display_name: Some(display_name),
+                            display_name: Some(update.display_name),
                             folder_class: None,
                             sort_order: None,
                         },
@@ -751,10 +745,9 @@ where
                 ));
             }
 
-            let folder_id = requested_mailbox_folder_ids(request)
-                .into_iter()
-                .next()
-                .ok_or_else(|| anyhow!("UpdateFolder requires a mailbox FolderId."))?;
+            let FolderOperationTarget::Mailbox(folder_id) = update.target else {
+                unreachable!("public folders returned above")
+            };
             let mailboxes = self
                 .store
                 .fetch_jmap_mailboxes(principal.account_id)
@@ -762,7 +755,7 @@ where
             let current = mailbox_by_id(&mailboxes, folder_id)?;
             ensure_custom_mailbox(current)?;
             validate_supplied_folder_change_key(
-                supplied_change_key,
+                update.change_key.as_deref(),
                 &mailbox_folder_change_key(current),
                 &format!("mailbox:{folder_id}"),
             )?;
@@ -772,7 +765,7 @@ where
                     JmapMailboxUpdateInput {
                         account_id: principal.account_id,
                         mailbox_id: folder_id,
-                        name: Some(display_name),
+                        name: Some(update.display_name),
                         parent_id: None,
                         sort_order: None,
                         is_subscribed: None,
@@ -876,7 +869,7 @@ where
             .store
             .fetch_jmap_mailboxes(principal.account_id)
             .await?;
-        mailbox_by_id(&mailboxes, folder_id)?;
+        ensure_custom_mailbox(mailbox_by_id(&mailboxes, folder_id)?)?;
         let mut folder_ids = vec![folder_id];
         if delete_subfolders {
             let mut index = 0;
@@ -1022,16 +1015,40 @@ where
                 index += 1;
             }
         }
+        let folders = self
+            .store
+            .fetch_public_folder_trees(principal.account_id)
+            .await?;
+        let mut items_by_folder = Vec::new();
         for current_id in &folder_ids {
-            let items = self
+            let folder = self
                 .store
-                .fetch_public_folder_items(principal.account_id, *current_id)
+                .fetch_public_folder(principal.account_id, *current_id)
                 .await?;
+            if !folder.rights.may_delete {
+                bail!("public folder delete access is not granted");
+            }
+            if delete_subfolders
+                && folders
+                    .iter()
+                    .find(|tree| tree.id == folder.tree_id)
+                    .is_none_or(|tree| tree.admin_owner_account_id != principal.account_id)
+            {
+                bail!("public folder tree administration is required to delete subfolders");
+            }
+            items_by_folder.push((
+                *current_id,
+                self.store
+                    .fetch_public_folder_items(principal.account_id, *current_id)
+                    .await?,
+            ));
+        }
+        for (current_id, items) in items_by_folder {
             for item in items {
                 self.store
                     .delete_public_folder_item(
                         principal.account_id,
-                        *current_id,
+                        current_id,
                         item.id,
                         AuditEntryInput {
                             actor: principal.email.clone(),

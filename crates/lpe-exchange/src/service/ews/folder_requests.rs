@@ -20,6 +20,13 @@ pub(in crate::service) struct CreateFolderRequest {
     pub(in crate::service) folder_class: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::service) struct UpdateFolderRequest {
+    pub(in crate::service) target: FolderOperationTarget,
+    pub(in crate::service) display_name: String,
+    pub(in crate::service) change_key: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::service) enum FindFolderParent {
     Root,
@@ -86,6 +93,85 @@ pub(in crate::service) fn parse_delete_folder_target(
         bail!("DeleteFolder requires exactly one FolderIds collection");
     }
     parse_single_folder_target(folder_ids[0], "DeleteFolder")
+}
+
+/// [MS-OXWSFOLD] section 3.1.4.8: LPE accepts one DisplayName update for one
+/// canonical folder so the complete request can be rejected before mutation.
+pub(in crate::service) fn parse_update_folder_request(
+    request: &str,
+) -> Result<UpdateFolderRequest> {
+    let changes = element_contents(request, "FolderChanges");
+    if changes.len() != 1 {
+        bail!("UpdateFolder requires exactly one FolderChanges collection");
+    }
+    let changes = element_contents(changes[0], "FolderChange");
+    if changes.len() != 1 {
+        bail!("UpdateFolder requires exactly one FolderChange");
+    }
+    let change = changes[0];
+    let target = parse_single_folder_target(change, "UpdateFolder")?;
+    let change_key = attribute_values_for_tag(change, "FolderId", "ChangeKey")
+        .into_iter()
+        .next()
+        .map(str::to_string);
+    let updates = element_contents(change, "Updates");
+    if updates.len() != 1 {
+        bail!("UpdateFolder requires exactly one Updates collection");
+    }
+    let fields = element_contents(updates[0], "SetFolderField");
+    if fields.len() != 1
+        || !element_contents(updates[0], "DeleteFolderField").is_empty()
+        || !element_contents(updates[0], "AppendToFolderField").is_empty()
+    {
+        bail!("UpdateFolder supports exactly one DisplayName SetFolderField");
+    }
+    let field = fields[0];
+    if attribute_values_for_tag(field, "FieldURI", "FieldURI") != ["folder:DisplayName"] {
+        bail!("UpdateFolder supports only folder:DisplayName");
+    }
+    let folders = element_contents(field, "Folder");
+    if folders.len() != 1
+        || [
+            "CalendarFolder",
+            "ContactsFolder",
+            "SearchFolder",
+            "TasksFolder",
+        ]
+        .into_iter()
+        .any(|name| !element_contents(field, name).is_empty())
+    {
+        bail!("UpdateFolder requires one Folder DisplayName value");
+    }
+    let display_name = element_text(folders[0], "DisplayName")
+        .filter(|name| !name.trim().is_empty())
+        .ok_or_else(|| anyhow!("UpdateFolder requires DisplayName"))?;
+    Ok(UpdateFolderRequest {
+        target,
+        display_name,
+        change_key,
+    })
+}
+
+/// [MS-OXWSFOLD] section 3.1.4.5: one bounded folder target prevents a
+/// mixed/public request from partially emptying canonical state.
+pub(in crate::service) fn parse_empty_folder_target(
+    request: &str,
+) -> Result<FolderOperationTarget> {
+    parse_folder_ids_target(request, "EmptyFolder")
+}
+
+pub(in crate::service) fn parse_mark_all_items_as_read_target(
+    request: &str,
+) -> Result<FolderOperationTarget> {
+    parse_folder_ids_target(request, "MarkAllItemsAsRead")
+}
+
+fn parse_folder_ids_target(request: &str, operation: &str) -> Result<FolderOperationTarget> {
+    let folder_ids = element_contents(request, "FolderIds");
+    if folder_ids.len() != 1 {
+        bail!("{operation} requires exactly one FolderIds collection");
+    }
+    parse_single_folder_target(folder_ids[0], operation)
 }
 
 fn parse_create_folder_parent(request: &str) -> Result<CreateFolderParent> {

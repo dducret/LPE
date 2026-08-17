@@ -497,5 +497,25 @@ macro_rules! store_impl_mailbox_config {
         })
     }
 
+    fn snooze_reminder_occurrence<'a>(
+        &'a self,
+        account_id: Uuid,
+        source_type: &'a str,
+        source_id: Uuid,
+        occurrence_start_at: &'a str,
+        snoozed_until: &'a str,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.snooze_reminder_occurrence(
+                account_id,
+                source_type,
+                source_id,
+                occurrence_start_at,
+                snoozed_until,
+            )
+            .await
+        })
+    }
+
     };
 }

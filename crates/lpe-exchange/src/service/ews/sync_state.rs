@@ -415,11 +415,11 @@ where
                             .collect::<HashMap<_, _>>();
                         for event in replay.events {
                             match event.change_kind.as_str() {
-                                "created" | "updated" => {
+                                "created" | "moved" | "updated" => {
                                     let Some(email) = emails.get(&event.message_id) else { continue };
-                                    changes.push_str(if event.change_kind == "created" { "<t:Create>" } else { "<t:Update>" });
+                                    changes.push_str(if matches!(event.change_kind.as_str(), "created" | "moved") { "<t:Create>" } else { "<t:Update>" });
                                     changes.push_str(&message_summary_xml_for_mailbox(email, mailbox_id));
-                                    changes.push_str(if event.change_kind == "created" { "</t:Create>" } else { "</t:Update>" });
+                                    changes.push_str(if matches!(event.change_kind.as_str(), "created" | "moved") { "</t:Create>" } else { "</t:Update>" });
                                 }
                                 "destroyed" | "expunged" => changes.push_str(&format!(
                                     "<t:Delete><t:ItemId Id=\"message:{}\" ChangeKey=\"{}\"/></t:Delete>",

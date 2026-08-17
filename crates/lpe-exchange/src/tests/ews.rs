@@ -5194,6 +5194,28 @@ async fn set_user_oof_settings_disables_active_sieve_script() {
 }
 
 #[tokio::test]
+async fn oof_settings_reject_a_foreign_mailbox_without_mutation() {
+    let active_sieve_script = Arc::new(Mutex::new(None));
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        active_sieve_script: active_sieve_script.clone(),
+        ..Default::default()
+    });
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SetUserOofSettings><t:Mailbox><t:EmailAddress>other@example.test</t:EmailAddress></t:Mailbox><t:OofSettings><t:OofState>Enabled</t:OofState><t:InternalReply><t:Message>Away</t:Message></t:InternalReply></t:OofSettings></m:SetUserOofSettings></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(active_sieve_script.lock().unwrap().is_none());
+}
+
+#[tokio::test]
 async fn send_item_submits_existing_draft_through_canonical_submission() {
     let draft_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000001").unwrap();
     let drafts_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000002").unwrap();
@@ -5734,6 +5756,17 @@ async fn reminders_are_read_and_dismissed_from_canonical_reminder_state() {
             status: "active".to_string(),
         },
         ClientReminder {
+            source_type: "calendar".to_string(),
+            source_id: reminder_id,
+            occurrence_start_at: Some("2026-05-09T09:00:00Z".to_string()),
+            title: "Planning".to_string(),
+            due_at: Some("2026-05-09T10:00:00Z".to_string()),
+            reminder_at: "2026-05-09T08:45:00Z".to_string(),
+            dismissed_at: None,
+            completed_at: None,
+            status: "active".to_string(),
+        },
+        ClientReminder {
             source_type: "task".to_string(),
             source_id: task_id,
             occurrence_start_at: None,
@@ -5785,6 +5818,8 @@ async fn reminders_are_read_and_dismissed_from_canonical_reminder_state() {
     assert_eq!(stored[0].dismissed_at.as_deref(), Some("now"));
     assert_eq!(stored[1].status, "active");
     assert!(stored[1].dismissed_at.is_none());
+    assert_eq!(stored[2].status, "active");
+    assert!(stored[2].dismissed_at.is_none());
 }
 
 #[tokio::test]
@@ -5797,7 +5832,7 @@ async fn perform_reminder_action_snoozes_calendar_and_task_canonical_reminders()
         ClientReminder {
             source_type: "calendar".to_string(),
             source_id: event_id,
-            occurrence_start_at: None,
+            occurrence_start_at: Some("2026-05-09T09:00:00Z".to_string()),
             title: "Standup".to_string(),
             due_at: Some("2026-05-09T09:00:00Z".to_string()),
             reminder_at: "2026-05-09T08:45:00Z".to_string(),
@@ -5806,9 +5841,20 @@ async fn perform_reminder_action_snoozes_calendar_and_task_canonical_reminders()
             status: "dismissed".to_string(),
         },
         ClientReminder {
+            source_type: "calendar".to_string(),
+            source_id: event_id,
+            occurrence_start_at: Some("2026-05-10T09:00:00Z".to_string()),
+            title: "Standup".to_string(),
+            due_at: Some("2026-05-10T09:00:00Z".to_string()),
+            reminder_at: "2026-05-10T08:45:00Z".to_string(),
+            dismissed_at: None,
+            completed_at: None,
+            status: "pending".to_string(),
+        },
+        ClientReminder {
             source_type: "task".to_string(),
             source_id: task_id,
-            occurrence_start_at: None,
+            occurrence_start_at: Some("2026-05-09T15:00:00Z".to_string()),
             title: "Ship notes".to_string(),
             due_at: Some("2026-05-09T15:00:00Z".to_string()),
             reminder_at: "2026-05-09T14:30:00Z".to_string(),
@@ -5861,7 +5907,7 @@ async fn perform_reminder_action_snoozes_calendar_and_task_canonical_reminders()
         .handle(
             &bearer_headers(),
             format!(
-                r#"<s:Envelope><s:Body><m:PerformReminderAction><m:ReminderItemActions><t:ReminderItemAction><t:ActionType>Snooze</t:ActionType><t:NewReminderTime>2026-05-09T16:00:00Z</t:NewReminderTime><t:ItemId Id="calendar:{event_id}"/></t:ReminderItemAction><t:ReminderItemAction><t:ActionType>Snooze</t:ActionType><t:NewReminderTime>2026-05-09T16:00:00Z</t:NewReminderTime><t:ItemId Id="task:{task_id}"/></t:ReminderItemAction></m:ReminderItemActions></m:PerformReminderAction></s:Body></s:Envelope>"#
+                r#"<s:Envelope><s:Body><m:PerformReminderAction><m:ReminderItemActions><t:ReminderItemAction><t:ActionType>Snooze</t:ActionType><t:NewReminderTime>2026-05-09T16:00:00Z</t:NewReminderTime><t:ItemId Id="calendar:{event_id}:2026-05-09T09:00:00Z"/></t:ReminderItemAction><t:ReminderItemAction><t:ActionType>Snooze</t:ActionType><t:NewReminderTime>2026-05-09T16:00:00Z</t:NewReminderTime><t:ItemId Id="task:{task_id}:2026-05-09T15:00:00Z"/></t:ReminderItemAction></m:ReminderItemActions></m:PerformReminderAction></s:Body></s:Envelope>"#
             )
             .as_bytes(),
         )
@@ -5872,14 +5918,15 @@ async fn perform_reminder_action_snoozes_calendar_and_task_canonical_reminders()
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
 
     let stored = reminders.lock().unwrap();
-    assert_eq!(stored.len(), 2);
-    assert!(stored
-        .iter()
-        .all(|reminder| reminder.reminder_at == "2026-05-09T16:00:00Z"));
-    assert!(stored
-        .iter()
-        .all(|reminder| reminder.dismissed_at.is_none()));
-    assert!(stored.iter().all(|reminder| reminder.status == "pending"));
+    assert_eq!(stored.len(), 3);
+    assert_eq!(stored[0].reminder_at, "2026-05-09T16:00:00Z");
+    assert_eq!(stored[1].reminder_at, "2026-05-10T08:45:00Z");
+    assert_eq!(stored[2].reminder_at, "2026-05-09T16:00:00Z");
+    assert!(stored[0].dismissed_at.is_none());
+    assert!(stored[2].dismissed_at.is_none());
+    assert_eq!(stored[0].status, "pending");
+    assert_eq!(stored[1].status, "pending");
+    assert_eq!(stored[2].status, "pending");
     drop(stored);
 
     let response = service
@@ -5893,6 +5940,7 @@ async fn perform_reminder_action_snoozes_calendar_and_task_canonical_reminders()
     assert!(body.contains("<t:Subject>Standup</t:Subject>"));
     assert!(body.contains("<t:Subject>Ship notes</t:Subject>"));
     assert!(body.contains("<t:ReminderTime>2026-05-09T16:00:00Z</t:ReminderTime>"));
+    assert!(body.contains("<t:ReminderTime>2026-05-10T08:45:00Z</t:ReminderTime>"));
 }
 
 #[tokio::test]
@@ -5925,7 +5973,7 @@ async fn get_mail_tips_projects_directory_and_oof_without_local_tip_state() {
                   <t:Mailbox><t:EmailAddress>bob@example.test</t:EmailAddress></t:Mailbox>
                   <t:Mailbox><t:EmailAddress>missing@example.test</t:EmailAddress></t:Mailbox>
                 </m:Recipients>
-                <m:MailTipsRequested>InvalidRecipient OutOfOfficeMessage</m:MailTipsRequested>
+                <m:MailTipsRequested>InvalidRecipient OutOfOfficeMessage MailboxFull DeliveryRestricted ModerationStatus CustomMailTip</m:MailTipsRequested>
               </m:GetMailTips>
             </s:Body></s:Envelope>
             "#,
@@ -5944,6 +5992,15 @@ async fn get_mail_tips_projects_directory_and_oof_without_local_tip_state() {
     assert!(body.contains("<t:EmailAddress>missing@example.test</t:EmailAddress>"));
     assert!(body.contains("<t:MailboxType>Unknown</t:MailboxType>"));
     assert!(body.contains("<t:InvalidRecipient>true</t:InvalidRecipient>"));
+    for unsupported_tip in [
+        "MailboxFull",
+        "DeliveryRestricted",
+        "IsModerated",
+        "CustomMailTip",
+        "Bcc",
+    ] {
+        assert!(!body.contains(unsupported_tip));
+    }
 }
 
 #[tokio::test]
@@ -10895,6 +10952,7 @@ async fn move_item_moves_custom_mailbox_message_to_target_folder() {
         ..Default::default()
     };
     let moved_emails = store.moved_emails.clone();
+    let emails = store.emails.clone();
     let service = ExchangeService::new(store);
 
     let response = service
@@ -10914,6 +10972,9 @@ async fn move_item_moves_custom_mailbox_message_to_target_folder() {
         moved_emails.lock().unwrap().as_slice(),
         &[(message_id, target_mailbox_id)]
     );
+    let stored = emails.lock().unwrap();
+    let moved = stored.iter().find(|email| email.id == message_id).unwrap();
+    assert_eq!(moved.mailbox_ids, vec![target_mailbox_id]);
 }
 
 #[tokio::test]
@@ -11121,6 +11182,7 @@ async fn copy_item_copies_custom_mailbox_message_to_target_folder() {
         ..Default::default()
     };
     let copied_emails = store.copied_emails.clone();
+    let emails = store.emails.clone();
     let service = ExchangeService::new(store);
 
     let response = service
@@ -11140,6 +11202,14 @@ async fn copy_item_copies_custom_mailbox_message_to_target_folder() {
         copied_emails.lock().unwrap().as_slice(),
         &[(message_id, target_mailbox_id)]
     );
+    let stored = emails.lock().unwrap();
+    let source = stored.iter().find(|email| email.id == message_id).unwrap();
+    let copy = stored
+        .iter()
+        .find(|email| email.id != message_id && email.mailbox_id == target_mailbox_id)
+        .unwrap();
+    assert_eq!(source.mailbox_ids, vec![source.mailbox_id]);
+    assert_eq!(copy.mailbox_id, target_mailbox_id);
 }
 
 #[tokio::test]
@@ -11225,6 +11295,212 @@ async fn mark_all_items_as_read_updates_canonical_mailbox_message_flags() {
             .unwrap()
             .unread
     );
+}
+
+#[tokio::test]
+async fn mark_all_items_as_read_changes_only_the_requested_visible_membership() {
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let archive_id = Uuid::parse_str("66666666-6666-6666-6666-666666666666").unwrap();
+    let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+    let mut email = FakeStore::email(
+        &message_id.to_string(),
+        &inbox_id.to_string(),
+        "inbox",
+        "Shared",
+    );
+    email.unread = true;
+    email.mailbox_ids.push(archive_id);
+    let mut archive_state = email.mailbox_states[0].clone();
+    archive_state.mailbox_id = archive_id;
+    archive_state.role = "archive".to_string();
+    archive_state.unread = true;
+    email.mailbox_states.push(archive_state);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox"),
+            FakeStore::mailbox(&archive_id.to_string(), "archive", "Archive"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(r#"<s:Envelope><s:Body><m:MarkAllItemsAsRead><m:ReadFlag>true</m:ReadFlag><m:FolderIds><t:FolderId Id="mailbox:{inbox_id}"/></m:FolderIds></m:MarkAllItemsAsRead></s:Body></s:Envelope>"#).as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    let email = store.emails.lock().unwrap()[0].clone();
+    assert!(
+        !email
+            .mailbox_states
+            .iter()
+            .find(|state| state.mailbox_id == inbox_id)
+            .unwrap()
+            .unread
+    );
+    assert!(
+        email
+            .mailbox_states
+            .iter()
+            .find(|state| state.mailbox_id == archive_id)
+            .unwrap()
+            .unread
+    );
+}
+
+#[tokio::test]
+async fn empty_and_update_folder_reject_protected_or_invalid_requests_before_mutation() {
+    let inbox_id = "11111111-1111-1111-1111-111111111111";
+    let custom_id = "22222222-2222-2222-2222-222222222222";
+    let message_id = "33333333-3333-3333-3333-333333333333";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(inbox_id, "inbox", "Inbox"),
+            FakeStore::mailbox(custom_id, "custom", "Projects"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            message_id,
+            inbox_id,
+            "inbox",
+            "Protected",
+        )])),
+        ..Default::default()
+    };
+    let deleted_emails = store.deleted_emails.clone();
+    let updated_mailboxes = store.updated_mailboxes.clone();
+    let service = ExchangeService::new(store);
+
+    for request in [
+        format!(
+            r#"<s:Envelope><s:Body><m:EmptyFolder DeleteType="HardDelete"><m:FolderIds><t:FolderId Id="mailbox:{inbox_id}"/></m:FolderIds></m:EmptyFolder></s:Body></s:Envelope>"#
+        ),
+        format!(
+            r#"<s:Envelope><s:Body><m:UpdateFolder><m:FolderChanges><t:FolderChange><t:FolderId Id="mailbox:{custom_id}"/><t:Updates><t:SetFolderField><t:FieldURI FieldURI="folder:FolderClass"/><t:Folder><t:DisplayName>Renamed</t:DisplayName></t:Folder></t:SetFolderField></t:Updates></t:FolderChange></m:FolderChanges></m:UpdateFolder></s:Body></s:Envelope>"#
+        ),
+    ] {
+        let response = service
+            .handle(&bearer_headers(), request.as_bytes())
+            .await
+            .unwrap();
+        let body = response_text(response).await;
+        assert!(body.contains("ResponseClass=\"Error\""));
+    }
+    assert!(deleted_emails.lock().unwrap().is_empty());
+    assert!(updated_mailboxes.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn find_conversation_uses_current_canonical_memberships_and_rejects_invalid_parent() {
+    let inbox_id = Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
+    let archive_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let message_id = Uuid::parse_str("66666666-6666-6666-6666-666666666666").unwrap();
+    let thread_id = Uuid::parse_str("aaaaaaaa-1111-1111-1111-111111111111").unwrap();
+    let mut email = FakeStore::email(
+        &message_id.to_string(),
+        &inbox_id.to_string(),
+        "inbox",
+        "Copied",
+    );
+    email.thread_id = thread_id;
+    email.mailbox_ids.push(archive_id);
+    let mut archive_state = email.mailbox_states[0].clone();
+    archive_state.mailbox_id = archive_id;
+    archive_state.role = "archive".to_string();
+    email.mailbox_states.push(archive_state);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox"),
+            FakeStore::mailbox(&archive_id.to_string(), "archive", "Archive"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service.handle(&bearer_headers(), format!(r#"<s:Envelope><s:Body><m:FindConversation><m:ParentFolderId><t:FolderId Id="mailbox:{archive_id}"/></m:ParentFolderId></m:FindConversation></s:Body></s:Envelope>"#).as_bytes()).await.unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains(&format!("conversation:{thread_id}")));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:FindConversation/></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(!body.contains(&message_id.to_string()));
+}
+
+#[tokio::test]
+async fn convert_id_is_stateless_for_a_valid_inaccessible_canonical_id() {
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        fail_fetch_all_jmap_email_ids: true,
+        ..Default::default()
+    });
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:ConvertId DestinationFormat="EntryId"><m:SourceIds><t:AlternateId Format="EwsId" Id="message:99999999-9999-9999-9999-999999999999"/></m:SourceIds></m:ConvertId></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("LPEEWS1."));
+}
+
+#[tokio::test]
+async fn sync_folder_items_replays_a_moved_membership_as_a_target_create() {
+    let mailbox_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+    let message_id = Uuid::parse_str("88888888-8888-8888-8888-888888888888").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &mailbox_id.to_string(),
+            "custom",
+            "Target",
+        )])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            &message_id.to_string(),
+            &mailbox_id.to_string(),
+            "custom",
+            "Moved",
+        )])),
+        mapi_notification_cursor: Arc::new(Mutex::new(Some(7))),
+        ews_mailbox_item_sync_replays: Arc::new(Mutex::new(vec![EwsNotificationReplay {
+            expired: false,
+            current_cursor: Some(8),
+            next_cursor: 8,
+            more_events: false,
+            events: vec![EwsNotificationLogEvent {
+                cursor: 8,
+                mailbox_id,
+                message_id,
+                change_kind: "moved".to_string(),
+                modseq: 8,
+                created_at: "2026-08-17T08:00:00.000000Z".to_string(),
+            }],
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let initial = service.handle(&bearer_headers(), format!(r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="mailbox:{mailbox_id}"/></m:SyncFolderId></m:SyncFolderItems></s:Body></s:Envelope>"#).as_bytes()).await.unwrap();
+    let sync_state = test_xml_text(&response_text(initial).await, "SyncState").unwrap();
+    let response = service.handle(&bearer_headers(), format!(r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncState>{sync_state}</m:SyncState><m:SyncFolderId><t:FolderId Id="mailbox:{mailbox_id}"/></m:SyncFolderId></m:SyncFolderItems></s:Body></s:Envelope>"#).as_bytes()).await.unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:Create><t:Message>"));
+    assert!(body.contains(&format!("message:{message_id}")));
 }
 
 #[tokio::test]

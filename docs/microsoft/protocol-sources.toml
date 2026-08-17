@@ -2483,6 +2483,8 @@ sections = [
   "3.1.4.2 CreateFolder Operation",
   "3.1.4.4 DeleteFolder Operation",
   "3.1.4.6 GetFolder Operation",
+  "3.1.4.5 EmptyFolder Operation",
+  "3.1.4.8 UpdateFolder Operation",
 ]
 
 [[protocol]]

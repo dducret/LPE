@@ -10,7 +10,9 @@ where
     pub(in crate::service) async fn get_user_oof_settings(
         &self,
         principal: &AccountPrincipal,
+        request: &str,
     ) -> Result<String> {
+        ensure_oof_mailbox_is_principal(principal, request)?;
         let script = self
             .store
             .fetch_active_sieve_script(principal.account_id)
@@ -26,6 +28,7 @@ where
         request: &str,
     ) -> Result<String> {
         let result = async {
+            ensure_oof_mailbox_is_principal(principal, request)?;
             let settings = element_content(request, "UserOofSettings")
                 .or_else(|| element_content(request, "OofSettings"))
                 .unwrap_or(request);
@@ -95,6 +98,21 @@ where
             set_user_oof_settings_error_response("ErrorInvalidOperation", &error.to_string())
         }))
     }
+}
+
+fn ensure_oof_mailbox_is_principal(principal: &AccountPrincipal, request: &str) -> Result<()> {
+    let Some(address) = element_content(request, "Mailbox")
+        .and_then(|mailbox| {
+            element_text(mailbox, "EmailAddress").or_else(|| element_text(mailbox, "Address"))
+        })
+        .filter(|address| !address.trim().is_empty())
+    else {
+        return Ok(());
+    };
+    if address.eq_ignore_ascii_case(&principal.email) {
+        return Ok(());
+    }
+    bail!("EWS OOF settings are limited to the authenticated mailbox.")
 }
 
 #[derive(Debug, Clone)]

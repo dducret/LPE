@@ -11,7 +11,9 @@ where
         request: &str,
     ) -> Result<String> {
         let result = async {
-            let emails = self.conversation_source_emails(principal, request).await?;
+            let emails = self
+                .conversation_source_emails(principal, request, true)
+                .await?;
             Ok(find_conversation_response(&emails, request))
         }
         .await;
@@ -31,12 +33,18 @@ where
         request: &str,
     ) -> Result<String> {
         let result = async {
-            let conversation_ids = requested_conversation_ids(request);
+            let conversation_ids = requested_conversation_ids(request)?;
             if conversation_ids.is_empty() {
                 bail!("GetConversationItems requires at least one ConversationId.");
             }
-            let mut emails = self.conversation_source_emails(principal, request).await?;
-            filter_ignored_conversation_folders(&mut emails, request);
+            let mut emails = self
+                .conversation_source_emails(principal, request, false)
+                .await?;
+            let mailboxes = self
+                .store
+                .fetch_jmap_mailboxes(principal.account_id)
+                .await?;
+            filter_ignored_conversation_folders(&mut emails, request, &mailboxes);
             Ok(get_conversation_items_response(
                 &emails,
                 &conversation_ids,
@@ -189,10 +197,13 @@ where
         &self,
         principal: &AccountPrincipal,
         request: &str,
+        require_parent_folder: bool,
     ) -> Result<Vec<JmapEmail>> {
-        let folder_ids = if element_content(request, "ParentFolderId").is_some() {
-            self.requested_mailbox_folder_ids(principal, request)
-                .await?
+        let folder_ids = if require_parent_folder {
+            vec![
+                self.requested_conversation_parent_mailbox_id(principal, request)
+                    .await?,
+            ]
         } else {
             Vec::new()
         };
@@ -226,9 +237,50 @@ where
             .await?;
         if !folder_ids.is_empty() {
             let folder_set = folder_ids.into_iter().collect::<HashSet<_>>();
-            emails.retain(|email| folder_set.contains(&email.mailbox_id));
+            emails.retain(|email| email.mailbox_ids.iter().any(|id| folder_set.contains(id)));
         }
         Ok(emails)
+    }
+
+    async fn requested_conversation_parent_mailbox_id(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<Uuid> {
+        let parents = element_contents(request, "ParentFolderId");
+        if parents.len() != 1 {
+            bail!("FindConversation requires exactly one mailbox ParentFolderId");
+        }
+        let parent = parents[0];
+        let folder_ids = attribute_values_for_tag(parent, "FolderId", "Id");
+        let distinguished_ids = attribute_values_for_tag(parent, "DistinguishedFolderId", "Id");
+        if folder_ids.len() + distinguished_ids.len() != 1 {
+            bail!("FindConversation requires exactly one mailbox ParentFolderId");
+        }
+        let mailboxes = self
+            .store
+            .fetch_jmap_mailboxes(principal.account_id)
+            .await?;
+        let mailbox_id = if let Some(folder_id) = folder_ids.first() {
+            let id = folder_id
+                .strip_prefix("mailbox:")
+                .ok_or_else(|| anyhow!("FindConversation parent folder is not a mailbox"))?;
+            Uuid::parse_str(id)
+                .map_err(|_| anyhow!("FindConversation parent mailbox id is invalid"))?
+        } else {
+            let role = ews_distinguished_mailbox_role(distinguished_ids[0])
+                .ok_or_else(|| anyhow!("FindConversation parent folder is not supported"))?;
+            mailboxes
+                .iter()
+                .find(|mailbox| mailbox.role == role)
+                .map(|mailbox| mailbox.id)
+                .ok_or_else(|| anyhow!("FindConversation parent mailbox is not visible"))?
+        };
+        if mailboxes.iter().any(|mailbox| mailbox.id == mailbox_id) {
+            Ok(mailbox_id)
+        } else {
+            bail!("FindConversation parent mailbox is not visible")
+        }
     }
 }
 
@@ -360,10 +412,12 @@ pub(in crate::service) fn get_conversation_items_response(
     )
 }
 
-pub(in crate::service) fn requested_conversation_ids(request: &str) -> Vec<Uuid> {
+pub(in crate::service) fn requested_conversation_ids(request: &str) -> Result<Vec<Uuid>> {
     attribute_values_for_tag(request, "ConversationId", "Id")
         .into_iter()
-        .filter_map(parse_conversation_id)
+        .map(|value| {
+            parse_conversation_id(value).ok_or_else(|| anyhow!("ConversationId is invalid"))
+        })
         .collect()
 }
 
@@ -393,20 +447,29 @@ pub(in crate::service) fn parse_conversation_actions(
 pub(in crate::service) fn filter_ignored_conversation_folders(
     emails: &mut Vec<JmapEmail>,
     request: &str,
+    visible_mailboxes: &[JmapMailbox],
 ) {
     let Some(ignore_xml) = element_content(request, "FoldersToIgnore") else {
         return;
     };
+    let visible_ids = visible_mailboxes
+        .iter()
+        .map(|mailbox| mailbox.id)
+        .collect::<HashSet<_>>();
     let ignored_ids = requested_mailbox_folder_ids(ignore_xml)
         .into_iter()
+        .filter(|id| visible_ids.contains(id))
         .collect::<HashSet<_>>();
     let ignored_roles = attribute_values_for_tag(ignore_xml, "DistinguishedFolderId", "Id")
         .into_iter()
         .filter_map(ews_distinguished_mailbox_role)
         .collect::<HashSet<_>>();
     emails.retain(|email| {
-        !ignored_ids.contains(&email.mailbox_id)
-            && !ignored_roles.contains(email.mailbox_role.as_str())
+        !email.mailbox_ids.iter().any(|id| ignored_ids.contains(id))
+            && !email
+                .mailbox_states
+                .iter()
+                .any(|state| ignored_roles.contains(state.role.as_str()))
     });
 }
 

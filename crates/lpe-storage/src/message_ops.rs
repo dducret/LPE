@@ -444,7 +444,7 @@ impl Storage {
                 Some(source_mailbox_id),
                 "mailbox_message",
                 source_membership_id,
-                "updated",
+                "expunged",
                 modseq,
                 &principals,
                 serde_json::json!({
@@ -686,7 +686,7 @@ impl Storage {
             Some(source_mailbox_id),
             "mailbox_message",
             source_membership_id,
-            "updated",
+            "expunged",
             modseq,
             &principals,
             serde_json::json!({

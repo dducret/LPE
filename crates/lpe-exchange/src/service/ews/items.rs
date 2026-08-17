@@ -1,5 +1,7 @@
 use super::super::*;
 
+const EWS_COPY_MOVE_ITEM_LIMIT: usize = 100;
+
 impl<S, V> ExchangeService<S, V>
 where
     S: ExchangeStore + Clone + Send + Sync + 'static,
@@ -571,59 +573,6 @@ where
         }))
     }
 
-    pub(in crate::service) async fn mark_all_items_as_read(
-        &self,
-        principal: &AccountPrincipal,
-        request: &str,
-    ) -> Result<String> {
-        let result = async {
-            if !requested_public_folder_ids(request).is_empty() {
-                bail!("MarkAllItemsAsRead currently supports canonical mailbox folders only.");
-            }
-            let folder_ids = self
-                .requested_mailbox_folder_ids(principal, request)
-                .await?;
-            if folder_ids.is_empty() {
-                bail!("MarkAllItemsAsRead requires a mailbox folder id.");
-            }
-            let read_flag = element_text(request, "ReadFlag")
-                .map(|value| !value.eq_ignore_ascii_case("false"))
-                .unwrap_or(true);
-            for folder_id in folder_ids {
-                let message_ids = self
-                    .store
-                    .query_jmap_email_ids(principal.account_id, Some(folder_id), None, 0, 10_000)
-                    .await?
-                    .ids;
-                for message_id in message_ids {
-                    self.store
-                        .update_jmap_email_flags(
-                            principal.account_id,
-                            message_id,
-                            Some(!read_flag),
-                            None,
-                            AuditEntryInput {
-                                actor: principal.email.clone(),
-                                action: "ews-mark-all-items-as-read".to_string(),
-                                subject: message_id.to_string(),
-                            },
-                        )
-                        .await?;
-                }
-            }
-            Ok(simple_operation_success_response("MarkAllItemsAsRead"))
-        }
-        .await;
-
-        Ok(result.unwrap_or_else(|error: anyhow::Error| {
-            operation_error_response(
-                "MarkAllItemsAsRead",
-                "ErrorInvalidOperation",
-                &error.to_string(),
-            )
-        }))
-    }
-
     pub(in crate::service) async fn archive_item(
         &self,
         principal: &AccountPrincipal,
@@ -728,6 +677,7 @@ where
             if ids.is_empty()
                 || message_ids.len() + public_folder_item_ids.len() != ids.len()
                 || (!message_ids.is_empty() && !public_folder_item_ids.is_empty())
+                || ids.len() > EWS_COPY_MOVE_ITEM_LIMIT
             {
                 return Ok(operation_error_response(
                     "CopyItem",
@@ -745,6 +695,13 @@ where
                     ));
                 }
                 let target_public_folder_id = target_public_folder_ids[0];
+                let target = self
+                    .store
+                    .fetch_public_folder(principal.account_id, target_public_folder_id)
+                    .await?;
+                if !target.rights.may_write {
+                    bail!("public folder write access is not granted");
+                }
                 let existing_items = self
                     .store
                     .fetch_public_folder_items_by_ids(principal.account_id, &public_folder_item_ids)
@@ -804,6 +761,20 @@ where
                 ));
             }
 
+            let source_messages = self
+                .store
+                .fetch_jmap_emails(principal.account_id, &message_ids)
+                .await?;
+            if source_messages.len() != message_ids.len() {
+                bail!("message not found");
+            }
+            if source_messages
+                .iter()
+                .any(|message| message.mailbox_ids.contains(&target_mailbox_id))
+            {
+                bail!("message already exists in target mailbox");
+            }
+
             let mut items = String::new();
             for message_id in message_ids {
                 let copied = self
@@ -858,6 +829,7 @@ where
             if ids.is_empty()
                 || message_ids.len() + public_folder_item_ids.len() != ids.len()
                 || (!message_ids.is_empty() && !public_folder_item_ids.is_empty())
+                || ids.len() > EWS_COPY_MOVE_ITEM_LIMIT
             {
                 return Ok(operation_error_response(
                     "MoveItem",
@@ -875,6 +847,13 @@ where
                     ));
                 }
                 let target_public_folder_id = target_public_folder_ids[0];
+                let target = self
+                    .store
+                    .fetch_public_folder(principal.account_id, target_public_folder_id)
+                    .await?;
+                if !target.rights.may_write {
+                    bail!("public folder write access is not granted");
+                }
                 let existing_items = self
                     .store
                     .fetch_public_folder_items_by_ids(principal.account_id, &public_folder_item_ids)
@@ -885,6 +864,15 @@ where
                         "ErrorItemNotFound",
                         "public folder item not found",
                     ));
+                }
+                for item in &existing_items {
+                    let source = self
+                        .store
+                        .fetch_public_folder(principal.account_id, item.public_folder_id)
+                        .await?;
+                    if !source.rights.may_delete {
+                        bail!("public folder delete access is not granted");
+                    }
                 }
                 let mut items = String::new();
                 for existing in existing_items {
@@ -944,6 +932,20 @@ where
                     "ErrorFolderNotFound",
                     "target mailbox folder not found",
                 ));
+            }
+
+            let source_messages = self
+                .store
+                .fetch_jmap_emails(principal.account_id, &message_ids)
+                .await?;
+            if source_messages.len() != message_ids.len() {
+                bail!("message not found");
+            }
+            if source_messages
+                .iter()
+                .any(|message| message.mailbox_ids.contains(&target_mailbox_id))
+            {
+                bail!("message already exists in target mailbox");
             }
 
             let mut items = String::new();

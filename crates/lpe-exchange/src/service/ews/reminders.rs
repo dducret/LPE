@@ -85,12 +85,14 @@ where
                     "calendar" => {
                         if let Some(reminder_at) = snooze_until.clone() {
                             self.store
-                                .update_accessible_event_reminder(
+                                .snooze_reminder_occurrence(
                                     principal.account_id,
+                                    &parsed.source_type,
                                     parsed.source_id,
-                                    Some(true),
-                                    Some(reminder_at),
-                                    None,
+                                    parsed.occurrence_start_at.as_deref().ok_or_else(|| {
+                                        anyhow!("calendar reminder ItemId requires an occurrence identity")
+                                    })?,
+                                    &reminder_at,
                                 )
                                 .await?;
                         } else {
@@ -108,13 +110,14 @@ where
                     "task" => {
                         if let Some(reminder_at) = snooze_until.clone() {
                             self.store
-                                .update_accessible_task_reminder(
+                                .snooze_reminder_occurrence(
                                     principal.account_id,
+                                    &parsed.source_type,
                                     parsed.source_id,
-                                    Some(true),
-                                    Some(reminder_at),
-                                    None,
-                                    Some(true),
+                                    parsed.occurrence_start_at.as_deref().ok_or_else(|| {
+                                        anyhow!("task reminder ItemId requires an occurrence identity")
+                                    })?,
+                                    &reminder_at,
                                 )
                                 .await?;
                         } else {
