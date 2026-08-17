@@ -4122,7 +4122,7 @@ async fn delegate_operations_use_canonical_permissions_and_preferences() {
                       <t:ViewPrivateItems>false</t:ViewPrivateItems>
                     </t:DelegateUser>
                   </m:DelegateUsers>
-                  <m:DeliverMeetingRequests>DelegatesOnly</m:DeliverMeetingRequests>
+                  <m:DeliverMeetingRequests>NoForward</m:DeliverMeetingRequests>
                 </m:UpdateDelegate>
               </s:Body>
             </s:Envelope>
@@ -4138,7 +4138,7 @@ async fn delegate_operations_use_canonical_permissions_and_preferences() {
         let stored = delegates.first().expect("delegate should remain stored");
         assert!(stored.inbox_rights.may_write);
         assert!(!stored.calendar_rights.may_write);
-        assert_eq!(stored.preferences.meeting_request_delivery, "delegate_only");
+        assert_eq!(stored.preferences.meeting_request_delivery, "owner_only");
         assert!(!stored.preferences.receives_meeting_request_copy);
         assert!(!stored.preferences.may_view_private_items);
     }
@@ -4204,6 +4204,51 @@ async fn delegate_add_rejects_cross_tenant_delegate() {
     assert!(body.contains("<m:AddDelegateResponse>"));
     assert!(body.contains("ResponseClass=\"Error\""));
     assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(store.ews_delegates.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn delegate_operations_reject_a_mailbox_other_than_the_authenticated_owner() {
+    let delegate = AuthenticatedAccount {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "delegate@example.test".to_string(),
+        display_name: "Delegate User".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        directory_accounts: Arc::new(Mutex::new(vec![delegate])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:AddDelegate>
+                  <m:Mailbox><t:EmailAddress>other@example.test</t:EmailAddress></m:Mailbox>
+                  <m:DelegateUsers>
+                    <t:DelegateUser>
+                      <t:UserId><t:PrimarySmtpAddress>delegate@example.test</t:PrimarySmtpAddress></t:UserId>
+                      <t:DelegatePermissions><t:InboxFolderPermissionLevel>Reviewer</t:InboxFolderPermissionLevel></t:DelegatePermissions>
+                    </t:DelegateUser>
+                  </m:DelegateUsers>
+                </m:AddDelegate>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:AddDelegateResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("owner-bound to the authenticated mailbox"));
     assert!(store.ews_delegates.lock().unwrap().is_empty());
 }
 
@@ -4347,7 +4392,7 @@ async fn user_configuration_create_get_update_and_delete_use_canonical_storage()
                         <t:DictionaryValue><t:Type>String</t:Type><t:Value>contrast</t:Value></t:DictionaryValue>
                       </t:DictionaryEntry>
                     </t:Dictionary>
-                    <t:XmlData>&lt;options version=&quot;1&quot;/&gt;</t:XmlData>
+                    <t:XmlData>PG9wdGlvbnMgdmVyc2lvbj0iMSIvPg==</t:XmlData>
                     <t:BinaryData>cHJvZmlsZS1jYWNoZQ==</t:BinaryData>
                   </m:UserConfiguration>
                 </m:CreateUserConfiguration>
@@ -4380,6 +4425,16 @@ async fn user_configuration_create_get_update_and_delete_use_canonical_storage()
             Some(b"profile-cache".as_slice())
         );
     }
+    assert_eq!(
+        store
+            .ews_user_configuration_audits
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|entry| entry.action.as_str())
+            .collect::<Vec<_>>(),
+        vec!["ews-create-user-configuration"]
+    );
 
     let response = service
         .handle(
@@ -4403,7 +4458,7 @@ async fn user_configuration_create_get_update_and_delete_use_canonical_storage()
     assert!(body.contains("<t:UserConfigurationName Name=\"OWA.UserOptions\"/>"));
     assert!(body.contains("<t:Value>previewPane</t:Value>"));
     assert!(body.contains("<t:Value>right</t:Value>"));
-    assert!(body.contains("<t:XmlData>&lt;options version=&quot;1&quot;/&gt;</t:XmlData>"));
+    assert!(body.contains("<t:XmlData>PG9wdGlvbnMgdmVyc2lvbj0iMSIvPg==</t:XmlData>"));
     assert!(body.contains("<t:BinaryData>cHJvZmlsZS1jYWNoZQ==</t:BinaryData>"));
 
     let response = service
@@ -4421,7 +4476,7 @@ async fn user_configuration_create_get_update_and_delete_use_canonical_storage()
                         <t:DictionaryValue><t:Type>String</t:Type><t:Value>bottom</t:Value></t:DictionaryValue>
                       </t:DictionaryEntry>
                     </t:Dictionary>
-                    <t:XmlData>&lt;options version=&quot;2&quot;/&gt;</t:XmlData>
+                    <t:XmlData>PG9wdGlvbnMgdmVyc2lvbj0iMiIvPg==</t:XmlData>
                   </m:UserConfiguration>
                 </m:UpdateUserConfiguration>
               </s:Body>
@@ -4444,6 +4499,19 @@ async fn user_configuration_create_get_update_and_delete_use_canonical_storage()
         );
         assert_eq!(configuration.binary_payload, None);
     }
+    assert_eq!(
+        store
+            .ews_user_configuration_audits
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|entry| entry.action.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "ews-create-user-configuration",
+            "ews-update-user-configuration"
+        ]
+    );
 
     let response = service
         .handle(
@@ -4485,6 +4553,20 @@ async fn user_configuration_create_get_update_and_delete_use_canonical_storage()
     assert!(body.contains("<m:DeleteUserConfigurationResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(store.ews_user_configurations.lock().unwrap().is_empty());
+    assert_eq!(
+        store
+            .ews_user_configuration_audits
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|entry| entry.action.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "ews-create-user-configuration",
+            "ews-update-user-configuration",
+            "ews-delete-user-configuration"
+        ]
+    );
 }
 
 #[tokio::test]
@@ -4555,6 +4637,134 @@ async fn user_configuration_supports_mailbox_scoped_names_and_not_found_errors()
     assert!(body.contains("<m:GetUserConfigurationResponse>"));
     assert!(body.contains("ResponseClass=\"Error\""));
     assert!(body.contains("<m:ResponseCode>ErrorItemNotFound</m:ResponseCode>"));
+}
+
+#[tokio::test]
+async fn user_configuration_enforces_scope_name_payload_and_mutation_boundaries() {
+    use base64::Engine as _;
+
+    let mailbox_id = "44444444-4444-4444-4444-444444444445";
+    let public_folder_id = "44444444-4444-4444-4444-444444444446";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            mailbox_id, "inbox", "Inbox",
+        )])),
+        public_folders: Arc::new(Mutex::new(vec![FakeStore::public_folder(
+            public_folder_id,
+            None,
+            "Public",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+    let create = |scope: &str, value: &str| {
+        format!(
+            r#"<s:Envelope><s:Body><m:CreateUserConfiguration><m:UserConfiguration><t:UserConfigurationName Name="Shared.Configuration">{scope}</t:UserConfigurationName><t:Dictionary><t:DictionaryEntry><t:DictionaryKey><t:Type>String</t:Type><t:Value>scope</t:Value></t:DictionaryKey><t:DictionaryValue><t:Type>String</t:Type><t:Value>{value}</t:Value></t:DictionaryValue></t:DictionaryEntry></t:Dictionary></m:UserConfiguration></m:CreateUserConfiguration></s:Body></s:Envelope>"#
+        )
+    };
+
+    let mailbox_scope = format!("<t:FolderId Id=\"mailbox:{mailbox_id}\"/>");
+    let public_folder_scope = format!("<t:FolderId Id=\"public-folder:{public_folder_id}\"/>");
+    for (scope, value) in [
+        ("", "account"),
+        (mailbox_scope.as_str(), "mailbox"),
+        (public_folder_scope.as_str(), "public"),
+    ] {
+        let response = service
+            .handle(&bearer_headers(), create(scope, value).as_bytes())
+            .await
+            .unwrap();
+        assert!(response_text(response)
+            .await
+            .contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    }
+    assert_eq!(store.ews_user_configurations.lock().unwrap().len(), 3);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:GetUserConfiguration><m:UserConfigurationName Name="Shared.Configuration"><t:FolderId Id="mailbox:{mailbox_id}"/></m:UserConfigurationName><m:UserConfigurationProperties>Dictionary</m:UserConfigurationProperties></m:GetUserConfiguration></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains(&format!("<t:FolderId Id=\"mailbox:{mailbox_id}\"/>")));
+    assert!(body.contains("<t:Value>mailbox</t:Value>"));
+    assert!(!body.contains("<t:ItemId "));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:GetUserConfiguration><m:UserConfigurationName Name="Shared.Configuration"><t:FolderId Id="public-folder:{public_folder_id}"/></m:UserConfigurationName><m:UserConfigurationProperties>Id</m:UserConfigurationProperties></m:GetUserConfiguration></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains(&format!(
+        "<t:FolderId Id=\"public-folder:{public_folder_id}\"/>"
+    )));
+    assert!(body.contains("<t:ItemId Id=\"user-configuration:"));
+    assert!(!body.contains("<t:Dictionary>"));
+
+    let response = service
+        .handle(&bearer_headers(), create("", "duplicate").as_bytes())
+        .await
+        .unwrap();
+    assert!(response_text(response)
+        .await
+        .contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert_eq!(store.ews_user_configurations.lock().unwrap().len(), 3);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:UpdateUserConfiguration><m:UserConfiguration><t:UserConfigurationName Name="Missing.Configuration"/></m:UserConfiguration></m:UpdateUserConfiguration></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    assert!(response_text(response)
+        .await
+        .contains("<m:ResponseCode>ErrorItemNotFound</m:ResponseCode>"));
+
+    let oversized = base64::engine::general_purpose::STANDARD.encode(vec![b'x'; 65_537]);
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:CreateUserConfiguration><m:UserConfiguration><t:UserConfigurationName Name="TooLarge"/><t:BinaryData>{oversized}</t:BinaryData></m:UserConfiguration></m:CreateUserConfiguration></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    assert!(response_text(response)
+        .await
+        .contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert_eq!(store.ews_user_configurations.lock().unwrap().len(), 3);
+
+    for element in ["XmlData", "BinaryData"] {
+        let response = service
+            .handle(
+                &bearer_headers(),
+                format!(
+                    r#"<s:Envelope><s:Body><m:CreateUserConfiguration><m:UserConfiguration><t:UserConfigurationName Name="Invalid{element}"/><t:{element}>not-base64!</t:{element}></m:UserConfiguration></m:CreateUserConfiguration></s:Body></s:Envelope>"#
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        assert!(response_text(response)
+            .await
+            .contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    }
+    assert_eq!(store.ews_user_configurations.lock().unwrap().len(), 3);
 }
 
 #[tokio::test]
@@ -4901,6 +5111,144 @@ async fn pull_subscription_expired_watermark_returns_parseable_error() {
     assert!(body.contains("ResponseClass=\"Error\""));
     assert!(body.contains("<m:ResponseCode>ErrorInvalidWatermark</m:ResponseCode>"));
     assert!(body.contains("canonical change-log retention"));
+}
+
+#[tokio::test]
+async fn streaming_notification_replay_is_immediate_token_bound_and_inbox_filtered() {
+    let inbox_id = Uuid::parse_str("88888888-8888-8888-8888-888888888811").unwrap();
+    let custom_id = Uuid::parse_str("88888888-8888-8888-8888-888888888812").unwrap();
+    let inbox_message_id = Uuid::parse_str("88888888-8888-8888-8888-888888888813").unwrap();
+    let custom_message_id = Uuid::parse_str("88888888-8888-8888-8888-888888888814").unwrap();
+    let cursor = Arc::new(Mutex::new(Some(7)));
+    let polls = Arc::new(Mutex::new(vec![MapiNotificationPoll {
+        event_pending: true,
+        cursor: Some(9),
+        events: vec![
+            MapiNotificationEvent::canonical(
+                MapiNotificationKind::Content,
+                1,
+                1,
+                Some(2),
+                None,
+                8,
+                8,
+                None,
+                None,
+                "created".to_string(),
+                Some("Inbox item".to_string()),
+                None,
+                Some("Inbox item".to_string()),
+                None,
+            )
+            .with_canonical_ids(Some(inbox_id), Some(inbox_message_id)),
+            MapiNotificationEvent::canonical(
+                MapiNotificationKind::Content,
+                1,
+                1,
+                Some(2),
+                None,
+                9,
+                9,
+                None,
+                None,
+                "created".to_string(),
+                Some("Custom item".to_string()),
+                None,
+                Some("Custom item".to_string()),
+                None,
+            )
+            .with_canonical_ids(Some(custom_id), Some(custom_message_id)),
+        ],
+    }]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox"),
+            FakeStore::mailbox(&custom_id.to_string(), "custom", "Custom"),
+        ])),
+        mapi_notification_cursor: cursor.clone(),
+        mapi_notification_polls: polls.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:Subscribe><m:PullSubscriptionRequest><t:SubscribeToAllFolders>true</t:SubscribeToAllFolders><t:EventTypes><t:EventType>NewMailEvent</t:EventType></t:EventTypes><t:Timeout>30</t:Timeout></m:PullSubscriptionRequest></m:Subscribe></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let subscription = response_text(response).await;
+    let subscription_id = test_xml_text(&subscription, "SubscriptionId").unwrap();
+
+    let response = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        service.handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:GetStreamingEvents><m:SubscriptionIds><t:SubscriptionId>{subscription_id}</t:SubscriptionId></m:SubscriptionIds><m:ConnectionTimeout>30</m:ConnectionTimeout></m:GetStreamingEvents></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        ),
+    )
+    .await
+    .expect("one-shot streaming replay must not wait for ConnectionTimeout")
+    .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetStreamingEventsResponse>"));
+    assert!(body.contains("<t:NewMailEvent>"));
+    assert!(body.contains(&format!("message:{inbox_message_id}")));
+    assert!(!body.contains(&format!("message:{custom_message_id}")));
+    assert_eq!(*cursor.lock().unwrap(), Some(7));
+    assert!(polls.lock().unwrap().is_empty());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetStreamingEvents><m:SubscriptionIds><t:SubscriptionId>invalid</t:SubscriptionId></m:SubscriptionIds><m:ConnectionTimeout>30</m:ConnectionTimeout></m:GetStreamingEvents></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidSubscription</m:ResponseCode>"));
+    assert_eq!(*cursor.lock().unwrap(), Some(7));
+}
+
+#[tokio::test]
+async fn streaming_notification_replay_reports_expired_canonical_cursor() {
+    let mailbox_id = "88888888-8888-8888-8888-888888888821";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            mailbox_id, "inbox", "Inbox",
+        )])),
+        mapi_notification_cursor: Arc::new(Mutex::new(Some(7))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:Subscribe><m:PullSubscriptionRequest><t:FolderIds><t:FolderId Id="mailbox:88888888-8888-8888-8888-888888888821"/></t:FolderIds><t:EventTypes><t:EventType>CreatedEvent</t:EventType></t:EventTypes><t:Timeout>10</t:Timeout></m:PullSubscriptionRequest></m:Subscribe></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let subscription = response_text(response).await;
+    let subscription_id = test_xml_text(&subscription, "SubscriptionId").unwrap();
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:GetStreamingEvents><m:SubscriptionIds><t:SubscriptionId>{subscription_id}</t:SubscriptionId></m:SubscriptionIds><m:ConnectionTimeout>1</m:ConnectionTimeout></m:GetStreamingEvents></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetStreamingEventsResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidWatermark</m:ResponseCode>"));
 }
 
 #[tokio::test]
@@ -6405,6 +6753,11 @@ async fn pull_and_streaming_notifications_replay_canonical_sql_change_cursor() {
     email.mailbox_states[0].modseq = 10;
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &mailbox_id.to_string(),
+            "inbox",
+            "Inbox",
+        )])),
         emails: Arc::new(Mutex::new(vec![email])),
         mapi_notification_cursor: mapi_notification_cursor.clone(),
         mapi_notification_polls: mapi_notification_polls.clone(),

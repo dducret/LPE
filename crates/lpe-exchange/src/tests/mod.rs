@@ -4316,6 +4316,7 @@ struct FakeStore {
     ews_mailbox_item_sync_replays: Arc<Mutex<Vec<EwsNotificationReplay>>>,
     mapi_mail_store_load_notification: Arc<Mutex<Option<(i64, MapiNotificationPoll)>>>,
     ews_user_configurations: Arc<Mutex<Vec<EwsUserConfiguration>>>,
+    ews_user_configuration_audits: Arc<Mutex<Vec<lpe_storage::AuditEntryInput>>>,
     ews_delegates: Arc<Mutex<Vec<EwsDelegate>>>,
     ews_retention_policy_tags: Arc<Mutex<Vec<FakeRetentionPolicyTag>>>,
     ews_sharing_grants: Arc<Mutex<Vec<CollaborationGrant>>>,
@@ -5794,25 +5795,20 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(configuration) })
     }
 
-    fn upsert_ews_user_configuration<'a>(
+    fn create_ews_user_configuration<'a>(
         &'a self,
         input: UpsertEwsUserConfigurationInput,
-        _audit: lpe_storage::AuditEntryInput,
+        audit: lpe_storage::AuditEntryInput,
     ) -> StoreFuture<'a, EwsUserConfiguration> {
         let mut configurations = self.ews_user_configurations.lock().unwrap();
-        if let Some(configuration) = configurations.iter_mut().find(|configuration| {
+        if configurations.iter().any(|configuration| {
             configuration.scope_kind == input.key.scope_kind
                 && configuration.mailbox_id == input.key.mailbox_id
                 && configuration.public_folder_id == input.key.public_folder_id
                 && configuration.config_name == input.key.config_name
                 && configuration.config_class == input.key.config_class
         }) {
-            configuration.dictionary_json = input.dictionary_json;
-            configuration.xml_payload = input.xml_payload;
-            configuration.binary_payload = input.binary_payload;
-            configuration.modseq += 1;
-            let configuration = configuration.clone();
-            return Box::pin(async move { Ok(configuration) });
+            return Box::pin(async { bail!("user configuration already exists") });
         }
         let configuration = EwsUserConfiguration {
             id: Uuid::new_v4(),
@@ -5827,6 +5823,41 @@ impl ExchangeStore for FakeStore {
             modseq: 1,
         };
         configurations.push(configuration.clone());
+        self.ews_user_configuration_audits
+            .lock()
+            .unwrap()
+            .push(audit);
+        Box::pin(async move { Ok(configuration) })
+    }
+
+    fn update_ews_user_configuration<'a>(
+        &'a self,
+        input: UpsertEwsUserConfigurationInput,
+        audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, Option<EwsUserConfiguration>> {
+        let mut configurations = self.ews_user_configurations.lock().unwrap();
+        let configuration = configurations
+            .iter_mut()
+            .find(|configuration| {
+                configuration.scope_kind == input.key.scope_kind
+                    && configuration.mailbox_id == input.key.mailbox_id
+                    && configuration.public_folder_id == input.key.public_folder_id
+                    && configuration.config_name == input.key.config_name
+                    && configuration.config_class == input.key.config_class
+            })
+            .map(|configuration| {
+                configuration.dictionary_json = input.dictionary_json;
+                configuration.xml_payload = input.xml_payload;
+                configuration.binary_payload = input.binary_payload;
+                configuration.modseq += 1;
+                configuration.clone()
+            });
+        if configuration.is_some() {
+            self.ews_user_configuration_audits
+                .lock()
+                .unwrap()
+                .push(audit);
+        }
         Box::pin(async move { Ok(configuration) })
     }
 
@@ -5834,7 +5865,7 @@ impl ExchangeStore for FakeStore {
         &'a self,
         account_id: Uuid,
         key: &'a EwsUserConfigurationKey,
-        _audit: lpe_storage::AuditEntryInput,
+        audit: lpe_storage::AuditEntryInput,
     ) -> StoreFuture<'a, bool> {
         let deleted = if account_id == FakeStore::account().account_id {
             let mut configurations = self.ews_user_configurations.lock().unwrap();
@@ -5850,6 +5881,12 @@ impl ExchangeStore for FakeStore {
         } else {
             false
         };
+        if deleted {
+            self.ews_user_configuration_audits
+                .lock()
+                .unwrap()
+                .push(audit);
+        }
         Box::pin(async move { Ok(deleted) })
     }
 

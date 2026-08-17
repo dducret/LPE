@@ -160,12 +160,37 @@ where
                 "The requested EWS notification watermark is no longer available in canonical change-log retention.",
             ));
         }
+        let inbox_ids = if subscription
+            .events
+            .contains(&EwsNotificationEventType::NewMail)
+        {
+            self.store
+                .fetch_jmap_mailboxes(principal.account_id)
+                .await?
+                .into_iter()
+                .filter(|mailbox| mailbox.role == "inbox")
+                .map(|mailbox| mailbox.id)
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         let notifications = replay
             .events
             .into_iter()
+            .filter(|event| {
+                event.change_kind != "created"
+                    || subscription
+                        .events
+                        .contains(&EwsNotificationEventType::Created)
+                    || inbox_ids.contains(&event.mailbox_id)
+            })
             .map(|event| EwsQueuedNotification {
                 sequence: event.cursor.max(0) as u64,
-                kind: notification_kind_for_change(&event.change_kind, &subscription.events),
+                kind: notification_kind_for_change(
+                    &event.change_kind,
+                    &subscription.events,
+                    inbox_ids.contains(&event.mailbox_id),
+                ),
                 item_id: event.message_id,
                 mailbox_id: event.mailbox_id,
                 change_key: versioned_change_key(
@@ -729,11 +754,14 @@ fn notification_event_type_name(value: EwsNotificationEventType) -> &'static str
 fn notification_kind_for_change(
     change: &str,
     events: &[EwsNotificationEventType],
+    is_inbox: bool,
 ) -> EwsNotificationKind {
     match change {
         "destroyed" | "expunged" => EwsNotificationKind::Deleted,
         "updated" => EwsNotificationKind::Modified,
-        "created" if events.contains(&EwsNotificationEventType::NewMail) => {
+        // [MS-OXWSNTIF] §§2.2.4.1-.8: NewMail is a delivered Inbox event;
+        // other canonical creations retain the CreatedEvent projection.
+        "created" if is_inbox && events.contains(&EwsNotificationEventType::NewMail) => {
             EwsNotificationKind::NewMail
         }
         _ => EwsNotificationKind::Created,

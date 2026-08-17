@@ -3232,7 +3232,7 @@ CREATE TABLE account_client_configurations (
         OR (scope_kind = 'public_folder' AND mailbox_id IS NULL AND public_folder_id IS NOT NULL)
     ),
     CHECK (jsonb_typeof(dictionary_json) = 'object'),
-    CHECK (payload_size_octets = COALESCE(length(xml_payload), 0) + COALESCE(octet_length(binary_payload), 0)),
+    CHECK (payload_size_octets = COALESCE(octet_length(xml_payload), 0) + COALESCE(octet_length(binary_payload), 0)),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, account_id, mailbox_id)
         REFERENCES mailboxes (tenant_id, account_id, id)

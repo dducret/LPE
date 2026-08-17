@@ -6,6 +6,10 @@ macro_rules! store_impl_ews_admin {
         key: &'a EwsUserConfigurationKey,
     ) -> StoreFuture<'a, Option<EwsUserConfiguration>> {
         Box::pin(async move {
+            let mut tx = self.pool().begin().await?;
+            let tenant_id = ews_user_configuration_tenant_id(&mut tx, account_id).await?;
+            validate_ews_user_configuration_scope(&mut tx, tenant_id, account_id, key, false)
+                .await?;
             let row = sqlx::query(
                 r#"
                 SELECT id, scope_kind, mailbox_id, public_folder_id, config_name, config_class,
@@ -26,53 +30,86 @@ macro_rules! store_impl_ews_admin {
             .bind(key.public_folder_id)
             .bind(&key.config_name)
             .bind(&key.config_class)
-            .fetch_optional(self.pool())
+            .fetch_optional(&mut *tx)
             .await?;
 
+            tx.commit().await?;
             Ok(row.map(ews_user_configuration_from_row))
         })
     }
 
-    fn upsert_ews_user_configuration<'a>(
+    fn create_ews_user_configuration<'a>(
         &'a self,
         input: UpsertEwsUserConfigurationInput,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, EwsUserConfiguration> {
         Box::pin(async move {
-            let tenant_id = sqlx::query_scalar::<_, Uuid>(
+            let mut tx = self.pool().begin().await?;
+            let tenant_id = ews_user_configuration_tenant_id(&mut tx, input.account_id).await?;
+            validate_ews_user_configuration_scope(&mut tx, tenant_id, input.account_id, &input.key, true)
+                .await?;
+            let payload_size = ews_user_configuration_payload_size(&input)?;
+            let row = sqlx::query(
                 r#"
-                SELECT tenant_id
-                FROM accounts
-                WHERE id = $1
-                LIMIT 1
+                INSERT INTO account_client_configurations (
+                    id, tenant_id, account_id, scope_kind, mailbox_id, public_folder_id,
+                    config_name, config_class, dictionary_json, xml_payload, binary_payload,
+                    payload_size_octets
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                RETURNING id, scope_kind, mailbox_id, public_folder_id, config_name,
+                          config_class, dictionary_json, xml_payload, binary_payload, modseq
                 "#,
             )
+            .bind(Uuid::new_v4())
+            .bind(tenant_id)
             .bind(input.account_id)
-            .fetch_optional(self.pool())
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("account not found"))?;
-            let payload_size = input
-                .xml_payload
-                .as_ref()
-                .map(|value| value.len())
-                .unwrap_or(0)
-                + input
-                    .binary_payload
-                    .as_ref()
-                    .map(|value| value.len())
-                    .unwrap_or(0);
-            let existing_id = sqlx::query_scalar::<_, Uuid>(
+            .bind(&input.key.scope_kind)
+            .bind(input.key.mailbox_id)
+            .bind(input.key.public_folder_id)
+            .bind(&input.key.config_name)
+            .bind(&input.key.config_class)
+            .bind(&input.dictionary_json)
+            .bind(&input.xml_payload)
+            .bind(&input.binary_payload)
+            .bind(payload_size)
+            .fetch_one(&mut *tx)
+            .await?;
+            self.append_audit_event_in_tx(&mut tx, tenant_id, audit).await?;
+            tx.commit().await?;
+            Ok(ews_user_configuration_from_row(row))
+        })
+    }
+
+    fn update_ews_user_configuration<'a>(
+        &'a self,
+        input: UpsertEwsUserConfigurationInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Option<EwsUserConfiguration>> {
+        Box::pin(async move {
+            let mut tx = self.pool().begin().await?;
+            let tenant_id = ews_user_configuration_tenant_id(&mut tx, input.account_id).await?;
+            validate_ews_user_configuration_scope(&mut tx, tenant_id, input.account_id, &input.key, true)
+                .await?;
+            let payload_size = ews_user_configuration_payload_size(&input)?;
+            let row = sqlx::query(
                 r#"
-                SELECT id
-                FROM account_client_configurations
+                UPDATE account_client_configurations
+                SET dictionary_json = $7,
+                    xml_payload = $8,
+                    binary_payload = $9,
+                    payload_size_octets = $10,
+                    modseq = modseq + 1,
+                    updated_at = NOW()
                 WHERE tenant_id = $1
                   AND account_id = $2
                   AND scope_kind = $3
                   AND mailbox_id IS NOT DISTINCT FROM $4
                   AND public_folder_id IS NOT DISTINCT FROM $5
                   AND config_name = $6
-                  AND config_class = $7
-                LIMIT 1
+                  AND config_class = 'ews_user_configuration'
+                RETURNING id, scope_kind, mailbox_id, public_folder_id, config_name,
+                          config_class, dictionary_json, xml_payload, binary_payload, modseq
                 "#,
             )
             .bind(tenant_id)
@@ -81,62 +118,17 @@ macro_rules! store_impl_ews_admin {
             .bind(input.key.mailbox_id)
             .bind(input.key.public_folder_id)
             .bind(&input.key.config_name)
-            .bind(&input.key.config_class)
-            .fetch_optional(self.pool())
+            .bind(&input.dictionary_json)
+            .bind(&input.xml_payload)
+            .bind(&input.binary_payload)
+            .bind(payload_size)
+            .fetch_optional(&mut *tx)
             .await?;
-
-            let row = if let Some(existing_id) = existing_id {
-                sqlx::query(
-                    r#"
-                    UPDATE account_client_configurations
-                    SET dictionary_json = $2,
-                        xml_payload = $3,
-                        binary_payload = $4,
-                        payload_size_octets = $5,
-                        modseq = modseq + 1,
-                        updated_at = NOW()
-                    WHERE id = $1
-                    RETURNING id, scope_kind, mailbox_id, public_folder_id, config_name,
-                              config_class, dictionary_json, xml_payload, binary_payload, modseq
-                    "#,
-                )
-                .bind(existing_id)
-                .bind(&input.dictionary_json)
-                .bind(&input.xml_payload)
-                .bind(&input.binary_payload)
-                .bind(payload_size as i32)
-                .fetch_one(self.pool())
-                .await?
-            } else {
-                sqlx::query(
-                    r#"
-                    INSERT INTO account_client_configurations (
-                        id, tenant_id, account_id, scope_kind, mailbox_id, public_folder_id,
-                        config_name, config_class, dictionary_json, xml_payload, binary_payload,
-                        payload_size_octets
-                    )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-                    RETURNING id, scope_kind, mailbox_id, public_folder_id, config_name,
-                              config_class, dictionary_json, xml_payload, binary_payload, modseq
-                    "#,
-                )
-                .bind(Uuid::new_v4())
-                .bind(tenant_id)
-                .bind(input.account_id)
-                .bind(&input.key.scope_kind)
-                .bind(input.key.mailbox_id)
-                .bind(input.key.public_folder_id)
-                .bind(&input.key.config_name)
-                .bind(&input.key.config_class)
-                .bind(&input.dictionary_json)
-                .bind(&input.xml_payload)
-                .bind(&input.binary_payload)
-                .bind(payload_size as i32)
-                .fetch_one(self.pool())
-                .await?
-            };
-            self.append_audit_event(tenant_id, audit).await?;
-            Ok(ews_user_configuration_from_row(row))
+            if row.is_some() {
+                self.append_audit_event_in_tx(&mut tx, tenant_id, audit).await?;
+            }
+            tx.commit().await?;
+            Ok(row.map(ews_user_configuration_from_row))
         })
     }
 
@@ -147,18 +139,10 @@ macro_rules! store_impl_ews_admin {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, bool> {
         Box::pin(async move {
-            let tenant_id = sqlx::query_scalar::<_, Uuid>(
-                r#"
-                SELECT tenant_id
-                FROM accounts
-                WHERE id = $1
-                LIMIT 1
-                "#,
-            )
-            .bind(account_id)
-            .fetch_optional(self.pool())
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("account not found"))?;
+            let mut tx = self.pool().begin().await?;
+            let tenant_id = ews_user_configuration_tenant_id(&mut tx, account_id).await?;
+            validate_ews_user_configuration_scope(&mut tx, tenant_id, account_id, key, true)
+                .await?;
             let result = sqlx::query(
                 r#"
                 DELETE FROM account_client_configurations
@@ -178,14 +162,13 @@ macro_rules! store_impl_ews_admin {
             .bind(key.public_folder_id)
             .bind(&key.config_name)
             .bind(&key.config_class)
-            .execute(self.pool())
+            .execute(&mut *tx)
             .await?;
             if result.rows_affected() > 0 {
-                self.append_audit_event(tenant_id, audit).await?;
-                Ok(true)
-            } else {
-                Ok(false)
+                self.append_audit_event_in_tx(&mut tx, tenant_id, audit).await?;
             }
+            tx.commit().await?;
+            Ok(result.rows_affected() > 0)
         })
     }
 
@@ -1355,4 +1338,101 @@ macro_rules! store_impl_ews_admin {
     }
 
     };
+}
+
+async fn ews_user_configuration_tenant_id(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    account_id: Uuid,
+) -> anyhow::Result<Uuid> {
+    sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT tenant_id
+        FROM accounts
+        WHERE id = $1
+        LIMIT 1
+        "#,
+    )
+    .bind(account_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("account not found"))
+}
+
+async fn validate_ews_user_configuration_scope(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+    account_id: Uuid,
+    key: &EwsUserConfigurationKey,
+    requires_write: bool,
+) -> anyhow::Result<()> {
+    match key.scope_kind.as_str() {
+        "account" if key.mailbox_id.is_none() && key.public_folder_id.is_none() => Ok(()),
+        "mailbox" if key.public_folder_id.is_none() => {
+            let mailbox_id = key
+                .mailbox_id
+                .ok_or_else(|| anyhow::anyhow!("mailbox scope requires a mailbox id"))?;
+            let owned = sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM mailboxes WHERE tenant_id = $1 AND account_id = $2 AND id = $3)",
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(mailbox_id)
+            .fetch_one(&mut **tx)
+            .await?;
+            if owned {
+                Ok(())
+            } else {
+                anyhow::bail!("mailbox scope is not owned by this account")
+            }
+        }
+        "public_folder" if key.mailbox_id.is_none() => {
+            let public_folder_id = key.public_folder_id.ok_or_else(|| {
+                anyhow::anyhow!("public folder scope requires a public folder id")
+            })?;
+            let allowed = sqlx::query_scalar::<_, bool>(
+                r#"
+                SELECT CASE
+                    WHEN t.admin_owner_account_id = $2 THEN TRUE
+                    WHEN $4 THEN COALESCE(p.may_write, FALSE)
+                    ELSE COALESCE(p.may_read, FALSE)
+                END
+                FROM public_folders f
+                JOIN public_folder_trees t
+                  ON t.tenant_id = f.tenant_id
+                 AND t.id = f.tree_id
+                LEFT JOIN public_folder_permissions p
+                  ON p.tenant_id = f.tenant_id
+                 AND p.public_folder_id = f.id
+                 AND p.principal_account_id = $2
+                WHERE f.tenant_id = $1
+                  AND f.id = $3
+                  AND f.lifecycle_state <> 'deleted'
+                  AND t.lifecycle_state = 'active'
+                LIMIT 1
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(public_folder_id)
+            .bind(requires_write)
+            .fetch_optional(&mut **tx)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("public folder scope was not found"))?;
+            if allowed {
+                Ok(())
+            } else {
+                anyhow::bail!("public folder scope access is not granted")
+            }
+        }
+        _ => anyhow::bail!("invalid user configuration scope"),
+    }
+}
+
+fn ews_user_configuration_payload_size(
+    input: &UpsertEwsUserConfigurationInput,
+) -> anyhow::Result<i32> {
+    let payload_size = input.xml_payload.as_ref().map_or(0, |value| value.len())
+        + input.binary_payload.as_ref().map_or(0, Vec::len);
+    i32::try_from(payload_size)
+        .map_err(|_| anyhow::anyhow!("User configuration payload exceeds the supported limit."))
 }

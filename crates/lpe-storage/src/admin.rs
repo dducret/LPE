@@ -125,6 +125,15 @@ impl Storage {
         Ok(())
     }
 
+    pub async fn append_audit_event_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tenant_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        self.insert_audit(tx, &tenant_id, audit).await
+    }
+
     pub async fn list_sieve_scripts(&self, account_id: Uuid) -> Result<Vec<SieveScriptSummary>> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let rows = sqlx::query(

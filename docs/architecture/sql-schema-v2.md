@@ -716,7 +716,9 @@ and keeps its ranking metadata.
 Exchange and Outlook compatibility state is stored as canonical LPE state when
 LPE owns the product behavior. `account_client_configurations` stores bounded
 account, mailbox, and public-folder client configuration payloads for Outlook
-profile/user-configuration compatibility. `mapi_associated_config_messages`
+profile/user-configuration compatibility. Its payload octet accounting uses the
+UTF-8 byte length of XML text plus binary bytes, so its bounded EWS projection
+does not miscount non-ASCII XML. `mapi_associated_config_messages`
 stores bounded Outlook-created MAPI FAI configuration rows only for MAPI replay.
 `delegate_preferences` stores only delegate delivery/private-item preferences;
 mailbox, calendar, task, contact, and sender rights remain in the canonical

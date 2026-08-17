@@ -66,7 +66,7 @@ where
         };
         match self
             .store
-            .upsert_ews_user_configuration(
+            .create_ews_user_configuration(
                 input,
                 AuditEntryInput {
                     actor: principal.email.clone(),
@@ -102,7 +102,7 @@ where
         };
         match self
             .store
-            .upsert_ews_user_configuration(
+            .update_ews_user_configuration(
                 input,
                 AuditEntryInput {
                     actor: principal.email.clone(),
@@ -112,7 +112,12 @@ where
             )
             .await
         {
-            Ok(_) => Ok(simple_operation_success_response("UpdateUserConfiguration")),
+            Ok(Some(_)) => Ok(simple_operation_success_response("UpdateUserConfiguration")),
+            Ok(None) => Ok(operation_error_response(
+                "UpdateUserConfiguration",
+                "ErrorItemNotFound",
+                "User configuration was not found.",
+            )),
             Err(error) => Ok(operation_error_response(
                 "UpdateUserConfiguration",
                 ews_error_code_or(&error, "ErrorInvalidOperation"),
@@ -169,6 +174,16 @@ pub(in crate::service) fn get_user_configuration_response(
     request: &str,
 ) -> Result<String> {
     let properties = requested_user_configuration_properties(request)?;
+    let configuration_name = ews_user_configuration_name_xml(configuration);
+    let item_id = if properties.id {
+        format!(
+            "<t:ItemId Id=\"user-configuration:{id}\" ChangeKey=\"{change_key}\"/>",
+            id = configuration.id,
+            change_key = configuration.modseq,
+        )
+    } else {
+        String::new()
+    };
     let dictionary = if properties.dictionary {
         ews_user_configuration_dictionary_xml(&configuration.dictionary_json)
     } else {
@@ -178,7 +193,7 @@ pub(in crate::service) fn get_user_configuration_response(
         configuration
             .xml_payload
             .as_ref()
-            .map(|value| format!("<t:XmlData>{}</t:XmlData>", escape_xml(value)))
+            .map(|value| format!("<t:XmlData>{}</t:XmlData>", BASE64_STANDARD.encode(value)))
             .unwrap_or_default()
     } else {
         String::new()
@@ -204,8 +219,8 @@ pub(in crate::service) fn get_user_configuration_response(
             "<m:GetUserConfigurationResponseMessage ResponseClass=\"Success\">",
             "<m:ResponseCode>NoError</m:ResponseCode>",
             "<m:UserConfiguration>",
-            "<t:UserConfigurationName Name=\"{name}\"/>",
-            "<t:ItemId Id=\"user-configuration:{id}\" ChangeKey=\"{change_key}\"/>",
+            "{configuration_name}",
+            "{item_id}",
             "{dictionary}",
             "{xml_data}",
             "{binary_data}",
@@ -214,9 +229,8 @@ pub(in crate::service) fn get_user_configuration_response(
             "</m:ResponseMessages>",
             "</m:GetUserConfigurationResponse>"
         ),
-        name = escape_xml(&configuration.config_name),
-        id = configuration.id,
-        change_key = configuration.modseq,
+        configuration_name = configuration_name,
+        item_id = item_id,
         dictionary = dictionary,
         xml_data = xml_data,
         binary_data = binary_data,
@@ -225,6 +239,7 @@ pub(in crate::service) fn get_user_configuration_response(
 
 #[derive(Debug, Clone, Copy)]
 struct RequestedUserConfigurationProperties {
+    id: bool,
     dictionary: bool,
     xml_data: bool,
     binary_data: bool,
@@ -238,20 +253,28 @@ fn requested_user_configuration_properties(
         .map(xml_text)
         .collect::<Vec<_>>();
     if values.is_empty() || values.iter().any(|value| value.eq_ignore_ascii_case("All")) {
+        if values.len() > 1 {
+            bail!("UserConfigurationProperties cannot combine All with other properties");
+        }
         return Ok(RequestedUserConfigurationProperties {
+            id: true,
             dictionary: true,
             xml_data: true,
             binary_data: true,
         });
     }
-    if values
-        .iter()
-        .any(|value| !matches!(value.as_str(), "Dictionary" | "XmlData" | "BinaryData"))
-        || values.windows(2).any(|values| values[0] == values[1])
+    let mut unique_values = std::collections::HashSet::new();
+    if values.iter().any(|value| {
+        !matches!(
+            value.as_str(),
+            "Id" | "Dictionary" | "XmlData" | "BinaryData"
+        )
+    }) || values.iter().any(|value| !unique_values.insert(value))
     {
         bail!("UserConfigurationProperties contains an unsupported or duplicate property");
     }
     Ok(RequestedUserConfigurationProperties {
+        id: values.iter().any(|value| value == "Id"),
         dictionary: values.iter().any(|value| value == "Dictionary"),
         xml_data: values.iter().any(|value| value == "XmlData"),
         binary_data: values.iter().any(|value| value == "BinaryData"),
@@ -298,9 +321,17 @@ pub(in crate::service) fn parse_ews_user_configuration_key(
     if config_name.len() > MAX_USER_CONFIGURATION_NAME_BYTES {
         bail!("UserConfigurationName Name exceeds the supported limit.");
     }
-    let folder_id = attribute_value_after(name_element, "FolderId", "Id")
-        .or_else(|| attribute_value_after(name_element, "DistinguishedFolderId", "Id"))
-        .map(str::trim)
+    let folder_ids = attribute_values_for_tag(name_element, "FolderId", "Id");
+    let distinguished_folder_ids =
+        attribute_values_for_tag(name_element, "DistinguishedFolderId", "Id");
+    if folder_ids.len() + distinguished_folder_ids.len() > 1 {
+        bail!("UserConfigurationName accepts at most one folder scope.");
+    }
+    let folder_id = folder_ids
+        .into_iter()
+        .chain(distinguished_folder_ids)
+        .next()
+        .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
     let (scope_kind, mailbox_id, public_folder_id) = if let Some(folder_id) = folder_id {
         if let Some(raw_id) = folder_id.strip_prefix("mailbox:") {
@@ -341,7 +372,18 @@ pub(in crate::service) fn parse_ews_user_configuration_upsert(
 ) -> Result<UpsertEwsUserConfigurationInput> {
     let key = parse_ews_user_configuration_key(request)?;
     let dictionary_json = parse_ews_user_configuration_dictionary(request)?;
-    let xml_payload = element_text(request, "XmlData").filter(|value| !value.is_empty());
+    let xml_payload = element_text(request, "XmlData")
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            BASE64_STANDARD
+                .decode(value.as_bytes())
+                .map_err(|_| anyhow!("XmlData must be valid base64."))
+                .and_then(|value| {
+                    String::from_utf8(value)
+                        .map_err(|_| anyhow!("XmlData must decode to UTF-8 XML text."))
+                })
+        })
+        .transpose()?;
     let binary_payload = element_text(request, "BinaryData")
         .filter(|value| !value.is_empty())
         .map(|value| {
@@ -362,6 +404,26 @@ pub(in crate::service) fn parse_ews_user_configuration_upsert(
         xml_payload,
         binary_payload,
     })
+}
+
+fn ews_user_configuration_name_xml(configuration: &EwsUserConfiguration) -> String {
+    let name = escape_xml(&configuration.config_name);
+    match configuration.scope_kind.as_str() {
+        "account" => format!("<t:UserConfigurationName Name=\"{name}\"/>"),
+        "mailbox" => configuration.mailbox_id.map_or_else(
+            || format!("<t:UserConfigurationName Name=\"{name}\"/>"),
+            |mailbox_id| format!(
+                "<t:UserConfigurationName Name=\"{name}\"><t:FolderId Id=\"mailbox:{mailbox_id}\"/></t:UserConfigurationName>"
+            ),
+        ),
+        "public_folder" => configuration.public_folder_id.map_or_else(
+            || format!("<t:UserConfigurationName Name=\"{name}\"/>"),
+            |public_folder_id| format!(
+                "<t:UserConfigurationName Name=\"{name}\"><t:FolderId Id=\"public-folder:{public_folder_id}\"/></t:UserConfigurationName>"
+            ),
+        ),
+        _ => format!("<t:UserConfigurationName Name=\"{name}\"/>"),
+    }
 }
 
 fn parse_ews_user_configuration_dictionary(request: &str) -> Result<serde_json::Value> {

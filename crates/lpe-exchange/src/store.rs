@@ -350,11 +350,17 @@ pub trait ExchangeStore: AccountAuthStore {
         key: &'a EwsUserConfigurationKey,
     ) -> StoreFuture<'a, Option<EwsUserConfiguration>>;
 
-    fn upsert_ews_user_configuration<'a>(
+    fn create_ews_user_configuration<'a>(
         &'a self,
         input: UpsertEwsUserConfigurationInput,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, EwsUserConfiguration>;
+
+    fn update_ews_user_configuration<'a>(
+        &'a self,
+        input: UpsertEwsUserConfigurationInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Option<EwsUserConfiguration>>;
 
     fn delete_ews_user_configuration<'a>(
         &'a self,

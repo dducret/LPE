@@ -333,6 +333,7 @@ pub(in crate::service) fn parse_delegate_meeting_delivery(
         preferences.meeting_request_delivery = match value.trim() {
             "DelegatesOnly" => "delegate_only",
             "DelegatesAndMe" | "DelegatesAndSendInformationToMe" => "delegate_and_owner",
+            "NoForward" => "owner_only",
             other => bail!("unsupported DeliverMeetingRequests value {other}"),
         }
         .to_string();
