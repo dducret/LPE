@@ -148,8 +148,9 @@ UpdateInboxRules, and GetServerTimeZones. Apply the shared preamble.
   replace a non-generated or OOF script; return a parseable error unchanged.
 - GetServerTimeZones is stateless lpe-ews-time-zones-v1: UTC and Europe/Berlin
   only, ReturnFullTimeZoneData=false only, and an optional unique exact-ID
-  filter. Reject full data, absent/empty/multiple Ids, duplicates, unknown IDs,
-  and case variants deterministically.
+  filter. When no filter is supplied, return both definitions. When supplied,
+  require exactly one nonempty exact-case ID. Reject full data, empty/multiple
+  IDs, duplicates, unknown IDs, and case variants deterministically.
 
 Test tenant/ACL/ambiguity redaction, availability window/DST limits, rules
 ordering and complete rollback, OOF/non-generated script preservation, and

@@ -5765,6 +5765,231 @@ async fn send_item_rejects_an_invalid_batch_before_submitting_a_draft() {
 }
 
 #[tokio::test]
+async fn send_item_requires_one_direct_nonempty_item_ids_collection_before_submitting() {
+    let draft_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000021").unwrap();
+    let drafts_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000022").unwrap();
+
+    for item_ids in [
+        format!(
+            r#"<m:ItemIds><t:ItemId Id="message:{draft_id}"/></m:ItemIds><m:ItemIds/>"#
+        ),
+        format!(r#"<t:ItemId Id="message:{draft_id}"/>"#),
+        format!(
+            r#"<m:ItemIds><t:ItemId Id="message:{draft_id}"/></m:ItemIds><m:Other><m:ItemIds/></m:Other>"#
+        ),
+    ] {
+        let submitted_draft_messages = Arc::new(Mutex::new(Vec::new()));
+        let service = ExchangeService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            emails: Arc::new(Mutex::new(vec![FakeStore::email(
+                &draft_id.to_string(),
+                &drafts_id.to_string(),
+                "drafts",
+                "Draft to preserve",
+            )])),
+            submitted_draft_messages: submitted_draft_messages.clone(),
+            ..Default::default()
+        });
+
+        let response = service
+            .handle(
+                &bearer_headers(),
+                format!(
+                    r#"<s:Envelope><s:Body><m:SendItem>{item_ids}</m:SendItem></s:Body></s:Envelope>"#
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let body = response_text(response).await;
+
+        assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+        assert!(submitted_draft_messages.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn delete_item_requires_one_direct_nonempty_item_ids_collection_before_deleting() {
+    let message_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000023").unwrap();
+    let mailbox_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000024").unwrap();
+
+    for item_ids in [
+        format!(
+            r#"<m:ItemIds><t:ItemId Id="message:{message_id}"/></m:ItemIds><m:ItemIds/>"#
+        ),
+        format!(r#"<t:ItemId Id="message:{message_id}"/>"#),
+        format!(
+            r#"<m:ItemIds><t:ItemId Id="message:{message_id}"/></m:ItemIds><m:Other><m:ItemIds/></m:Other>"#
+        ),
+    ] {
+        let deleted_emails = Arc::new(Mutex::new(Vec::new()));
+        let service = ExchangeService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            emails: Arc::new(Mutex::new(vec![FakeStore::email(
+                &message_id.to_string(),
+                &mailbox_id.to_string(),
+                "inbox",
+                "Do not delete",
+            )])),
+            deleted_emails: deleted_emails.clone(),
+            ..Default::default()
+        });
+
+        let response = service
+            .handle(
+                &bearer_headers(),
+                format!(
+                    r#"<s:Envelope><s:Body><m:DeleteItem DeleteType="HardDelete">{item_ids}</m:DeleteItem></s:Body></s:Envelope>"#
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let body = response_text(response).await;
+
+        assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+        assert!(deleted_emails.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn send_item_rejects_multiple_accessible_drafts_without_submitting_either() {
+    let first_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000028").unwrap();
+    let second_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000029").unwrap();
+    let drafts_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000030").unwrap();
+    let submitted_draft_messages = Arc::new(Mutex::new(Vec::new()));
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(vec![
+            FakeStore::email(&first_id.to_string(), &drafts_id.to_string(), "drafts", "First"),
+            FakeStore::email(&second_id.to_string(), &drafts_id.to_string(), "drafts", "Second"),
+        ])),
+        submitted_draft_messages: submitted_draft_messages.clone(),
+        ..Default::default()
+    });
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SendItem><m:ItemIds><t:ItemId Id="message:{first_id}"/><t:ItemId Id="message:{second_id}"/></m:ItemIds></m:SendItem></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(submitted_draft_messages.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn delete_item_rejects_multiple_accessible_items_without_deleting_either() {
+    let first_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000031").unwrap();
+    let second_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000032").unwrap();
+    let mailbox_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000033").unwrap();
+    let deleted_emails = Arc::new(Mutex::new(Vec::new()));
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(vec![
+            FakeStore::email(&first_id.to_string(), &mailbox_id.to_string(), "inbox", "First"),
+            FakeStore::email(&second_id.to_string(), &mailbox_id.to_string(), "inbox", "Second"),
+        ])),
+        deleted_emails: deleted_emails.clone(),
+        ..Default::default()
+    });
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:DeleteItem DeleteType="HardDelete"><m:ItemIds><t:ItemId Id="message:{first_id}"/><t:ItemId Id="message:{second_id}"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(deleted_emails.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn update_item_rejects_multi_item_and_unsupported_message_fields_without_mutation() {
+    let first_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000025").unwrap();
+    let second_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000026").unwrap();
+    let mailbox_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000027").unwrap();
+    let mut first = FakeStore::email(&first_id.to_string(), &mailbox_id.to_string(), "inbox", "First");
+    first.unread = true;
+    let mut second = FakeStore::email(&second_id.to_string(), &mailbox_id.to_string(), "inbox", "Second");
+    second.unread = true;
+    second.flagged = false;
+    let emails = Arc::new(Mutex::new(vec![first, second]));
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        emails: emails.clone(),
+        ..Default::default()
+    });
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                concat!(
+                    r#"<s:Envelope><s:Body><m:UpdateItem><m:ItemChanges>"#,
+                    r#"<t:ItemChange><t:ItemId Id="message:{first_id}"/><t:Updates>"#,
+                    r#"<t:SetItemField><t:FieldURI FieldURI="message:IsRead"/>"#,
+                    r#"<t:Message><t:IsRead>true</t:IsRead></t:Message>"#,
+                    r#"</t:SetItemField></t:Updates></t:ItemChange>"#,
+                    r#"<t:ItemChange><t:ItemId Id="message:{second_id}"/><t:Updates>"#,
+                    r#"<t:SetItemField><t:FieldURI FieldURI="message:Flag"/>"#,
+                    r#"<t:Message><t:Flag><t:FlagStatus>Flagged</t:FlagStatus></t:Flag></t:Message>"#,
+                    r#"</t:SetItemField></t:Updates></t:ItemChange>"#,
+                    r#"</m:ItemChanges></m:UpdateItem></s:Body></s:Envelope>"#,
+                ),
+                first_id = first_id,
+                second_id = second_id,
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    let updated = emails.lock().unwrap();
+    assert!(updated[0].unread);
+    assert!(!updated[0].flagged);
+    assert!(updated[1].unread);
+    assert!(!updated[1].flagged);
+    drop(updated);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                concat!(
+                    r#"<s:Envelope><s:Body><m:UpdateItem><m:ItemChanges>"#,
+                    r#"<t:ItemChange><t:ItemId Id="message:{first_id}"/><t:Updates>"#,
+                    r#"<t:SetItemField><t:FieldURI FieldURI="message:IsRead"/>"#,
+                    r#"<t:Message><t:IsRead>true</t:IsRead></t:Message></t:SetItemField>"#,
+                    r#"<t:SetItemField><t:FieldURI FieldURI="item:Subject"/>"#,
+                    r#"<t:Message><t:Subject>Ignored today</t:Subject></t:Message></t:SetItemField>"#,
+                    r#"</t:Updates></t:ItemChange></m:ItemChanges></m:UpdateItem></s:Body></s:Envelope>"#,
+                ),
+                first_id = first_id,
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(emails.lock().unwrap()[0].unread);
+}
+
+#[tokio::test]
 async fn update_item_rejects_an_unavailable_target_before_updating_another_item() {
     let message_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000015").unwrap();
     let mailbox_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000016").unwrap();
@@ -9752,6 +9977,11 @@ async fn create_item_saveonly_imports_message_into_custom_mailbox_folder() {
 async fn find_item_lists_custom_mailbox_messages() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "44444444-4444-4444-4444-444444444444",
+            "custom",
+            "RCA Sync",
+        )])),
         emails: Arc::new(Mutex::new(vec![FakeStore::email(
             "99999999-9999-9999-9999-999999999999",
             "44444444-4444-4444-4444-444444444444",
@@ -9775,6 +10005,49 @@ async fn find_item_lists_custom_mailbox_messages() {
     assert!(body.contains("<t:Message>"));
     assert!(body.contains("message:99999999-9999-9999-9999-999999999999"));
     assert!(body.contains("<t:Subject>RCA folder item</t:Subject>"));
+}
+
+#[tokio::test]
+async fn find_item_rejects_unscoped_duplicate_or_inaccessible_parents_before_query() {
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        fail_query_jmap_email_ids: true,
+        ..Default::default()
+    });
+
+    for request in [
+        br#"<s:Envelope><s:Body><m:FindItem/></s:Body></s:Envelope>"#.as_slice(),
+        br#"<s:Envelope><s:Body><m:FindItem><m:ParentFolderIds><t:DistinguishedFolderId Id="inbox"/></m:ParentFolderIds><m:ParentFolderIds><t:DistinguishedFolderId Id="contacts"/></m:ParentFolderIds></m:FindItem></s:Body></s:Envelope>"#.as_slice(),
+        br#"<s:Envelope><s:Body><m:FindItem><m:ParentFolderIds><t:FolderId Id="mailbox:not-a-uuid"/></m:ParentFolderIds></m:FindItem></s:Body></s:Envelope>"#.as_slice(),
+        br#"<s:Envelope><s:Body><m:FindItem><m:ParentFolderIds><t:FolderId Id="unsupported"/></m:ParentFolderIds></m:FindItem></s:Body></s:Envelope>"#.as_slice(),
+        br#"<s:Envelope><s:Body><m:FindItem><m:ParentFolderIds><t:FolderId Id="mailbox:44444444-4444-4444-4444-444444444444"/></m:ParentFolderIds></m:FindItem></s:Body></s:Envelope>"#.as_slice(),
+    ] {
+        let response = service.handle(&bearer_headers(), request).await.unwrap();
+        let body = response_text(response).await;
+        assert!(body.contains("<m:FindItemResponse>"));
+        assert!(body.contains("<m:ResponseCode>ErrorFolderNotFound</m:ResponseCode>"));
+    }
+}
+
+#[tokio::test]
+async fn get_item_rejects_missing_duplicate_empty_or_malformed_item_id_shapes() {
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        fail_fetch_all_jmap_email_ids: true,
+        ..Default::default()
+    });
+
+    for request in [
+        br#"<s:Envelope><s:Body><m:GetItem/></s:Body></s:Envelope>"#.as_slice(),
+        br#"<s:Envelope><s:Body><m:GetItem><m:ItemIds/><m:ItemIds><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/></m:ItemIds></m:GetItem></s:Body></s:Envelope>"#.as_slice(),
+        br#"<s:Envelope><s:Body><m:GetItem><m:ItemIds/></m:GetItem></s:Body></s:Envelope>"#.as_slice(),
+        br#"<s:Envelope><s:Body><m:GetItem><m:ItemIds><t:ItemId Id="message:not-a-uuid"/></m:ItemIds></m:GetItem></s:Body></s:Envelope>"#.as_slice(),
+    ] {
+        let response = service.handle(&bearer_headers(), request).await.unwrap();
+        let body = response_text(response).await;
+        assert!(body.contains("<m:GetItemResponse>"));
+        assert!(body.contains("<m:ResponseCode>ErrorItemNotFound</m:ResponseCode>"));
+    }
 }
 
 #[tokio::test]

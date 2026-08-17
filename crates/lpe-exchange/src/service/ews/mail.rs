@@ -343,23 +343,3 @@ pub(in crate::service) fn imported_email_input(
         attachments: input.attachments,
     }
 }
-
-pub(in crate::service) fn parse_update_message_flags(
-    request: &str,
-) -> Result<Option<(Option<bool>, Option<bool>)>> {
-    let unread = element_text(request, "IsRead")
-        .map(|value| parse_xml_bool(&value).map(|is_read| !is_read))
-        .transpose()?;
-    let mut flagged = element_text(request, "FlagStatus")
-        .map(|value| match value.trim().to_ascii_lowercase().as_str() {
-            "notflagged" => Ok(false),
-            "flagged" | "complete" => Ok(true),
-            other => bail!("unsupported message FlagStatus {other}"),
-        })
-        .transpose()?;
-    if field_deleted(request, "message:Flag") || field_deleted(request, "message:FlagStatus") {
-        flagged = Some(false);
-    }
-
-    Ok((unread.is_some() || flagged.is_some()).then_some((unread, flagged)))
-}

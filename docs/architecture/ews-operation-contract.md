@@ -223,7 +223,7 @@ Current automated gate coverage:
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `GetServerTimeZones` | Partial | None | Explicit EWS time-zone catalog projection | `lpe-ews-time-zones-v1` exposes compact `UTC` and `Europe/Berlin` definitions only when `ReturnFullTimeZoneData=false`; optional unique known IDs filter that catalog. Full transition definitions and the Exchange corpus remain unsupported | P0 |
+| `GetServerTimeZones` | Partial | None | Explicit EWS time-zone catalog projection | `lpe-ews-time-zones-v1` exposes compact `UTC` and `Europe/Berlin` definitions only when `ReturnFullTimeZoneData=false`; no filter returns both definitions, while a supplied filter contains exactly one known case-sensitive ID. Full transition definitions and the Exchange corpus remain unsupported | P0 |
 
 ## Unified Messaging Operations
 

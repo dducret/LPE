@@ -7,6 +7,32 @@ pub(in crate::service) fn requested_item_ids(request: &str) -> Vec<String> {
         .collect()
 }
 
+/// [MS-OXWSMSG] sections 3.1.4.3 and 3.1.4.6: mutable item operations use
+/// their own direct, singular ItemIds collection so unrelated XML cannot add
+/// targets to a write request.
+pub(in crate::service) fn requested_operation_item_references(
+    request: &str,
+    operation: &str,
+) -> Result<Vec<RequestedItemReference>> {
+    let operations = element_contents(request, operation);
+    let [operation_content] = operations.as_slice() else {
+        bail!("{operation} requires exactly one operation element");
+    };
+    let item_ids = element_contents(operation_content, "ItemIds");
+    let direct_item_ids = direct_child_contents(operation_content, "ItemIds");
+    let [item_ids_content] = direct_item_ids.as_slice() else {
+        bail!("{operation} requires exactly one direct ItemIds collection");
+    };
+    if item_ids.len() != 1 {
+        bail!("{operation} ItemIds collection is duplicated or misplaced");
+    }
+    let references = requested_item_references(item_ids_content);
+    if references.is_empty() || requested_item_references(operation_content).len() != references.len() {
+        bail!("{operation} ItemIds requires one or more direct ItemId values");
+    }
+    Ok(references)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::service) struct RequestedItemReference {
     pub id: String,
@@ -109,6 +135,80 @@ pub(in crate::service) fn requested_item_references(request: &str) -> Vec<Reques
         rest = &rest[1..];
     }
     ids
+}
+
+fn direct_child_contents<'a>(xml: &'a str, local_name: &str) -> Vec<&'a str> {
+    let mut values = Vec::new();
+    let mut cursor = 0;
+    let mut depth: usize = 0;
+    while let Some(relative_start) = xml[cursor..].find('<') {
+        let start = cursor + relative_start;
+        let Some(relative_end) = xml[start..].find('>') else {
+            break;
+        };
+        let end = start + relative_end;
+        let tag = xml[start + 1..end].trim_start();
+        if tag.starts_with('?') || tag.starts_with('!') {
+            cursor = end + 1;
+            continue;
+        }
+        let closing = tag.starts_with('/');
+        let name = tag
+            .trim_start_matches('/')
+            .split(|character: char| character.is_whitespace() || character == '/')
+            .next()
+            .unwrap_or_default()
+            .rsplit(':')
+            .next()
+            .unwrap_or_default();
+        let self_closing = tag.trim_end().ends_with('/');
+        if closing {
+            depth = depth.saturating_sub(1);
+        } else {
+            if depth == 0 && name == local_name {
+                values.push(if self_closing {
+                    ""
+                } else {
+                    matching_element_content(xml, end + 1, name).unwrap_or("")
+                });
+            }
+            if !self_closing {
+                depth += 1;
+            }
+        }
+        cursor = end + 1;
+    }
+    values
+}
+
+fn matching_element_content<'a>(xml: &'a str, content_start: usize, local_name: &str) -> Option<&'a str> {
+    let mut cursor = content_start;
+    let mut depth = 1;
+    while let Some(relative_start) = xml[cursor..].find('<') {
+        let start = cursor + relative_start;
+        let relative_end = xml[start..].find('>')?;
+        let end = start + relative_end;
+        let tag = xml[start + 1..end].trim_start();
+        let closing = tag.starts_with('/');
+        let name = tag
+            .trim_start_matches('/')
+            .split(|character: char| character.is_whitespace() || character == '/')
+            .next()?
+            .rsplit(':')
+            .next()?;
+        if name == local_name {
+            if closing {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&xml[content_start..start]);
+                }
+            } else if !tag.trim_end().ends_with('/') {
+                depth += 1;
+            }
+        }
+        cursor = end + 1;
+    }
+    None
 }
 
 pub(in crate::service) fn requested_transfer_item_ids(request: &str) -> Vec<String> {

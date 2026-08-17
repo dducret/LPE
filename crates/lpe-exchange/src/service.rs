@@ -76,6 +76,7 @@ mod ews {
     pub(super) mod ids;
     pub(super) mod item_batch_responses;
     pub(super) mod item_reads;
+    pub(super) mod item_mutations;
     pub(super) mod items;
     pub(super) mod mail;
     pub(super) mod mail_apps;
@@ -125,6 +126,7 @@ use ews::fields::*;
 use ews::folder_requests::*;
 use ews::folders::*;
 use ews::ids::*;
+use ews::item_mutations::*;
 use ews::mail::*;
 use ews::mailboxes::*;
 use ews::mime::*;

@@ -10,9 +10,14 @@ where
         principal: &AccountPrincipal,
         request: &str,
     ) -> Result<String> {
+        let ids = match requested_get_item_ids(request) {
+            Ok(ids) => ids,
+            Err(error) => {
+                return Ok(get_item_error_response("ErrorItemNotFound", &error.to_string()));
+            }
+        };
         let include_mime_content = requested_mime_content(request);
         let prefer_html_body = requested_html_body(request);
-        let ids = requested_item_ids(request);
         let contact_ids = ids
             .iter()
             .filter_map(|id| id.strip_prefix("contact:"))
@@ -44,11 +49,43 @@ where
             + message_ids.len()
             + public_folder_item_ids.len();
 
-        let mut items = String::new();
         let contacts = self
             .store
             .fetch_accessible_contacts_by_ids(principal.account_id, &contact_ids)
             .await?;
+        let events = self
+            .store
+            .fetch_accessible_events_by_ids(principal.account_id, &event_ids)
+            .await?;
+        let tasks = self
+            .store
+            .fetch_accessible_tasks_by_ids(principal.account_id, &task_ids)
+            .await?;
+        // [MS-OXWSMSG] sections 2.2.4.3 and 3.1.4.4 permit BccRecipients in a
+        // Message response. The storage call binds protected recipients to the
+        // authenticated owner; rendering further limits them to that owner's Sent item.
+        let emails = self
+            .store
+            .fetch_jmap_emails_with_protected_bcc(principal.account_id, &message_ids)
+            .await?;
+        let public_folder_items = self
+            .store
+            .fetch_public_folder_items_by_ids(principal.account_id, &public_folder_item_ids)
+            .await?;
+        if contacts.len()
+            + events.len()
+            + tasks.len()
+            + emails.len()
+            + public_folder_items.len()
+            != ids.len()
+        {
+            return Ok(get_item_error_response(
+                "ErrorItemNotFound",
+                "The requested item was not found or is not exposed by the EWS MVP.",
+            ));
+        }
+
+        let mut items = String::new();
         let contact_change_keys =
             contact_change_keys(&self.store, principal.account_id, &contacts).await?;
         for contact in &contacts {
@@ -57,10 +94,6 @@ where
                 change_key_for(&contact_change_keys, contact.id, "contact")?,
             ));
         }
-        let events = self
-            .store
-            .fetch_accessible_events_by_ids(principal.account_id, &event_ids)
-            .await?;
         let event_change_keys =
             event_change_keys(&self.store, principal.account_id, &events).await?;
         for event in &events {
@@ -69,10 +102,6 @@ where
                 change_key_for(&event_change_keys, event.id, "calendar")?,
             ));
         }
-        let tasks = self
-            .store
-            .fetch_accessible_tasks_by_ids(principal.account_id, &task_ids)
-            .await?;
         let task_change_keys = task_change_keys(&self.store, principal.account_id, &tasks).await?;
         for task in &tasks {
             items.push_str(&task_item_xml_with_change_key(
@@ -80,13 +109,6 @@ where
                 change_key_for(&task_change_keys, task.id, "task")?,
             ));
         }
-        // [MS-OXWSMSG] sections 2.2.4.3 and 3.1.4.4 permit BccRecipients in a
-        // Message response. The storage call binds protected recipients to the
-        // authenticated owner; rendering further limits them to that owner's Sent item.
-        let emails = self
-            .store
-            .fetch_jmap_emails_with_protected_bcc(principal.account_id, &message_ids)
-            .await?;
         for email in emails {
             let attachments = if email.has_attachments {
                 self.store
@@ -118,17 +140,12 @@ where
                 prefer_html_body,
             ));
         }
-        for item in self
-            .store
-            .fetch_public_folder_items_by_ids(principal.account_id, &public_folder_item_ids)
-            .await?
-        {
+        for item in public_folder_items {
             items.push_str(&public_folder_item_xml(&item));
         }
 
-        if !ids.is_empty()
-            && (supported_id_count != ids.len()
-                || count_tag_occurrences(&items, "<t:ItemId") != supported_id_count)
+        if supported_id_count != ids.len()
+            || count_tag_occurrences(&items, "<t:ItemId") != supported_id_count
         {
             return Ok(get_item_error_response(
                 "ErrorItemNotFound",
@@ -156,8 +173,17 @@ where
         principal: &AccountPrincipal,
         request: &str,
     ) -> Result<String> {
-        let folder_kind = requested_folder_kind(request).unwrap_or(FolderKind::Contacts);
-        if let Err(error) = validate_find_item_folder_ids(request, folder_kind) {
+        let (folder_kind, parent) = match requested_find_item_parent(request) {
+            Ok(scope) => scope,
+            Err(error) => {
+                return Ok(operation_error_response(
+                    "FindItem",
+                    "ErrorFolderNotFound",
+                    &error.to_string(),
+                ));
+            }
+        };
+        if let Err(error) = validate_find_item_folder_ids(parent, folder_kind) {
             return Ok(operation_error_response(
                 "FindItem",
                 "ErrorFolderNotFound",
@@ -167,7 +193,16 @@ where
         match folder_kind {
             FolderKind::Root => Ok(find_item_response(String::new())),
             FolderKind::Contacts => {
-                let collection_id = requested_collection_id(request).unwrap_or(CONTACTS_FOLDER_ID);
+                let collection_id = requested_collection_id(parent).unwrap_or(CONTACTS_FOLDER_ID);
+                if !self
+                    .store
+                    .fetch_accessible_contact_collections(principal.account_id)
+                    .await?
+                    .iter()
+                    .any(|collection| collection.id == collection_id)
+                {
+                    return Ok(find_item_folder_not_found_response());
+                }
                 let contacts = self
                     .store
                     .fetch_accessible_contacts_in_collection(principal.account_id, collection_id)
@@ -186,7 +221,16 @@ where
                 Ok(find_item_response(items))
             }
             FolderKind::Calendar => {
-                let collection_id = requested_collection_id(request).unwrap_or(CALENDAR_FOLDER_ID);
+                let collection_id = requested_collection_id(parent).unwrap_or(CALENDAR_FOLDER_ID);
+                if !self
+                    .store
+                    .fetch_accessible_calendar_collections(principal.account_id)
+                    .await?
+                    .iter()
+                    .any(|collection| collection.id == collection_id)
+                {
+                    return Ok(find_item_folder_not_found_response());
+                }
                 let events = self
                     .store
                     .fetch_accessible_events_in_collection(principal.account_id, collection_id)
@@ -205,7 +249,16 @@ where
                 Ok(find_item_response(items))
             }
             FolderKind::Tasks => {
-                let collection_id = requested_collection_id(request).unwrap_or(TASKS_FOLDER_ID);
+                let collection_id = requested_collection_id(parent).unwrap_or(TASKS_FOLDER_ID);
+                if !self
+                    .store
+                    .fetch_accessible_task_collections(principal.account_id)
+                    .await?
+                    .iter()
+                    .any(|collection| collection.id == collection_id)
+                {
+                    return Ok(find_item_folder_not_found_response());
+                }
                 let tasks = self
                     .store
                     .fetch_accessible_tasks_in_collection(principal.account_id, collection_id)
@@ -225,13 +278,22 @@ where
             }
             FolderKind::Mailbox => {
                 let Some(mailbox_id) = self
-                    .requested_mailbox_folder_ids(principal, request)
+                    .requested_mailbox_folder_ids(principal, parent)
                     .await?
                     .into_iter()
                     .next()
                 else {
-                    return Ok(find_item_response(String::new()));
+                    return Ok(find_item_folder_not_found_response());
                 };
+                if !self
+                    .store
+                    .fetch_jmap_mailboxes(principal.account_id)
+                    .await?
+                    .iter()
+                    .any(|mailbox| mailbox.id == mailbox_id)
+                {
+                    return Ok(find_item_folder_not_found_response());
+                }
                 if attribute_value_after(request, "IndexedPageItemView", "BasePoint")
                     .is_some_and(|base_point| !base_point.eq_ignore_ascii_case("Beginning"))
                 {
@@ -274,10 +336,18 @@ where
                 ))
             }
             FolderKind::PublicFolders => {
-                let Some(folder_id) = requested_public_folder_ids(request).into_iter().next()
+                let Some(folder_id) = requested_public_folder_ids(parent).into_iter().next()
                 else {
-                    return Ok(find_item_response(String::new()));
+                    return Ok(find_item_folder_not_found_response());
                 };
+                if self
+                    .store
+                    .fetch_public_folder(principal.account_id, folder_id)
+                    .await
+                    .is_err()
+                {
+                    return Ok(find_item_folder_not_found_response());
+                }
                 let items = self
                     .store
                     .fetch_public_folder_items(principal.account_id, folder_id)
@@ -288,6 +358,51 @@ where
             }
         }
     }
+}
+
+fn requested_get_item_ids(request: &str) -> Result<Vec<String>> {
+    let wrappers = element_contents(request, "ItemIds");
+    let [wrapper] = wrappers.as_slice() else {
+        bail!("GetItem requires exactly one ItemIds collection");
+    };
+    let references = requested_item_references(wrapper);
+    if references.is_empty() || requested_item_references(request).len() != references.len() {
+        bail!("GetItem requires one nonempty ItemIds collection");
+    }
+    for reference in &references {
+        let Some((kind, id)) = reference.id.split_once(':') else {
+            bail!("GetItem item id is not supported");
+        };
+        if !matches!(kind, "contact" | "event" | "task" | "message" | "public-folder-item")
+            || Uuid::parse_str(id).is_err()
+        {
+            bail!("GetItem item id is not supported");
+        }
+    }
+    Ok(references.into_iter().map(|reference| reference.id).collect())
+}
+
+fn requested_find_item_parent(request: &str) -> Result<(FolderKind, &str)> {
+    let parents = element_contents(request, "ParentFolderIds");
+    let [parent] = parents.as_slice() else {
+        bail!("FindItem requires exactly one ParentFolderIds collection");
+    };
+    let target_count = attribute_values_for_tag(parent, "FolderId", "Id").len()
+        + attribute_values_for_tag(parent, "DistinguishedFolderId", "Id").len();
+    if target_count != 1 {
+        bail!("FindItem requires exactly one parent folder id");
+    }
+    let folder_kind = requested_folder_kind(parent)
+        .ok_or_else(|| anyhow!("FindItem parent folder is not supported"))?;
+    Ok((folder_kind, parent))
+}
+
+fn find_item_folder_not_found_response() -> String {
+    operation_error_response(
+        "FindItem",
+        "ErrorFolderNotFound",
+        "The requested folder is not exposed by the EWS MVP.",
+    )
 }
 
 // [MS-OXWSMSG] section 3.1.4.5: malformed explicit folder references must

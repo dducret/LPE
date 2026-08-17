@@ -18,6 +18,9 @@ where
             self.validate_mutating_item_change_keys(principal, request)
                 .await?;
             let item_changes = requested_update_item_changes(request)?;
+            if item_changes.len() != 1 {
+                bail!("UpdateItem supports exactly one ItemChange until canonical atomic batching exists");
+            }
             let item_references = item_changes
                 .iter()
                 .map(|change| change.reference.clone())
@@ -137,13 +140,9 @@ where
                 })
                 .transpose()?;
             let message_update = if !message_ids.is_empty() {
-                let Some((unread, flagged)) = parse_update_message_flags(request)? else {
-                    return Ok(operation_error_response(
-                        "UpdateItem",
-                        "ErrorInvalidOperation",
-                        "UpdateItem message updates currently support only IsRead and FlagStatus.",
-                    ));
-                };
+                let (unread, flagged) = parse_update_item_message_flags(
+                    update_item_change_content(&item_changes, &format!("message:{}", message_ids[0]))?,
+                )?;
                 let messages = self
                     .store
                     .fetch_jmap_emails(principal.account_id, &message_ids)
@@ -523,13 +522,16 @@ where
         request: &str,
     ) -> Result<String> {
         let result = async {
+            let item_references = requested_operation_item_references(request, "SendItem")?;
+            if item_references.len() != 1 {
+                bail!("SendItem supports exactly one ItemId until canonical atomic submission exists");
+            }
             self.validate_mutating_item_change_keys(principal, request)
                 .await?;
-            let ids = requested_item_ids(request);
-            let draft_ids = ids
+            let draft_ids = item_references
                 .iter()
-                .map(|id| {
-                    id.strip_prefix("message:")
+                .map(|reference| {
+                    reference.id.strip_prefix("message:")
                         .ok_or_else(|| anyhow!("SendItem requires canonical message ItemIds."))
                         .and_then(|id| {
                             Uuid::parse_str(id).map_err(|_| {
@@ -538,7 +540,7 @@ where
                         })
                 })
                 .collect::<Result<Vec<_>>>()?;
-            if draft_ids.is_empty() || draft_ids.len() != ids.len() {
+            if draft_ids.is_empty() {
                 bail!("SendItem requires at least one message ItemId.");
             }
             let drafts = self
@@ -960,10 +962,16 @@ where
         request: &str,
     ) -> Result<String> {
         let result = async {
+            let item_references = requested_operation_item_references(request, "DeleteItem")?;
+            if item_references.len() != 1 {
+                bail!("DeleteItem supports exactly one ItemId until canonical atomic batching exists");
+            }
             self.validate_mutating_item_change_keys(principal, request)
                 .await?;
-            let ids = requested_item_ids(request);
-            let item_references = requested_item_references(request);
+            let ids = item_references
+                .iter()
+                .map(|reference| reference.id.clone())
+                .collect::<Vec<_>>();
             let contact_ids = ids
                 .iter()
                 .filter_map(|id| id.strip_prefix("contact:"))
@@ -1390,140 +1398,4 @@ fn validate_create_item_shape(request: &str) -> Result<()> {
     }
 
     requested_create_item_saved_folder_target(request).map(|_| ())
-}
-
-fn validate_supplied_item_change_key(
-    references: &[RequestedItemReference],
-    id: &str,
-    current_change_key: &str,
-) -> Result<()> {
-    let supplied_change_key = references
-        .iter()
-        .find(|reference| reference.id == id)
-        .and_then(|reference| reference.change_key.as_deref());
-    if matches!(supplied_change_key, Some(change_key) if change_key != current_change_key) {
-        bail!("stale EWS ChangeKey for {id}");
-    }
-    Ok(())
-}
-
-struct UpdateItemChange<'a> {
-    reference: RequestedItemReference,
-    content: &'a str,
-}
-
-fn requested_update_item_changes(request: &str) -> Result<Vec<UpdateItemChange<'_>>> {
-    let changes = element_contents(request, "ItemChange")
-        .into_iter()
-        .map(|content| {
-            let references = requested_item_references(content);
-            let [reference] = references.as_slice() else {
-                bail!("each UpdateItem ItemChange requires exactly one ItemId");
-            };
-            Ok(UpdateItemChange {
-                reference: reference.clone(),
-                content,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    if changes.is_empty() {
-        bail!("UpdateItem requires at least one ItemChange");
-    }
-    Ok(changes)
-}
-
-fn update_item_change_content<'a>(
-    changes: &'a [UpdateItemChange<'a>],
-    id: &str,
-) -> Result<&'a str> {
-    changes
-        .iter()
-        .find(|change| change.reference.id == id)
-        .map(|change| change.content)
-        .ok_or_else(|| anyhow!("UpdateItem ItemChange was not found for {id}"))
-}
-
-fn validate_required_item_change_key(
-    references: &[RequestedItemReference],
-    id: &str,
-    current_change_key: &str,
-) -> Result<()> {
-    let supplied_change_key = references
-        .iter()
-        .find(|reference| reference.id == id)
-        .and_then(|reference| reference.change_key.as_deref())
-        .ok_or_else(|| anyhow!("stale EWS ChangeKey for {id}: missing ChangeKey"))?;
-    if supplied_change_key != current_change_key {
-        bail!("stale EWS ChangeKey for {id}");
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        requested_update_item_changes, update_item_change_content,
-        validate_required_item_change_key, validate_supplied_item_change_key,
-    };
-    use crate::service::ews::request_ids::RequestedItemReference;
-
-    #[test]
-    fn stale_supplied_change_key_is_rejected_before_item_mutation() {
-        let error = validate_supplied_item_change_key(
-            &[RequestedItemReference {
-                id: "message:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string(),
-                change_key: Some("stale".to_string()),
-            }],
-            "message:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-            "current",
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("stale EWS ChangeKey"));
-    }
-
-    #[test]
-    fn missing_required_change_key_is_a_conflict() {
-        let error = validate_required_item_change_key(
-            &[RequestedItemReference {
-                id: "contact:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string(),
-                change_key: None,
-            }],
-            "contact:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-            "current",
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("stale EWS ChangeKey"));
-        assert!(error.to_string().contains("missing ChangeKey"));
-    }
-
-    #[test]
-    fn update_item_changes_keep_each_item_payload_local() {
-        let changes = requested_update_item_changes(
-            concat!(
-                "<m:UpdateItem><m:ItemChanges>",
-                "<t:ItemChange><t:ItemId Id=\"contact:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\" ChangeKey=\"a\"/>",
-                "<t:Updates><t:Contact><t:DisplayName>Ada</t:DisplayName></t:Contact></t:Updates></t:ItemChange>",
-                "<t:ItemChange><t:ItemId Id=\"event:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb\" ChangeKey=\"b\"/>",
-                "<t:Updates><t:CalendarItem><t:Subject>Planning</t:Subject></t:CalendarItem></t:Updates></t:ItemChange>",
-                "</m:ItemChanges></m:UpdateItem>"
-            ),
-        )
-        .unwrap();
-
-        assert_eq!(changes.len(), 2);
-        assert!(update_item_change_content(
-            &changes,
-            "contact:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-        )
-        .unwrap()
-        .contains("Ada"));
-        assert!(!update_item_change_content(
-            &changes,
-            "contact:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-        )
-        .unwrap()
-        .contains("Planning"));
-    }
 }
