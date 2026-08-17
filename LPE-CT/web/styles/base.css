@@ -36,7 +36,7 @@
   --spring: cubic-bezier(0.2, 0.8, 0.2, 1);
   --font-title: 1rem;
   --font-copy: 0.82rem;
-  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-family: Inter, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
 }
 
 * {
@@ -46,6 +46,32 @@
 html,
 body {
   min-height: 100%;
+}
+
+::selection {
+  color: #fff;
+  background: var(--accent);
+}
+
+* {
+  scrollbar-color: rgba(97, 113, 129, 0.42) transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: rgba(97, 113, 129, 0.42);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 html {

@@ -125,6 +125,36 @@ fn collect_mime_attachment_parts_extracts_attachment_payloads() {
 }
 
 #[test]
+fn collect_mime_attachment_parts_keeps_unnamed_inline_calendar_parts() {
+    let message = concat!(
+        "Content-Type: multipart/alternative; boundary=\"invite\"\r\n",
+        "\r\n",
+        "--invite\r\n",
+        "Content-Type: text/plain; charset=utf-8\r\n",
+        "\r\n",
+        "\r\n",
+        "--invite\r\n",
+        "Content-Type: text/calendar; charset=utf-8; method=COUNTER\r\n",
+        "Content-Transfer-Encoding: base64\r\n",
+        "\r\n",
+        "QkVHSU46VkNBTEVOREFSDQpNRVRIT0Q6Q09VTlRFUg0KRU5EOlZDQUxFTkRBUg==\r\n",
+        "--invite--\r\n"
+    );
+
+    let attachments = collect_mime_attachment_parts(message.as_bytes()).unwrap();
+
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(
+        attachments[0].declared_mime.as_deref(),
+        Some("text/calendar; charset=utf-8; method=COUNTER")
+    );
+    assert_eq!(
+        attachments[0].bytes,
+        b"BEGIN:VCALENDAR\r\nMETHOD:COUNTER\r\nEND:VCALENDAR".to_vec()
+    );
+}
+
+#[test]
 fn extract_visible_text_prefers_plaintext_from_multipart_alternative() {
     let message = concat!(
         "Subject: =?UTF-8?Q?Bonjour_=C3=A9quipe?=\r\n",

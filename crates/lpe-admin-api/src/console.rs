@@ -64,6 +64,19 @@ pub(crate) async fn dashboard(
     ))
 }
 
+pub(crate) async fn tenant_dashboard(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<lpe_storage::TenantDashboard> {
+    let admin = require_admin(&storage, &headers, "dashboard").await?;
+    Ok(Json(
+        storage
+            .fetch_tenant_dashboard(admin.tenant_id)
+            .await
+            .map_err(internal_error)?,
+    ))
+}
+
 pub(crate) async fn create_account(
     State(storage): State<Storage>,
     headers: HeaderMap,

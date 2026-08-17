@@ -107,6 +107,7 @@
   - their state changes are driven by canonical `notes` and `journal`
     categories, not protocol-local sync state
 - Rules:
+  - inbound `text/calendar` MIME parts, including unnamed inline Outlook `REPLY` and `COUNTER` parts, remain durable message attachments so clients can inspect the original scheduling content; receiving a counterproposal does not move the organizer's event automatically
   - rights are bounded by authenticated account and canonical grants
   - `Bcc` recipients must not be learned into recipient suggestions and must not appear in contact, suggestion, search, AI, or shared-contact projections
   - no JMAP-only collection store

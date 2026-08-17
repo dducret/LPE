@@ -158,6 +158,9 @@ select.invalid {
 
 .login-card {
   width: min(480px, calc(100vw - 32px));
+  display: grid;
+  gap: 18px;
+  padding: 24px;
 }
 
 .fields {

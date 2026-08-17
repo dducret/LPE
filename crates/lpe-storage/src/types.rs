@@ -23,6 +23,81 @@ pub struct AdminDashboard {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct TenantDashboard {
+    pub overview: TenantDashboardOverview,
+    pub accounts: Vec<TenantAccountSummary>,
+    pub domains: Vec<TenantDomainSummary>,
+    pub quarantine: TenantQuarantineStatus,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TenantDashboardOverview {
+    pub total_accounts: usize,
+    pub total_mailboxes: usize,
+    pub total_domains: usize,
+    pub pending_queue_items: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TenantAccountSummary {
+    pub id: Uuid,
+    pub email: String,
+    pub display_name: String,
+    pub quota_mb: u32,
+    pub used_mb: u32,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TenantDomainSummary {
+    pub id: Uuid,
+    pub name: String,
+    pub status: String,
+    pub inbound_enabled: bool,
+    pub outbound_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TenantQuarantineStatus {
+    pub source: String,
+    pub available: bool,
+}
+
+#[cfg(test)]
+mod tenant_dashboard_tests {
+    use super::{TenantDashboard, TenantDashboardOverview, TenantQuarantineStatus};
+
+    #[test]
+    fn tenant_dashboard_serialization_excludes_platform_administration_state() {
+        let dashboard = TenantDashboard {
+            overview: TenantDashboardOverview {
+                total_accounts: 2,
+                total_mailboxes: 2,
+                total_domains: 1,
+                pending_queue_items: 3,
+            },
+            accounts: Vec::new(),
+            domains: Vec::new(),
+            quarantine: TenantQuarantineStatus {
+                source: "LPE-CT".to_string(),
+                available: false,
+            },
+        };
+
+        let value = serde_json::to_value(dashboard).expect("tenant dashboard serializes");
+
+        assert_eq!(value["overview"]["total_domains"], 1);
+        assert_eq!(value["quarantine"]["source"], "LPE-CT");
+        assert!(value.get("health").is_none());
+        assert!(value["overview"].get("total_aliases").is_none());
+        assert!(value["overview"].get("attachment_formats").is_none());
+        assert!(value["overview"].get("local_ai_enabled").is_none());
+        assert!(value.get("server_settings").is_none());
+        assert!(value.get("security_settings").is_none());
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct HealthResponse {
     pub service: &'static str,
     pub status: &'static str,

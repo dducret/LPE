@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { getInitialLocale, localeLabels, messages, setStoredLocale, supportedLocales, type Locale } from "./i18n";
+import { getInitialLocale, localeLabels, messages, setStoredLocale, supportedLocales, tenantDashboardLabels, type Locale } from "./i18n";
 import { Input, TabButton as PrimitiveTabButton } from "../../ui/src/components/primitives";
 import { StorageManagement } from "./StorageManagement";
 import "./styles.css";
@@ -21,6 +21,12 @@ type DashboardState = {
   quarantine_items: { id: string; message_ref: string; sender: string; recipient: string; reason: string; status: string; created_at: string }[];
   storage: { primary_store: string; search_engine: string; attachment_formats: string[]; replication_mode: string };
   audit_log: { id: string; timestamp: string; actor: string; action: string; subject: string }[];
+};
+type TenantDashboardState = {
+  overview: { total_accounts: number; total_mailboxes: number; total_domains: number; pending_queue_items: number };
+  accounts: { id: string; email: string; display_name: string; quota_mb: number; used_mb: number; status: string }[];
+  domains: { id: string; name: string; status: string; inbound_enabled: boolean; outbound_enabled: boolean }[];
+  quarantine: { source: string; available: boolean };
 };
 
 type TraceResult = {
@@ -99,6 +105,7 @@ function compactMeta(parts: Array<string | null | undefined>) { return parts.fil
 function App() {
   const [locale, setLocale] = React.useState<Locale>(getInitialLocale);
   const [state, setState] = React.useState<DashboardState | null>(null);
+  const [tenantDashboard, setTenantDashboard] = React.useState<TenantDashboardState | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
@@ -143,6 +150,7 @@ function App() {
   const [localAiForm, setLocalAiForm] = React.useState<DashboardState["local_ai_settings"] | null>(null);
   const [antispamForm, setAntispamForm] = React.useState<DashboardState["antispam_settings"] | null>(null);
   const copy = messages[locale];
+  const tenantLabels = tenantDashboardLabels[locale];
 
   React.useEffect(() => { document.documentElement.lang = locale; setStoredLocale(locale); }, [locale]);
   React.useEffect(() => { token ? window.localStorage.setItem("lpe.admin.token", token) : window.localStorage.removeItem("lpe.admin.token"); }, [token]);
@@ -165,16 +173,25 @@ function App() {
     if (!token) return;
     setBusy("load");
     try {
-      const [identity, dashboard, mailFlowResponse, snapshotResponse] = await Promise.all([
-        fetchJson<LoginResponse["admin"]>("auth/me", token),
-        fetchJson<DashboardState>("console/dashboard", token),
-        fetchJson<{ items: MailFlowEntry[] }>("console/mail-flow", token),
-        fetchJson<SnapshotResponse>("console/snapshots", token)
-      ]);
+      const identity = await fetchJson<LoginResponse["admin"]>("auth/me", token);
       setAdminIdentity(identity);
-      syncState(dashboard);
-      setMailFlow(mailFlowResponse.items);
-      setSnapshots(snapshotResponse);
+      if (identity.role === "tenant-admin") {
+        const dashboard = await fetchJson<TenantDashboardState>("console/tenant-dashboard", token);
+        setTenantDashboard(dashboard);
+        setState(null);
+        setMailFlow([]);
+        setSnapshots(null);
+      } else {
+        const [dashboard, mailFlowResponse, snapshotResponse] = await Promise.all([
+          fetchJson<DashboardState>("console/dashboard", token),
+          fetchJson<{ items: MailFlowEntry[] }>("console/mail-flow", token),
+          fetchJson<SnapshotResponse>("console/snapshots", token)
+        ]);
+        setTenantDashboard(null);
+        syncState(dashboard);
+        setMailFlow(mailFlowResponse.items);
+        setSnapshots(snapshotResponse);
+      }
       setError(null);
     }
     catch (e) { setError(e instanceof Error ? e.message : "Unknown error"); if (e instanceof Error && e.message.includes("401")) setToken(null); }
@@ -393,6 +410,8 @@ function App() {
     { key: "audit", label: copy.pageAudit, icon: "audit" },
     { key: "operations", label: copy.pageOperations, icon: "overview" }
   ];
+  const visibleSidebarPages = tenantDashboard ? sidebarPages.slice(0, 1) : sidebarPages;
+  const overview = tenantDashboard?.overview ?? state?.overview;
 
   function navigatePage(nextPage: PageKey) {
     setPage(nextPage);
@@ -433,10 +452,10 @@ function App() {
           <button className="icon-button sidebar-toggle" type="button" aria-label={sidebarCollapsed ? copy.open : copy.close} title={sidebarCollapsed ? copy.open : copy.close} onClick={() => setSidebarCollapsed((value) => !value)}><span className="menu-icon" aria-hidden="true" /></button>
         </section>
         <div className="sidebar-group">
-          <nav className="page-list">{sidebarPages.slice(0, 4).map((entry) => <button key={entry.key} type="button" title={entry.label} aria-label={entry.label} className={page === entry.key ? "page-button is-active" : "page-button"} onClick={() => navigatePage(entry.key)}><span className={`page-icon page-icon-${entry.icon}`} aria-hidden="true" /><span className="page-copy"><span className="page-label">{entry.label}</span></span></button>)}</nav>
+          <nav className="page-list">{visibleSidebarPages.slice(0, 4).map((entry) => <button key={entry.key} type="button" title={entry.label} aria-label={entry.label} className={page === entry.key ? "page-button is-active" : "page-button"} onClick={() => navigatePage(entry.key)}><span className={`page-icon page-icon-${entry.icon}`} aria-hidden="true" /><span className="page-copy"><span className="page-label">{entry.label}</span></span></button>)}</nav>
         </div>
         <div className="sidebar-group">
-          <nav className="page-list">{sidebarPages.slice(4).map((entry) => <button key={entry.key} type="button" title={entry.label} aria-label={entry.label} className={page === entry.key ? "page-button is-active" : "page-button"} onClick={() => navigatePage(entry.key)}><span className={`page-icon page-icon-${entry.icon}`} aria-hidden="true" /><span className="page-copy"><span className="page-label">{entry.label}</span></span></button>)}</nav>
+          <nav className="page-list">{visibleSidebarPages.slice(4).map((entry) => <button key={entry.key} type="button" title={entry.label} aria-label={entry.label} className={page === entry.key ? "page-button is-active" : "page-button"} onClick={() => navigatePage(entry.key)}><span className={`page-icon page-icon-${entry.icon}`} aria-hidden="true" /><span className="page-copy"><span className="page-label">{entry.label}</span></span></button>)}</nav>
         </div>
       </div>
       <div className="sidebar-footer">
@@ -445,10 +464,25 @@ function App() {
       </div>
     </aside>
     <section className="workspace">
-      <header className="topbar"><div className="topbar-copy"><div className="topbar-heading"><button className="icon-button shell-toggle" type="button" aria-label={sidebarMobileOpen ? copy.close : copy.open} aria-expanded={sidebarMobileOpen} onClick={() => setSidebarMobileOpen((value) => !value)}>☰</button><h2>{sidebarPages.find((entry) => entry.key === page)?.label}</h2></div><p>{adminIdentity ? `${copy.banner} · ${adminIdentity.email}` : copy.banner}</p></div><div className="topbar-actions"><span className="pill">{adminIdentity?.role ?? "admin"}</span><span className="pill">{state ? `${state.overview.total_domains} ${copy.domains}` : copy.loading}</span><div className="inline-form"><button className="secondary-button" type="button" onClick={() => void load()}>{copy.refresh}</button><button className="secondary-button" type="button" onClick={() => { setToken(null); setState(null); }}>{copy.logout}</button></div></div></header>
+      <header className="topbar"><div className="topbar-copy"><div className="topbar-heading"><button className="icon-button shell-toggle" type="button" aria-label={sidebarMobileOpen ? copy.close : copy.open} aria-expanded={sidebarMobileOpen} onClick={() => setSidebarMobileOpen((value) => !value)}>☰</button><h2>{visibleSidebarPages.find((entry) => entry.key === page)?.label}</h2></div><p>{adminIdentity ? `${copy.banner} · ${adminIdentity.email}` : copy.banner}</p></div><div className="topbar-actions"><span className="pill">{adminIdentity?.role ?? "admin"}</span><span className="pill">{overview ? `${overview.total_domains} ${copy.domains}` : copy.loading}</span><div className="inline-form"><button className="secondary-button" type="button" onClick={() => void load()}>{copy.refresh}</button><button className="secondary-button" type="button" onClick={() => { setToken(null); setState(null); setTenantDashboard(null); }}>{copy.logout}</button></div></div></header>
       {error ? <p className="feedback error">{error}</p> : null}
       {notice ? <p className="feedback notice">{notice}</p> : null}
-      {!state ? <p className="feedback muted">{busy === "load" ? copy.loading : copy.noData}</p> : null}
+      {!state && !tenantDashboard ? <p className="feedback muted">{busy === "load" ? copy.loading : copy.noData}</p> : null}
+      {tenantDashboard && page === "server" ? <section className="page-card tenant-dashboard">
+        <div className="tenant-dashboard-heading">
+          <div><h3>{tenantLabels.title}</h3><p className="muted">{adminIdentity?.email}</p></div>
+        </div>
+        <section className="tenant-pulse" aria-label={tenantLabels.title}>
+          <div className="tenant-pulse-item"><span>{copy.domains}</span><strong>{tenantDashboard.overview.total_domains}</strong><small>{tenantDashboard.domains.filter((domain) => domain.status === "active").length} {copy.enabled.toLowerCase()}</small></div>
+          <div className="tenant-pulse-item"><span>{copy.accounts}</span><strong>{tenantDashboard.overview.total_accounts}</strong><small>{tenantDashboard.overview.total_mailboxes} {copy.mailboxName.toLowerCase()}</small></div>
+          <div className="tenant-pulse-item"><span>{tenantLabels.mailFlow}</span><strong>{tenantDashboard.overview.pending_queue_items}</strong><small>{copy.queue}</small></div>
+          <div className="tenant-pulse-item"><span>{copy.quarantine}</span><strong>{tenantDashboard.quarantine.source}</strong><small>{tenantDashboard.quarantine.available ? copy.enabled : tenantLabels.quarantineManaged}</small></div>
+        </section>
+        <div className="tenant-dashboard-grid">
+          <section className="tenant-dashboard-section"><div className="section-title-row"><h3>{copy.domains}</h3><span className="pill">{tenantDashboard.domains.length}</span></div><div className="tenant-dashboard-list">{tenantDashboard.domains.length ? tenantDashboard.domains.map((domain) => <div className="tenant-dashboard-row" key={domain.id}><div><strong>{domain.name}</strong><span>{domain.inbound_enabled ? copy.inbound : copy.disabled} · {domain.outbound_enabled ? copy.outbound : copy.disabled}</span></div><span className={domain.status === "active" ? "pill ok" : "pill warn"}>{domain.status}</span></div>) : <p className="muted">{copy.noData}</p>}</div></section>
+          <section className="tenant-dashboard-section"><div className="section-title-row"><h3>{copy.accounts}</h3><span className="pill">{tenantDashboard.accounts.length}</span></div><div className="tenant-dashboard-list">{tenantDashboard.accounts.length ? tenantDashboard.accounts.map((account) => <div className="tenant-dashboard-row" key={account.id}><div><strong>{account.display_name}</strong><span>{account.email} · {account.used_mb}/{account.quota_mb} MB</span></div><span className={account.status === "active" ? "pill ok" : "pill warn"}>{account.status}</span></div>) : <p className="muted">{copy.noData}</p>}</div></section>
+        </div>
+      </section> : null}
       {state ? <>
         {page === "server" ? <section className="page-card">
           <div className="tabs">{(["status","server","security","ai","domains","admins"] as ServerTab[]).map((tab) => <TabButton key={tab} active={serverTab===tab} onClick={() => setServerTab(tab)} label={copy.serverTabs[tab]} />)}</div>

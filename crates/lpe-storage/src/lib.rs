@@ -137,7 +137,8 @@ pub use crate::types::{
     StorageMigrationJobSummary, StorageMigrationVisibilityResponse, StorageOverview,
     StoragePlacementCounts, StoragePolicyOverview, StoragePolicyScope, StoragePolicySummary,
     StoragePolicyUpdate, StoragePoolConfigSummary, StoragePoolHealth, StoragePoolReference,
-    StoragePoolSummary, UpdateAccount, UpdateDomain, UpdateStoragePool,
+    StoragePoolSummary, TenantAccountSummary, TenantDashboard, TenantDashboardOverview,
+    TenantDomainSummary, TenantQuarantineStatus, UpdateAccount, UpdateDomain, UpdateStoragePool,
 };
 pub use crate::util::{normalize_mailbox_domain, normalize_mailbox_email};
 pub use crate::workspace::{

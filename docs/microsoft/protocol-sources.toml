@@ -3937,10 +3937,11 @@ published_version = "2024-08-20"
 local_cache = "docs/microsoft/cache/MS-STANOICAL.pdf"
 sha256 = "db092f49385578036514c0a39e5f2715fbafb58cfdcb1459001db6f1f957a20e"
 used_for = [
-  "Outlook iCalendar standards-support reference inventory; not a standalone LPE implementation claim",
+  "Outlook iCalendar standards-support reference inventory and preservation of inbound scheduling MIME parts; not a standalone LPE implementation claim",
 ]
 sections = [
   "Revision Summary",
+  "RFC5545 3.7.2 Method",
 ]
 
 [[standard]]

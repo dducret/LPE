@@ -82,3 +82,11 @@ const es: MessageSet = {
 };
 
 export const messages = defineLocaleCatalog(en, { fr, de, it, es });
+
+export const tenantDashboardLabels: Record<Locale, { title: string; mailFlow: string; quarantineManaged: string }> = {
+  en: { title: "Tenant dashboard", mailFlow: "Pending mail flow", quarantineManaged: "Managed by LPE-CT" },
+  fr: { title: "Tableau de bord du locataire", mailFlow: "Flux de courrier en attente", quarantineManaged: "Gere par LPE-CT" },
+  de: { title: "Mandanten-Dashboard", mailFlow: "Ausstehender Mailfluss", quarantineManaged: "Von LPE-CT verwaltet" },
+  it: { title: "Dashboard tenant", mailFlow: "Flusso mail in attesa", quarantineManaged: "Gestito da LPE-CT" },
+  es: { title: "Panel del inquilino", mailFlow: "Flujo de correo pendiente", quarantineManaged: "Gestionado por LPE-CT" },
+};

@@ -31,6 +31,11 @@
   - use full-width management lists
   - put primary `New` or `Create` action in the list header
   - use a right-side drawer for creation, details, and contextual actions
+  - `/console/tenant-dashboard` returns only the authenticated administrator's tenant-owned
+    domain, account, mailbox-count, and pending-submission state; it does not expose
+    platform administration settings
+  - quarantine remains LPE-CT perimeter state and is represented in the tenant dashboard
+    only as that explicit ownership boundary until LPE-CT exposes tenant-safe operational data
 
 ## Reference Table/List
 

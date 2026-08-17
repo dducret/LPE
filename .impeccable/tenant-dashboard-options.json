@@ -1,0 +1,45 @@
+{
+  "title": "Choose the tenant dashboard structure",
+  "question": "Each option preserves LPE's existing administration system. Choose the layout that should make provisioning, mail flow, and quarantine risk easiest to operate.",
+  "options": [
+    {
+      "id": "provisioning-ledger",
+      "label": "Provisioning ledger",
+      "kicker": "THE ROLL",
+      "lineage": "existing LPE management workbench",
+      "thesis": "A focused worklist drives domain and account setup, while a compact risk rail keeps delivery and quarantine exceptions impossible to miss.",
+      "palette": ["#0f1822", "#f3f6f9", "#2e6ff2", "#c6871b"],
+      "materials": ["dark navigation rail", "translucent blue-white panels", "semantic status rails"],
+      "viewport": "The header names the tenant; a full-width provisioning list dominates, with a narrow right rail for queue, quarantine, and protocol exceptions.",
+      "risk": "The operational rail must stay selective or it will compete with the primary provisioning task.",
+      "comp": ".impeccable/mocks/decision/tenant-dashboard-provisioning-ledger.png"
+    },
+    {
+      "id": "operations-workbench",
+      "label": "Operations workbench",
+      "lineage": "existing LPE management workbench",
+      "thesis": "Domains, accounts, and aliases appear as one actionable tenant inventory, with delivery health compressed into a single decisive status band.",
+      "palette": ["#0f1822", "#f3f6f9", "#2e6ff2", "#1d9d62"],
+      "materials": ["dark navigation rail", "dense management list", "status band"],
+      "viewport": "A tenant pulse band stretches across the top; below it, a full-width inventory list is grouped by domain with clear New actions and urgent exceptions inline.",
+      "risk": "The grouped inventory needs disciplined row design to remain scannable with many domains.",
+      "comp": ".impeccable/mocks/decision/tenant-dashboard-operations-workbench.png"
+    },
+    {
+      "id": "health-first-portfolio",
+      "label": "Health-first portfolio",
+      "lineage": "existing LPE overview cards",
+      "thesis": "A concise risk overview establishes whether the tenant is safe to operate, then hands off directly into domain and account actions.",
+      "palette": ["#0f1822", "#f3f6f9", "#2e6ff2", "#ce4242"],
+      "materials": ["quiet overview cards", "stacked signal panels", "semantic severity accents"],
+      "viewport": "A calm top row shows healthy capacity and risky mail-flow signals; two large action panels below lead directly to domain and account provisioning.",
+      "risk": "It may feel more like monitoring than a working dashboard unless the next actions are exceptionally direct.",
+      "comp": ".impeccable/mocks/decision/tenant-dashboard-health-first-portfolio.png"
+    }
+  ],
+  "reroll": true,
+  "buildPath": {
+    "value": "comp",
+    "toggle": true
+  }
+}

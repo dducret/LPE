@@ -3,12 +3,127 @@ use anyhow::Result;
 use crate::{
     AccountRow, AdminDashboard, AliasRecord, AliasRow, AuditEvent, AuditRow, DomainRecord,
     DomainRow, HealthResponse, MailboxRecord, MailboxRow, ProtocolStatus, PstTransferJobRecord,
-    PstTransferJobRow, Storage, StorageOverview, PLATFORM_TENANT_ID,
+    PstTransferJobRow, Storage, StorageOverview, TenantAccountSummary, TenantDashboard,
+    TenantDashboardOverview, TenantDomainSummary, TenantQuarantineStatus, PLATFORM_TENANT_ID,
 };
+use uuid::Uuid;
 
 impl Storage {
     pub async fn fetch_admin_dashboard(&self) -> Result<AdminDashboard> {
-        let tenant_id = PLATFORM_TENANT_ID;
+        self.fetch_admin_dashboard_for_tenant(PLATFORM_TENANT_ID)
+            .await
+    }
+
+    pub async fn fetch_tenant_dashboard(&self, tenant_id: Uuid) -> Result<TenantDashboard> {
+        let account_rows = sqlx::query_as::<_, AccountRow>(
+            r#"
+            SELECT
+                id,
+                primary_email,
+                display_name,
+                quota_mb,
+                COALESCE((
+                    SELECT SUM(logical_messages.size_octets)::BIGINT
+                    FROM (
+                        SELECT DISTINCT m.id, m.size_octets
+                        FROM mailbox_messages mm
+                        JOIN messages m
+                          ON m.tenant_id = mm.tenant_id
+                         AND m.id = mm.message_id
+                        WHERE mm.tenant_id = accounts.tenant_id
+                          AND mm.account_id = accounts.id
+                          AND mm.visibility <> 'expunged'
+                    ) logical_messages
+                ), 0)::BIGINT AS quota_used_octets,
+                status,
+                gal_visibility,
+                directory_kind
+            FROM accounts
+            WHERE tenant_id = $1
+            ORDER BY created_at ASC
+            "#,
+        )
+        .bind(tenant_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let accounts = account_rows
+            .into_iter()
+            .map(|row| TenantAccountSummary {
+                id: row.id,
+                email: row.primary_email,
+                display_name: row.display_name,
+                quota_mb: row.quota_mb as u32,
+                used_mb: (row.quota_used_octets.max(0) / 1_048_576) as u32,
+                status: row.status,
+            })
+            .collect::<Vec<_>>();
+
+        let domains = sqlx::query_as::<_, DomainRow>(
+            r#"
+            SELECT
+                id,
+                name,
+                status,
+                inbound_enabled,
+                outbound_enabled,
+                default_quota_mb,
+                default_sieve_script,
+                jmap_push_journal_retention_days
+            FROM domains
+            WHERE tenant_id = $1
+            ORDER BY created_at ASC
+            "#,
+        )
+        .bind(tenant_id)
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(|row| TenantDomainSummary {
+            id: row.id,
+            name: row.name,
+            status: row.status,
+            inbound_enabled: row.inbound_enabled,
+            outbound_enabled: row.outbound_enabled,
+        })
+        .collect::<Vec<_>>();
+
+        let total_mailboxes =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM mailboxes WHERE tenant_id = $1")
+                .bind(tenant_id)
+                .fetch_one(&self.pool)
+                .await?
+                .max(0) as usize;
+        let pending_queue_items = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)
+            FROM submission_queue
+            WHERE tenant_id = $1
+              AND status IN ('queued', 'ready', 'handed_off', 'deferred')
+            "#,
+        )
+        .bind(tenant_id)
+        .fetch_one(&self.pool)
+        .await?
+        .max(0) as u32;
+
+        Ok(TenantDashboard {
+            overview: TenantDashboardOverview {
+                total_accounts: accounts.len(),
+                total_mailboxes,
+                total_domains: domains.len(),
+                pending_queue_items,
+            },
+            accounts,
+            domains,
+            quarantine: TenantQuarantineStatus {
+                source: "LPE-CT".to_string(),
+                available: false,
+            },
+        })
+    }
+
+    async fn fetch_admin_dashboard_for_tenant(&self, tenant_id: Uuid) -> Result<AdminDashboard> {
         let account_rows = sqlx::query_as::<_, AccountRow>(
             r#"
             SELECT

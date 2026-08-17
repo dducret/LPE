@@ -34,9 +34,19 @@ pub fn parse_message_attachments(bytes: &[u8]) -> Result<Vec<AttachmentUploadInp
         .into_iter()
         .enumerate()
         .map(|(index, mut attachment)| {
-            let file_name = attachment
-                .filename
-                .unwrap_or_else(|| format!("attachment-{}.bin", index + 1));
+            let is_calendar = attachment.declared_mime.as_deref().is_some_and(|value| {
+                value
+                    .trim()
+                    .to_ascii_lowercase()
+                    .starts_with("text/calendar")
+            });
+            let file_name = attachment.filename.unwrap_or_else(|| {
+                if is_calendar {
+                    format!("calendar-{}.ics", index + 1)
+                } else {
+                    format!("attachment-{}.bin", index + 1)
+                }
+            });
             let media_type = attachment
                 .declared_mime
                 .unwrap_or_else(|| "application/octet-stream".to_string());
@@ -391,6 +401,37 @@ mod tests {
         assert_eq!(
             attachments[0].media_type,
             "text/calendar; method=REQUEST; charset=UTF-8"
+        );
+    }
+
+    #[test]
+    fn parse_message_attachments_names_unnamed_inline_calendar_parts() {
+        let message = concat!(
+            "Content-Type: multipart/alternative; boundary=\"invite\"\r\n",
+            "\r\n",
+            "--invite\r\n",
+            "Content-Type: text/plain; charset=utf-8\r\n",
+            "\r\n",
+            "\r\n",
+            "--invite\r\n",
+            "Content-Type: text/calendar; charset=utf-8; method=COUNTER\r\n",
+            "Content-Transfer-Encoding: base64\r\n",
+            "\r\n",
+            "QkVHSU46VkNBTEVOREFSDQpNRVRIT0Q6Q09VTlRFUg0KRU5EOlZDQUxFTkRBUg==\r\n",
+            "--invite--\r\n"
+        );
+
+        let attachments = parse_message_attachments(message.as_bytes()).unwrap();
+
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].file_name, "calendar-1.ics");
+        assert_eq!(
+            attachments[0].media_type,
+            "text/calendar; charset=utf-8; method=COUNTER"
+        );
+        assert_eq!(
+            attachments[0].blob_bytes,
+            b"BEGIN:VCALENDAR\r\nMETHOD:COUNTER\r\nEND:VCALENDAR".to_vec()
         );
     }
 

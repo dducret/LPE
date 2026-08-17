@@ -28,8 +28,8 @@ use crate::{
     console::{
         attachment_support, create_account, create_alias, create_domain, create_filter_rule,
         create_mailbox, create_pst_transfer_job, create_server_administrator, dashboard,
-        local_ai_health, mail_flow, run_pst_jobs, search_email_trace, update_account,
-        update_antispam_settings, update_domain, update_local_ai_settings,
+        local_ai_health, mail_flow, run_pst_jobs, search_email_trace, tenant_dashboard,
+        update_account, update_antispam_settings, update_domain, update_local_ai_settings,
         update_security_settings, update_server_settings, upload_pst_import,
     },
     delegation::{
@@ -164,6 +164,7 @@ pub fn router(storage: Storage) -> Router {
         .route("/health/local-ai", get(local_ai_health))
         .route("/capabilities/attachments", get(attachment_support))
         .route("/console/dashboard", get(dashboard))
+        .route("/console/tenant-dashboard", get(tenant_dashboard))
         .route("/console/accounts", post(create_account))
         .route("/console/accounts/{account_id}", put(update_account))
         .route("/console/mailboxes", post(create_mailbox))

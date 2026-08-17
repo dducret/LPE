@@ -500,6 +500,7 @@
 
 .dashboard-core-grid {
   grid-template-columns: repeat(4, minmax(13rem, 1fr));
+  gap: 18px;
   align-items: stretch;
 }
 

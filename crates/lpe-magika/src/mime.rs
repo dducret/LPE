@@ -96,7 +96,12 @@ fn collect_attachment_parts(bytes: &[u8], attachments: &mut Vec<MimeAttachmentPa
         .as_deref()
         .map(|value| value.to_ascii_lowercase().starts_with("attachment"))
         .unwrap_or(false);
-    if is_attachment || filename.is_some() {
+    // MS-STANOICAL, RFC 5545 section 3.7.2: a calendar MIME part carries the
+    // scheduling method even when Outlook does not give it a filename.
+    let is_calendar = content_type
+        .to_ascii_lowercase()
+        .starts_with("text/calendar");
+    if is_attachment || filename.is_some() || is_calendar {
         attachments.push(MimeAttachmentPart {
             filename,
             declared_mime: Some(content_type),
