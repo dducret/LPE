@@ -1,6 +1,27 @@
 import React from "react";
 import type { ClientCopy } from "../i18n";
 import type { ClientMailbox, Folder, Section, SystemFolder } from "../client-types";
+import { ClientIcon, type ClientIconName } from "./ClientIcon";
+
+const sectionIcons: Record<Section, ClientIconName> = {
+  mail: "mail",
+  calendar: "calendar",
+  contacts: "contacts",
+  tasks: "tasks",
+  notes: "notes",
+  journal: "journal",
+  reminders: "reminders",
+  settings: "settings"
+};
+
+function folderIcon(folder: Folder | null): ClientIconName {
+  if (folder === "inbox" || folder === "focused") return "inbox";
+  if (folder === "drafts") return "draft";
+  if (folder === "sent" || folder === "outbox") return "sent";
+  if (folder === "archive") return "archive";
+  if (folder === "trash") return "trash";
+  return "folder";
+}
 
 export function Sidebar(props: {
   copy: ClientCopy;
@@ -49,6 +70,18 @@ export function Sidebar(props: {
     { id: "settings", label: props.copy.sections.settings }
   ];
 
+  const selectSection = (section: Section) => {
+    props.setSection(section);
+    props.onCloseComposer();
+    props.onCloseMobile();
+  };
+  const selectFolder = (folder: Folder) => {
+    props.setSection("mail");
+    props.setFolder(folder);
+    props.onCloseComposer();
+    props.onCloseMobile();
+  };
+
   return (
     <aside
       id="client-sidebar"
@@ -56,64 +89,56 @@ export function Sidebar(props: {
       aria-hidden={props.isNarrowScreen && !props.mobileOpen ? true : undefined}
       inert={props.isNarrowScreen && !props.mobileOpen}
     >
-      <div className="sidebar-column">
+      <nav className="app-rail" aria-label={props.copy.sectionLabel}>
+        <div className="app-rail-brand" aria-label="LPE">L</div>
+        <div className="app-rail-links">
+          {sectionLinks.map((item) => (
+            <button
+              key={item.id}
+              className={props.section === item.id ? "app-rail-button is-active" : "app-rail-button"}
+              type="button"
+              title={item.label}
+              aria-label={item.label}
+              onClick={() => selectSection(item.id)}
+            >
+              <ClientIcon name={sectionIcons[item.id]} />
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      <div className="folder-rail">
         <div className="sidebar-toolbar">
           <div className="brand-lockup">
-            <div className="brand-mark">LPE</div>
             <div className="brand-copy">
-              <h1>{props.copy.productTitle}</h1>
-              <p className="brand-subtitle">{props.copy.productSubtitle}</p>
+              <h1>{props.copy.sections[props.section]}</h1>
+              <p className="brand-subtitle">{props.mailboxOwner}</p>
             </div>
           </div>
           <button className="ghost-button collapse-toggle" type="button" aria-label={props.collapsed ? props.copy.navigation.expand : props.copy.navigation.collapse} title={props.collapsed ? props.copy.navigation.expand : props.copy.navigation.collapse} onClick={props.onToggleCollapse}>
-            {props.collapsed ? "→" : "←"}
+            <span className="collapse-chevron" aria-hidden="true" />
           </button>
         </div>
 
-        <button className={props.collapsed ? "compose-button is-collapsed" : "compose-button"} type="button" title={props.copy.compose} aria-label={props.copy.compose} onClick={() => { props.onCompose(); props.onCloseMobile(); }}>
-          <span className="compose-plus">+</span>
+        <button className="compose-button" type="button" title={props.copy.compose} aria-label={props.copy.compose} onClick={() => { props.onCompose(); props.onCloseMobile(); }}>
+          <ClientIcon name="compose" />
           <span className="sidebar-label">{props.copy.compose}</span>
         </button>
 
-        <div className="sidebar-group">
-          <p className="panel-title">{props.copy.sectionLabel}</p>
-          <nav className="sidebar-section-nav" aria-label={props.copy.sectionLabel}>
-            {sectionLinks.map((item) => (
-              <button
-                key={item.id}
-                className={props.section === item.id ? "section-item is-active" : "section-item"}
-                type="button"
-                title={item.label}
-                aria-label={item.label}
-                onClick={() => {
-                  props.setSection(item.id);
-                  props.onCloseComposer();
-                  props.onCloseMobile();
-                }}
-              >
-                <span className="section-item-icon">{props.copy.sectionIcons[item.id]}</span>
-                <span className="sidebar-label">{item.label}</span>
-              </button>
-            ))}
-          </nav>
-        </div>
-
         <div className="folder-panel is-tight">
           <p className="panel-title">{props.copy.favoritesLabel}</p>
-          <button className="tree-item" type="button" title={props.copy.folders.focused} aria-label={props.copy.folders.focused} onClick={() => { props.setSection("mail"); props.setFolder("focused"); props.onCloseComposer(); props.onCloseMobile(); }}>
-            <span className="tree-item-icon">•</span>
+          <button className={props.folder === "focused" ? "tree-item is-active" : "tree-item"} type="button" title={props.copy.folders.focused} aria-label={props.copy.folders.focused} onClick={() => selectFolder("focused")}>
+            <ClientIcon className="tree-item-icon" name="inbox" />
             <span className="sidebar-label">{props.copy.folders.focused}</span>
           </button>
-          <button className="tree-item" type="button" title={props.copy.folders.inbox} aria-label={props.copy.folders.inbox} onClick={() => { props.setSection("mail"); props.setFolder("inbox"); props.onCloseComposer(); props.onCloseMobile(); }}>
-            <span className="tree-item-icon">•</span>
+          <button className={props.folder === "inbox" ? "tree-item is-active" : "tree-item"} type="button" title={props.copy.folders.inbox} aria-label={props.copy.folders.inbox} onClick={() => selectFolder("inbox")}>
+            <ClientIcon className="tree-item-icon" name="inbox" />
             <span className="sidebar-label">{props.copy.folders.inbox}</span>
             <span className="sidebar-meta">{props.counts.inbox}</span>
           </button>
         </div>
 
-        <div className="mailbox-header">
-          <strong className="sidebar-label">{props.mailboxOwner}</strong>
-        </div>
+        <div className="mailbox-header"><strong className="sidebar-label">{props.mailboxOwner}</strong></div>
 
         <div className="folder-panel is-tree">
           {mailFolders.map((item, index) => {
@@ -125,16 +150,9 @@ export function Sidebar(props: {
                 type="button"
                 title={item.label}
                 aria-label={item.label}
-                onClick={() => {
-                  if (item.id) {
-                    props.setSection("mail");
-                    props.setFolder(item.id);
-                    props.onCloseComposer();
-                    props.onCloseMobile();
-                  }
-                }}
+                onClick={() => item.id && selectFolder(item.id)}
               >
-                <span className="tree-item-icon">{item.id === "inbox" ? "•" : item.id === "drafts" ? "◦" : item.id === "sent" ? "↗" : item.id === "trash" ? "⌫" : item.id === "junk" ? "!" : item.id === "outbox" ? "↥" : "▤"}</span>
+                <ClientIcon className="tree-item-icon" name={folderIcon(item.id)} />
                 <span className="sidebar-label">{item.label}</span>
                 <span className="sidebar-meta">{item.count ?? ""}</span>
               </button>
@@ -143,32 +161,13 @@ export function Sidebar(props: {
           {customMailboxes.map((mailbox) => {
             const id = `mailbox:${mailbox.id}` as Folder;
             return (
-              <button
-                key={id}
-                className={props.folder === id ? "tree-item is-active" : "tree-item"}
-                type="button"
-                title={mailbox.name}
-                aria-label={mailbox.name}
-                onClick={() => {
-                  props.setSection("mail");
-                  props.setFolder(id);
-                  props.onCloseComposer();
-                  props.onCloseMobile();
-                }}
-              >
-                <span className="tree-item-icon">▤</span>
+              <button key={id} className={props.folder === id ? "tree-item is-active" : "tree-item"} type="button" title={mailbox.name} aria-label={mailbox.name} onClick={() => selectFolder(id)}>
+                <ClientIcon className="tree-item-icon" name="folder" />
                 <span className="sidebar-label">{mailbox.name}</span>
                 <span className="sidebar-meta">{mailbox.totalEmails}</span>
               </button>
             );
           })}
-        </div>
-
-        <div className="rail-summary">
-          <p className="panel-title">{props.copy.workspaceSummary}</p>
-          <div className="summary-card"><strong className="sidebar-label">{props.copy.summaryInbox}</strong><span className="sidebar-label">{props.copy.summaryUnread.replace("{count}", String(props.unreadCount))}</span></div>
-          <div className="summary-card"><strong className="sidebar-label">{props.copy.summaryAgenda}</strong><span className="sidebar-label">{props.copy.summaryAgendaCount.replace("{count}", String(props.eventCount))}</span></div>
-          <div className="summary-card"><strong className="sidebar-label">{props.copy.summaryDrafts}</strong><span className="sidebar-label">{props.copy.summaryDraftsCount.replace("{count}", String(props.draftCount))}</span></div>
         </div>
 
         <button className="ghost-button sidebar-mobile-close" type="button" onClick={props.onCloseMobile}>{props.copy.editorActions.cancel}</button>

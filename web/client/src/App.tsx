@@ -7,6 +7,7 @@ import { EventEditor } from "./components/EventEditor";
 import { ContactEditor } from "./components/ContactEditor";
 import { CanonicalItemEditor } from "./components/CanonicalItemEditor";
 import { SettingsWorkspace } from "./components/SettingsWorkspace";
+import { ClientIcon } from "./components/ClientIcon";
 import { useClientWorkspace } from "./useClientWorkspace";
 import type { ClientIdentity } from "./client-types";
 import { Button, Card, Input, Select } from "../../ui/src/components/primitives";
@@ -241,25 +242,6 @@ export function App() {
 
   const isMailWorkspace = workspace.section === "mail";
   const showMailPane = isMailWorkspace;
-  const visibleCount = workspace.section === "mail"
-    ? workspace.filtered.length
-    : workspace.section === "calendar"
-      ? workspace.filteredEvents.length
-      : workspace.section === "contacts"
-        ? workspace.filteredContacts.length
-        : workspace.section === "tasks"
-          ? workspace.filteredTasks.length
-          : workspace.section === "notes"
-            ? workspace.filteredNotes.length
-            : workspace.section === "journal"
-              ? workspace.filteredJournalEntries.length
-              : workspace.section === "reminders"
-                ? workspace.filteredReminders.length
-                : (workspace.collaboration?.outgoingContacts.length ?? 0)
-                  + (workspace.collaboration?.outgoingCalendars.length ?? 0)
-                  + (workspace.collaboration?.outgoingTaskLists.length ?? 0)
-                  + (workspace.mailboxDelegation?.outgoingMailboxes.length ?? 0)
-                  + (workspace.sieve?.scripts.length ?? 0);
   const attachmentCount = workspace.section === "mail"
     ? workspace.filtered.reduce((total, item) => total + item.attachments.length, 0)
     : 0;
@@ -271,10 +253,6 @@ export function App() {
       ? workspace.mailboxes.find((mailbox) => `mailbox:${mailbox.id}` === workspace.folder)?.name ?? copy.folders.inbox
       : copy.folders[workspace.folder as keyof typeof copy.folders]
     : copy.altViews[workspace.section];
-  const pushState = workspace.syncStatus.pushConnected
-    ? copy.syncStatus.connected
-    : copy.syncStatus.reconnecting;
-
   return (
     <main className="app-shell">
       <header className="app-header">
@@ -288,7 +266,7 @@ export function App() {
             aria-controls="client-sidebar"
             onClick={() => sidebarMobileOpen ? closeSidebarMobile(false) : setSidebarMobileOpen(true)}
           ><span className="menu-icon" aria-hidden="true" /></button>
-          <span className="header-app-icon" aria-hidden="true"><span className="app-grid-icon" /></span>
+          <span className="header-app-icon" aria-hidden="true"><ClientIcon name="mail" /></span>
           <div className="header-product">
             <strong>{copy.productTitle}</strong>
             <span>{copy.productSubtitle}</span>
@@ -299,6 +277,15 @@ export function App() {
           <input type="search" value={workspace.query} onChange={(event) => workspace.setQuery(event.target.value)} placeholder={copy.searchPlaceholder} aria-label={copy.searchPlaceholder} />
         </div>
         <div className="app-header-right">
+          <button
+            className="header-utility"
+            type="button"
+            title={copy.sections.settings}
+            aria-label={copy.sections.settings}
+            onClick={() => { workspace.setSection("settings"); workspace.closeComposer(); }}
+          >
+            <ClientIcon name="settings" />
+          </button>
           <div className="account-menu-shell" ref={accountMenuRef}>
             <button ref={accountMenuTriggerRef} className="account-menu-trigger" type="button" aria-haspopup="dialog" aria-expanded={accountMenuOpen} aria-controls="account-menu-popover" aria-label={copy.accountMenuLabel} onClick={() => setAccountMenuOpen((value) => !value)}>
               <span className="header-account">{copy.signedInAs.replace("{email}", identity.email)}</span>
@@ -338,6 +325,18 @@ export function App() {
         />
 
         <section className="workspace">
+          <nav className="workspace-menu" aria-label={copy.sectionLabel}>
+            {(["mail", "calendar", "contacts", "tasks", "notes", "journal", "reminders"] as const).map((section) => (
+              <button
+                key={section}
+                className={workspace.section === section ? "workspace-menu-item is-active" : "workspace-menu-item"}
+                type="button"
+                onClick={() => { workspace.setSection(section); workspace.closeComposer(); setMobileDetailOpen(false); }}
+              >
+                {copy.sections[section]}
+              </button>
+            ))}
+          </nav>
           <div className="workspace-toolbar">
             <div className="workspace-toolbar-actions">
               <Button className="workspace-compose-button" variant="primary" type="button" onClick={() => { workspace.openComposer("new"); setMobileDetailOpen(true); }}>{copy.compose}</Button>
@@ -362,16 +361,6 @@ export function App() {
               </label>
             </div>
           </div>
-
-          <section className="workspace-heading-panel">
-            <div>
-              <h1>{workspaceTitle}</h1>
-            </div>
-            <div className="workspace-hero-meta">
-              <span className="workspace-stat-pill">{copy.messageCount.replace("{count}", String(visibleCount))}</span>
-              <span className="workspace-stat-pill is-soft">{`${copy.syncStatus.push}: ${pushState}`}</span>
-            </div>
-          </section>
 
           {workspace.notice ? <div className="notice-banner">{workspace.notice}</div> : null}
 

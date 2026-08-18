@@ -375,6 +375,201 @@ body { background: var(--outlook-canvas); }
 .settings-shell { padding: 20px; }
 .settings-card { padding: 16px; border: 1px solid var(--outlook-line); border-radius: 4px; }
 
+/* Outlook-like frame: app launcher, folders, item list, then a reading surface. */
+.app-header {
+  grid-template-columns: 292px minmax(280px, 625px) minmax(180px, 1fr);
+}
+
+.header-app-icon svg,
+.header-utility svg {
+  width: 18px;
+  height: 18px;
+}
+
+.header-utility {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  color: #fff;
+  background: transparent;
+}
+
+.header-utility:hover { background: rgba(255, 255, 255, 0.14); }
+
+.shell-row {
+  --shell-sidebar-min: 292px;
+  --shell-sidebar-max: 292px;
+}
+
+.shell-row.is-sidebar-collapsed {
+  --shell-sidebar-min: 48px;
+  --shell-sidebar-max: 48px;
+}
+
+.rail {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 244px);
+  overflow: hidden;
+}
+
+.rail.is-collapsed { grid-template-columns: 48px 0; }
+
+.app-rail {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border-right: 1px solid var(--outlook-line);
+  background: #f1f3f5;
+}
+
+.app-rail-brand {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  margin: 8px 0 12px;
+  border-radius: 3px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  background: var(--outlook-blue);
+}
+
+.app-rail-links {
+  width: 100%;
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+}
+
+.app-rail-button {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  color: #4f5f6e;
+  background: transparent;
+}
+
+.app-rail-button svg { width: 19px; height: 19px; }
+.app-rail-button:hover { color: var(--outlook-blue-dark); background: #e3edf8; }
+.app-rail-button.is-active { color: var(--outlook-blue-dark); background: #d4e9fb; }
+
+.folder-rail {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 12px 8px;
+  overflow: auto;
+}
+
+.rail.is-collapsed .folder-rail { visibility: hidden; }
+
+.sidebar-toolbar { align-items: center; padding: 0 4px; }
+.brand-lockup { min-width: 0; }
+.brand-copy { min-width: 0; }
+.brand-lockup h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.collapse-chevron {
+  width: 8px;
+  height: 8px;
+  display: block;
+  border-top: 1.5px solid currentColor;
+  border-right: 1.5px solid currentColor;
+  transform: rotate(-135deg);
+}
+
+.compose-button {
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.compose-button svg { width: 17px; height: 17px; }
+.tree-item-icon { flex: 0 0 auto; }
+
+.workspace {
+  min-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-menu {
+  min-height: 36px;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--outlook-line);
+  background: #fff;
+  overflow-x: auto;
+}
+
+.workspace-menu-item {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: #555;
+  font-size: 13px;
+  background: transparent;
+  white-space: nowrap;
+}
+
+.workspace-menu-item:hover { color: var(--outlook-ink); background: #f4f6f8; }
+.workspace-menu-item.is-active { color: var(--outlook-ink); border-bottom-color: var(--outlook-blue); font-weight: 600; }
+
+.workspace-toolbar {
+  min-height: 44px;
+  padding: 6px 14px;
+}
+
+.workspace-compose-button { min-height: 30px; padding: 0 10px; }
+.workspace-toolbar .workspace-compose-button::before { content: "+"; font-size: 17px; font-weight: 300; line-height: 1; }
+
+.content-grid,
+.content-grid.has-detail {
+  flex: 1 1 auto;
+  grid-template-columns: minmax(360px, 430px) minmax(0, 1fr);
+}
+
+.list-pane { display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.pane-header { display: flex; justify-content: space-between; align-items: center; }
+
+.message-list,
+.agenda-list,
+.contact-list { min-height: 0; overflow: auto; }
+
+.mail-list-card { min-height: 62px; padding: 8px 14px; }
+.mail-list-avatar { display: none; }
+.mail-list-card-top { grid-template-columns: minmax(0, 1fr) auto; }
+.mail-list-card-top .mail-list-heading { grid-column: 1; }
+.mail-list-address { display: none; }
+.mail-list-body { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 12px; align-items: center; }
+.message-inline-meta { display: none; }
+
+.reading-pane-card { padding: 20px 28px 36px; }
+
+@media (max-width: 900px) {
+  .app-header { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .rail, .rail.is-collapsed {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 244px);
+    width: 292px;
+  }
+  .rail.is-collapsed .folder-rail { visibility: visible; }
+  .workspace-menu { padding-inline: 8px; }
+  .workspace-menu-item { padding-inline: 8px; }
+}
+
 @media (max-width: 900px) {
   .app-header { grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; padding: 0 8px; }
   .header-product span, .header-account { display: none; }
