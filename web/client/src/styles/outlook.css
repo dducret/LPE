@@ -304,6 +304,7 @@ body { background: var(--outlook-canvas); }
 .content-grid.has-detail.has-resizable-list {
   grid-template-columns: minmax(330px, var(--message-list-width, 430px)) 8px minmax(0, 1fr);
 }
+.content-grid.has-resizable-list .list-pane { width: auto; }
 
 .list-pane-resizer {
   position: relative;
