@@ -894,6 +894,10 @@ body { background: var(--outlook-canvas); }
 .contacts-navigation-list button.is-active { color: #0f5c9d; background: #e3effa; font-weight: 600; }
 .contacts-navigation-list svg { width: 16px; height: 16px; }
 
+.section-navigation { display: grid; align-content: start; gap: 5px; padding: 12px 8px; }
+.section-navigation strong { font-size: 13px; }
+.section-navigation p { margin: 0; color: var(--outlook-muted); font-size: 12px; line-height: 1.45; }
+
 .contacts-table-head, .contact-table-row { grid-template-columns: minmax(240px, 34%) minmax(280px, 1fr); }
 .contact-table-info { display: grid; gap: 2px; color: #1268b3; }
 .contact-table-info small { color: #1268b3; font-size: 11px; }

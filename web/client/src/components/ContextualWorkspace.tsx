@@ -52,6 +52,23 @@ export function ContactsRibbon(props: {
   </div>;
 }
 
+export function ObjectRibbon(props: {
+  copy: ClientCopy;
+  label: string;
+  newLabel?: string;
+  selected: boolean;
+  onNew?: () => void;
+  onDelete?: () => void;
+  onRefresh: () => void;
+}) {
+  return <div className="contextual-ribbon" aria-label={props.label}>
+    {props.onNew && props.newLabel ? <div className="ribbon-group"><button className="ribbon-command is-primary" type="button" onClick={props.onNew}>{props.newLabel}</button></div> : null}
+    {props.onDelete ? <div className="ribbon-group"><button className="ribbon-command" type="button" disabled={!props.selected} onClick={props.onDelete}>{props.copy.objectEditor.delete}</button></div> : null}
+    <div className="ribbon-group"><button className="ribbon-command" type="button" onClick={() => window.print()}>{props.copy.ribbonSecondary[3]}</button></div>
+    <div className="ribbon-group"><button className="ribbon-command" type="button" onClick={props.onRefresh}>{props.copy.topActions.sync}</button></div>
+  </div>;
+}
+
 function startOfWeek(value: Date) {
   const result = new Date(value);
   const day = result.getDay();

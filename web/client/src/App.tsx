@@ -8,7 +8,7 @@ import { ContactEditor } from "./components/ContactEditor";
 import { CanonicalItemEditor } from "./components/CanonicalItemEditor";
 import { SettingsWorkspace } from "./components/SettingsWorkspace";
 import { ClientIcon } from "./components/ClientIcon";
-import { CalendarWorkspace, ContactsRibbon, ContactsWorkspace, MailRibbon, TasksWorkspace } from "./components/ContextualWorkspace";
+import { CalendarWorkspace, ContactsRibbon, ContactsWorkspace, MailRibbon, ObjectRibbon, TasksWorkspace } from "./components/ContextualWorkspace";
 import { useClientWorkspace } from "./useClientWorkspace";
 import type { ClientIdentity } from "./client-types";
 import { Button, Card, Input, Select } from "../../ui/src/components/primitives";
@@ -54,6 +54,7 @@ export function App() {
   const [contactEditorOpen, setContactEditorOpen] = React.useState(false);
   const [taskEditorOpen, setTaskEditorOpen] = React.useState(false);
   const [calendarDate, setCalendarDate] = React.useState(() => new Date());
+  const [selectedTaskListId, setSelectedTaskListId] = React.useState("");
   const [isNarrowScreen, setIsNarrowScreen] = React.useState(() => window.matchMedia("(max-width: 900px)").matches);
   const accountMenuRef = React.useRef<HTMLDivElement | null>(null);
   const accountMenuTriggerRef = React.useRef<HTMLButtonElement | null>(null);
@@ -253,6 +254,9 @@ export function App() {
 
   const isMailWorkspace = workspace.section === "mail";
   const showMailPane = isMailWorkspace;
+  const visibleTasks = selectedTaskListId
+    ? workspace.filteredTasks.filter((task) => task.taskListId === selectedTaskListId)
+    : workspace.filteredTasks;
   const workspaceTitle = workspace.section === "mail"
     ? workspace.folder.startsWith("mailbox:")
       ? workspace.mailboxes.find((mailbox) => `mailbox:${mailbox.id}` === workspace.folder)?.name ?? copy.folders.inbox
@@ -335,6 +339,9 @@ export function App() {
           contactBooks={workspace.contactBooks}
           contactBook={workspace.contactBook}
           setContactBook={workspace.setContactBook}
+          taskLists={workspace.taskLists}
+          selectedTaskListId={selectedTaskListId}
+          setSelectedTaskListId={setSelectedTaskListId}
         />
 
         <section className="workspace">
@@ -366,11 +373,44 @@ export function App() {
             onEdit={() => setContactEditorOpen(true)}
             onDelete={() => void workspace.deleteContact()}
             onRefresh={() => void workspace.refreshWorkspace()}
+          /> : workspace.section === "tasks" ? <ObjectRibbon
+            copy={copy}
+            label={copy.sections.tasks}
+            newLabel={copy.objectEditor.tasks.new}
+            selected={Boolean(workspace.currentTask)}
+            onNew={() => { workspace.resetTaskForm(); setTaskEditorOpen(true); }}
+            onDelete={() => void workspace.deleteTask()}
+            onRefresh={() => void workspace.refreshWorkspace()}
+          /> : workspace.section === "notes" ? <ObjectRibbon
+            copy={copy}
+            label={copy.sections.notes}
+            newLabel={copy.objectEditor.notes.new}
+            selected={Boolean(workspace.currentNote)}
+            onNew={workspace.resetNoteForm}
+            onDelete={() => void workspace.deleteNote()}
+            onRefresh={() => void workspace.refreshWorkspace()}
+          /> : workspace.section === "journal" ? <ObjectRibbon
+            copy={copy}
+            label={copy.sections.journal}
+            newLabel={copy.objectEditor.journal.new}
+            selected={Boolean(workspace.currentJournalEntry)}
+            onNew={workspace.resetJournalEntryForm}
+            onDelete={() => void workspace.deleteJournalEntry()}
+            onRefresh={() => void workspace.refreshWorkspace()}
+          /> : workspace.section === "reminders" ? <ObjectRibbon
+            copy={copy}
+            label={copy.sections.reminders}
+            selected={Boolean(workspace.currentReminder)}
+            onRefresh={() => void workspace.refreshWorkspace()}
+          /> : workspace.section === "settings" ? <ObjectRibbon
+            copy={copy}
+            label={copy.sections.settings}
+            selected={false}
+            onRefresh={() => void workspace.refreshWorkspace()}
           /> : (
           <div className="workspace-toolbar">
             <div className="workspace-toolbar-actions">
               {workspace.section === "calendar" ? <Button className="workspace-compose-button" variant="primary" type="button" onClick={() => { workspace.resetEventForm(); setCalendarEditorOpen(true); }}>{copy.calendarActions.new}</Button> : null}
-              {workspace.section === "tasks" ? <Button className="workspace-compose-button" variant="primary" type="button" onClick={() => { workspace.resetTaskForm(); setTaskEditorOpen(true); }}>{copy.objectEditor.tasks.new}</Button> : null}
             </div>
             <div className="workspace-toolbar-summary">
               <Button variant="ghost" type="button" onClick={() => void workspace.refreshWorkspace()}>{copy.topActions.sync}</Button>
@@ -441,7 +481,7 @@ export function App() {
             </> : null}
 
             {workspace.section === "tasks" ? <>
-              <TasksWorkspace copy={copy} taskLists={workspace.taskLists} tasks={workspace.filteredTasks} selectedId={workspace.taskId} onSelect={(id) => { workspace.setTaskId(id); setTaskEditorOpen(true); }} />
+              <TasksWorkspace copy={copy} taskLists={workspace.taskLists} tasks={visibleTasks} selectedId={workspace.taskId} onSelect={(id) => { workspace.setTaskId(id); setTaskEditorOpen(true); }} />
               {taskEditorOpen ? <aside className="workspace-edit-drawer"><Button className="workspace-edit-close" variant="ghost" size="sm" type="button" onClick={() => setTaskEditorOpen(false)}>{copy.editorActions.cancel}</Button><CanonicalItemEditor copy={copy} section="tasks" taskLists={workspace.taskLists} currentTask={workspace.currentTask} taskForm={workspace.taskForm} setTaskForm={workspace.setTaskForm} currentNote={workspace.currentNote} noteForm={workspace.noteForm} setNoteForm={workspace.setNoteForm} currentJournalEntry={workspace.currentJournalEntry} journalEntryForm={workspace.journalEntryForm} setJournalEntryForm={workspace.setJournalEntryForm} currentReminder={workspace.currentReminder} onNewTask={workspace.resetTaskForm} onSaveTask={() => void workspace.saveTask()} onDeleteTask={() => void workspace.deleteTask()} onNewNote={workspace.resetNoteForm} onSaveNote={() => void workspace.saveNote()} onDeleteNote={() => void workspace.deleteNote()} onNewJournalEntry={workspace.resetJournalEntryForm} onSaveJournalEntry={() => void workspace.saveJournalEntry()} onDeleteJournalEntry={() => void workspace.deleteJournalEntry()} /></aside> : null}
             </> : null}
 

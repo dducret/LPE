@@ -1,6 +1,6 @@
 import React from "react";
 import type { ClientCopy } from "../i18n";
-import type { ClientMailbox, CollaborationCollection, Folder, Section, SystemFolder } from "../client-types";
+import type { ClientMailbox, ClientTaskList, CollaborationCollection, Folder, Section, SystemFolder } from "../client-types";
 import { ClientIcon, type ClientIconName } from "./ClientIcon";
 
 const sectionIcons: Record<Section, ClientIconName> = {
@@ -80,6 +80,20 @@ function ContactsNavigation(props: {
   </div>;
 }
 
+function TasksNavigation(props: { copy: ClientCopy; lists: ClientTaskList[]; selectedId: string; setSelectedId: (id: string) => void }) {
+  return <div className="contacts-navigation">
+    <strong>{props.copy.sections.tasks}</strong>
+    <div className="contacts-navigation-list">
+      <button className={!props.selectedId ? "is-active" : ""} type="button" onClick={() => props.setSelectedId("")}><ClientIcon name="tasks" /><span>{props.copy.sections.tasks}</span></button>
+      {props.lists.map((list) => <button className={props.selectedId === list.id ? "is-active" : ""} key={list.id} type="button" onClick={() => props.setSelectedId(list.id)}><ClientIcon name="tasks" /><span>{list.name}</span></button>)}
+    </div>
+  </div>;
+}
+
+function SectionNavigation(props: { copy: ClientCopy; section: Exclude<Section, "mail" | "calendar" | "contacts" | "tasks"> }) {
+  return <div className="section-navigation"><strong>{props.copy.sections[props.section]}</strong><p>{props.copy.altViews[props.section]}</p></div>;
+}
+
 export function Sidebar(props: {
   copy: ClientCopy;
   section: Section;
@@ -107,6 +121,9 @@ export function Sidebar(props: {
   contactBooks: CollaborationCollection[];
   contactBook: string;
   setContactBook: (id: string) => void;
+  taskLists: ClientTaskList[];
+  selectedTaskListId: string;
+  setSelectedTaskListId: (id: string) => void;
 }) {
   const mailFolders: Array<{ id: Folder | null; label: string; count?: number }> = [
     { id: "inbox", label: props.copy.folders.inbox, count: props.counts.inbox },
@@ -190,7 +207,7 @@ export function Sidebar(props: {
           <span className="sidebar-label">{props.copy.compose}</span>
         </button> : null}
 
-        {props.section === "calendar" ? <CalendarNavigation copy={props.copy} date={props.calendarDate} onSelectDate={props.onSelectCalendarDate} collections={props.calendarCollections} collectionId={props.calendarCollectionId} setCollectionId={props.setCalendarCollectionId} /> : props.section === "contacts" ? <ContactsNavigation copy={props.copy} collections={props.contactBooks} selectedId={props.contactBook} setSelectedId={props.setContactBook} /> : <>
+        {props.section === "calendar" ? <CalendarNavigation copy={props.copy} date={props.calendarDate} onSelectDate={props.onSelectCalendarDate} collections={props.calendarCollections} collectionId={props.calendarCollectionId} setCollectionId={props.setCalendarCollectionId} /> : props.section === "contacts" ? <ContactsNavigation copy={props.copy} collections={props.contactBooks} selectedId={props.contactBook} setSelectedId={props.setContactBook} /> : props.section === "tasks" ? <TasksNavigation copy={props.copy} lists={props.taskLists} selectedId={props.selectedTaskListId} setSelectedId={props.setSelectedTaskListId} /> : props.section === "mail" ? <>
 
         <div className="folder-panel is-tight">
           <p className="panel-title">{props.copy.favoritesLabel}</p>
@@ -237,7 +254,7 @@ export function Sidebar(props: {
           })}
         </div>
 
-        </>}
+        </> : <SectionNavigation copy={props.copy} section={props.section} />}
 
         <button className="ghost-button sidebar-mobile-close" type="button" onClick={props.onCloseMobile}>{props.copy.editorActions.cancel}</button>
       </div>
