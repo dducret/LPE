@@ -63,6 +63,23 @@ function CalendarNavigation(props: {
   </div>;
 }
 
+function ContactsNavigation(props: {
+  copy: ClientCopy;
+  collections: CollaborationCollection[];
+  selectedId: string;
+  setSelectedId: (id: string) => void;
+}) {
+  return <div className="contacts-navigation">
+    <strong>{props.copy.sections.contacts}</strong>
+    <div className="contacts-navigation-list">
+      {props.collections.map((collection) => <button className={props.selectedId === collection.id ? "is-active" : ""} key={collection.id} type="button" onClick={() => props.setSelectedId(collection.id)}>
+        <ClientIcon name="contacts" />
+        <span>{collection.displayName}</span>
+      </button>)}
+    </div>
+  </div>;
+}
+
 export function Sidebar(props: {
   copy: ClientCopy;
   section: Section;
@@ -87,6 +104,9 @@ export function Sidebar(props: {
   calendarCollections: CollaborationCollection[];
   calendarCollectionId: string;
   setCalendarCollectionId: (id: string) => void;
+  contactBooks: CollaborationCollection[];
+  contactBook: string;
+  setContactBook: (id: string) => void;
 }) {
   const mailFolders: Array<{ id: Folder | null; label: string; count?: number }> = [
     { id: "inbox", label: props.copy.folders.inbox, count: props.counts.inbox },
@@ -165,12 +185,12 @@ export function Sidebar(props: {
           </button>
         </div>
 
-        {props.section !== "calendar" ? <button className="compose-button" type="button" title={props.copy.compose} aria-label={props.copy.compose} onClick={() => { props.onCompose(); props.onCloseMobile(); }}>
+        {props.section === "mail" ? <button className="compose-button" type="button" title={props.copy.compose} aria-label={props.copy.compose} onClick={() => { props.onCompose(); props.onCloseMobile(); }}>
           <ClientIcon name="compose" />
           <span className="sidebar-label">{props.copy.compose}</span>
         </button> : null}
 
-        {props.section === "calendar" ? <CalendarNavigation copy={props.copy} date={props.calendarDate} onSelectDate={props.onSelectCalendarDate} collections={props.calendarCollections} collectionId={props.calendarCollectionId} setCollectionId={props.setCalendarCollectionId} /> : <>
+        {props.section === "calendar" ? <CalendarNavigation copy={props.copy} date={props.calendarDate} onSelectDate={props.onSelectCalendarDate} collections={props.calendarCollections} collectionId={props.calendarCollectionId} setCollectionId={props.setCalendarCollectionId} /> : props.section === "contacts" ? <ContactsNavigation copy={props.copy} collections={props.contactBooks} selectedId={props.contactBook} setSelectedId={props.setContactBook} /> : <>
 
         <div className="folder-panel is-tight">
           <p className="panel-title">{props.copy.favoritesLabel}</p>

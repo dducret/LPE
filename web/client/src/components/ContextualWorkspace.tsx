@@ -33,6 +33,25 @@ export function MailRibbon(props: {
   );
 }
 
+export function ContactsRibbon(props: {
+  copy: ClientCopy;
+  current: ContactItem | undefined;
+  onNew: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onRefresh: () => void;
+}) {
+  return <div className="contextual-ribbon" aria-label={props.copy.sections.contacts}>
+    <div className="ribbon-group"><button className="ribbon-command is-primary" type="button" onClick={props.onNew}>{props.copy.contactActions.new}</button></div>
+    <div className="ribbon-group">
+      <button className="ribbon-command" type="button" disabled={!props.current} onClick={props.onEdit}>{props.copy.contactActions.save}</button>
+      <button className="ribbon-command" type="button" disabled={!props.current} onClick={props.onDelete}>{props.copy.contactActions.delete}</button>
+    </div>
+    <div className="ribbon-group"><button className="ribbon-command" type="button" onClick={() => window.print()}>{props.copy.ribbonSecondary[3]}</button></div>
+    <div className="ribbon-group"><button className="ribbon-command" type="button" onClick={props.onRefresh}>{props.copy.topActions.sync}</button></div>
+  </div>;
+}
+
 function startOfWeek(value: Date) {
   const result = new Date(value);
   const day = result.getDay();
@@ -94,12 +113,11 @@ export function ContactsWorkspace(props: { copy: ClientCopy; contacts: ContactIt
   return (
     <section className="contacts-workspace" aria-label={props.copy.sections.contacts}>
       <header><strong>{props.copy.altViews.contacts}</strong><span>{props.copy.contactCount.replace("{count}", String(props.contacts.length))}</span></header>
-      <div className="contacts-table-head"><span>{props.copy.contactFields.name}</span><span>{props.copy.contactFields.email}</span><span>{props.copy.contactFields.phone}</span></div>
+      <div className="contacts-table-head"><span>{props.copy.contactFields.name}</span><span>{props.copy.contactFields.email}</span></div>
       <div className="contacts-table">
         {props.contacts.map((contact) => <button className={props.selectedId === contact.id ? "contact-table-row is-active" : "contact-table-row"} key={contact.id} type="button" onClick={() => props.onSelect(contact.id)}>
           <span className="contact-table-name"><span className="contact-initials">{contact.name.slice(0, 2).toUpperCase()}</span><span><strong>{contact.name}</strong><small>{contact.role || contact.team}</small></span></span>
-          <span>{contact.email || contact.team}</span>
-          <span>{contact.phone}</span>
+          <span className="contact-table-info"><span>{contact.email || contact.team}</span><small>{contact.phone}</small></span>
         </button>)}
         {props.contacts.length === 0 ? <p className="empty-state">{props.copy.noContacts}</p> : null}
       </div>

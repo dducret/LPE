@@ -8,7 +8,7 @@ import { ContactEditor } from "./components/ContactEditor";
 import { CanonicalItemEditor } from "./components/CanonicalItemEditor";
 import { SettingsWorkspace } from "./components/SettingsWorkspace";
 import { ClientIcon } from "./components/ClientIcon";
-import { CalendarWorkspace, ContactsWorkspace, MailRibbon, TasksWorkspace } from "./components/ContextualWorkspace";
+import { CalendarWorkspace, ContactsRibbon, ContactsWorkspace, MailRibbon, TasksWorkspace } from "./components/ContextualWorkspace";
 import { useClientWorkspace } from "./useClientWorkspace";
 import type { ClientIdentity } from "./client-types";
 import { Button, Card, Input, Select } from "../../ui/src/components/primitives";
@@ -332,6 +332,9 @@ export function App() {
           calendarCollections={workspace.calendarCollections}
           calendarCollectionId={workspace.calendarCollectionId}
           setCalendarCollectionId={workspace.setCalendarCollectionId}
+          contactBooks={workspace.contactBooks}
+          contactBook={workspace.contactBook}
+          setContactBook={workspace.setContactBook}
         />
 
         <section className="workspace">
@@ -356,11 +359,17 @@ export function App() {
             onForward={(message) => { workspace.openComposer("forward", message); setMobileDetailOpen(true); }}
             onToggleFlag={(message) => void workspace.toggleMessageFlag(message)}
             onRefresh={() => void workspace.refreshWorkspace()}
+          /> : workspace.section === "contacts" ? <ContactsRibbon
+            copy={copy}
+            current={workspace.currentContact}
+            onNew={() => { workspace.resetContactForm(); setContactEditorOpen(true); }}
+            onEdit={() => setContactEditorOpen(true)}
+            onDelete={() => void workspace.deleteContact()}
+            onRefresh={() => void workspace.refreshWorkspace()}
           /> : (
           <div className="workspace-toolbar">
             <div className="workspace-toolbar-actions">
               {workspace.section === "calendar" ? <Button className="workspace-compose-button" variant="primary" type="button" onClick={() => { workspace.resetEventForm(); setCalendarEditorOpen(true); }}>{copy.calendarActions.new}</Button> : null}
-              {workspace.section === "contacts" ? <Button className="workspace-compose-button" variant="primary" type="button" onClick={() => { workspace.resetContactForm(); setContactEditorOpen(true); }}>{copy.contactActions.new}</Button> : null}
               {workspace.section === "tasks" ? <Button className="workspace-compose-button" variant="primary" type="button" onClick={() => { workspace.resetTaskForm(); setTaskEditorOpen(true); }}>{copy.objectEditor.tasks.new}</Button> : null}
             </div>
             <div className="workspace-toolbar-summary">

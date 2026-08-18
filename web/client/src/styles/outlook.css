@@ -886,6 +886,18 @@ body { background: var(--outlook-canvas); }
 .calendar-week-heading { height: 52px; padding: 0 16px; border-bottom: 1px solid var(--outlook-line); }
 .calendar-week-grid { min-width: 860px; }
 
+.contacts-navigation { display: grid; align-content: start; gap: 10px; padding: 8px 4px; }
+.contacts-navigation > strong { padding: 0 4px; font-size: 13px; }
+.contacts-navigation-list { display: grid; gap: 3px; }
+.contacts-navigation-list button { min-height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border: 0; border-radius: 3px; color: var(--outlook-ink); font-size: 12px; text-align: left; background: transparent; }
+.contacts-navigation-list button:hover { background: #edf1f5; }
+.contacts-navigation-list button.is-active { color: #0f5c9d; background: #e3effa; font-weight: 600; }
+.contacts-navigation-list svg { width: 16px; height: 16px; }
+
+.contacts-table-head, .contact-table-row { grid-template-columns: minmax(240px, 34%) minmax(280px, 1fr); }
+.contact-table-info { display: grid; gap: 2px; color: #1268b3; }
+.contact-table-info small { color: #1268b3; font-size: 11px; }
+
 @media (max-width: 900px) {
   .calendar-workspace { min-width: 700px; }
 }
