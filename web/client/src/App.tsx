@@ -271,10 +271,6 @@ export function App() {
       ? workspace.mailboxes.find((mailbox) => `mailbox:${mailbox.id}` === workspace.folder)?.name ?? copy.folders.inbox
       : copy.folders[workspace.folder as keyof typeof copy.folders]
     : copy.altViews[workspace.section];
-  const syncCounts = workspace.syncStatus.counts;
-  const lastRefreshed = workspace.syncStatus.lastRefreshedAt
-    ? new Date(workspace.syncStatus.lastRefreshedAt).toLocaleString(locale)
-    : copy.syncStatus.notLoaded;
   const pushState = workspace.syncStatus.pushConnected
     ? copy.syncStatus.connected
     : copy.syncStatus.reconnecting;
@@ -291,15 +287,15 @@ export function App() {
             aria-expanded={sidebarMobileOpen}
             aria-controls="client-sidebar"
             onClick={() => sidebarMobileOpen ? closeSidebarMobile(false) : setSidebarMobileOpen(true)}
-          >☰</button>
-          <span className="header-app-icon">▦</span>
+          ><span className="menu-icon" aria-hidden="true" /></button>
+          <span className="header-app-icon" aria-hidden="true"><span className="app-grid-icon" /></span>
           <div className="header-product">
             <strong>{copy.productTitle}</strong>
             <span>{copy.productSubtitle}</span>
           </div>
         </div>
         <div className="search-shell is-header">
-          <span className="search-icon">⌕</span>
+          <span className="search-icon" aria-hidden="true"><span /></span>
           <input type="search" value={workspace.query} onChange={(event) => workspace.setQuery(event.target.value)} placeholder={copy.searchPlaceholder} aria-label={copy.searchPlaceholder} />
         </div>
         <div className="app-header-right">
@@ -369,34 +365,15 @@ export function App() {
 
           <section className="workspace-heading-panel">
             <div>
-              <p className="workspace-hero-eyebrow">{copy.sections[workspace.section]}</p>
               <h1>{workspaceTitle}</h1>
             </div>
             <div className="workspace-hero-meta">
               <span className="workspace-stat-pill">{copy.messageCount.replace("{count}", String(visibleCount))}</span>
-              <span className="workspace-stat-pill">{`${copy.syncStatus.push}: ${pushState}`}</span>
-              <span className="workspace-stat-pill is-soft">{copy.productSubtitle}</span>
+              <span className="workspace-stat-pill is-soft">{`${copy.syncStatus.push}: ${pushState}`}</span>
             </div>
           </section>
 
           {workspace.notice ? <div className="notice-banner">{workspace.notice}</div> : null}
-
-          <section className="sync-status-strip" aria-label={copy.syncStatus.title}>
-            <div>
-              <p className="workspace-hero-eyebrow">{copy.syncStatus.title}</p>
-              <strong>{copy.syncStatus.lastRefreshed.replace("{time}", lastRefreshed)}</strong>
-            </div>
-            <div className="sync-status-counts">
-              <span>{copy.syncStatus.mail.replace("{count}", String(syncCounts.mail))}</span>
-              <span>{copy.syncStatus.calendar.replace("{count}", String(syncCounts.calendar))}</span>
-              <span>{copy.syncStatus.contacts.replace("{count}", String(syncCounts.contacts))}</span>
-              <span>{copy.syncStatus.tasks.replace("{count}", String(syncCounts.tasks))}</span>
-              <span>{copy.syncStatus.notes.replace("{count}", String(syncCounts.notes))}</span>
-              <span>{copy.syncStatus.journal.replace("{count}", String(syncCounts.journal))}</span>
-              <span>{copy.syncStatus.reminders.replace("{count}", String(syncCounts.reminders))}</span>
-              <span>{copy.syncStatus.delegation.replace("{count}", String(syncCounts.delegation))}</span>
-            </div>
-          </section>
 
           <div className={`${showMailPane || workspace.section !== "mail" ? "content-grid has-detail" : "content-grid"}${mobileDetailOpen ? " is-mobile-detail-open" : ""}`}>
             {workspace.section !== "settings" ? (

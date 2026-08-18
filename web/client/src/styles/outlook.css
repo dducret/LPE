@@ -1,663 +1,407 @@
-/* Outlook-style client layer, using the shared web theme tokens. */
+/* Mail workspace: a compact, three-pane client inspired by familiar Outlook web patterns. */
 
 .app-shell {
-  --outlook-blue: var(--lpe-primary);
-  --outlook-blue-strong: var(--lpe-primary-strong);
-  --admin-bg: var(--lpe-bg);
-  --admin-top: var(--lpe-surface-soft);
-  --admin-bottom: var(--lpe-bg-deep);
-  --admin-panel: var(--lpe-surface);
-  --admin-panel-strong: var(--lpe-surface-strong);
-  --admin-panel-soft: var(--lpe-surface-soft);
-  --admin-line: var(--lpe-border);
-  --admin-line-strong: var(--lpe-border-strong);
-  --admin-dark: var(--lpe-nav);
-  --admin-dark-soft: var(--lpe-nav-soft);
-  --admin-shadow: var(--lpe-shadow-panel);
-  --admin-shadow-strong: var(--lpe-shadow-soft);
-  --admin-radius-xs: 8px;
-  --admin-radius-sm: var(--lpe-radius-sm);
-  --admin-radius-md: var(--lpe-radius-md);
-  --admin-radius-lg: var(--lpe-radius-lg);
+  --outlook-blue: #0f6cbd;
+  --outlook-blue-dark: #005a9e;
+  --outlook-canvas: #f5f6f8;
+  --outlook-line: #e0e4e8;
+  --outlook-ink: #242424;
+  --outlook-muted: #616161;
+  background: var(--outlook-canvas);
+  color: var(--outlook-ink);
 }
 
-body {
-  background: var(--lpe-bg);
-}
+body { background: var(--outlook-canvas); }
 
-.app-shell {
-  background: transparent;
+.app-shell button, .app-shell input, .app-shell select, .app-shell textarea { border-radius: 4px; }
+
+.app-shell button:focus-visible, .app-shell input:focus-visible, .app-shell select:focus-visible, .app-shell textarea:focus-visible {
+  outline: 2px solid #005fb8;
+  outline-offset: 2px;
 }
 
 .app-header {
-  min-height: 58px;
-  grid-template-columns: minmax(220px, 280px) minmax(280px, 1fr) auto;
-  gap: 14px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--admin-line);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(248, 251, 254, 0.78)),
-    var(--admin-panel-strong);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 10px 24px rgba(17, 27, 39, 0.045);
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: 252px minmax(280px, 680px) minmax(180px, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  border: 0;
+  background: var(--outlook-blue);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
 }
 
-.header-app-icon,
-.header-action {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--admin-radius-xs);
-  border-color: var(--admin-line);
-  background: var(--admin-panel-strong);
-  color: var(--outlook-blue-strong);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86);
+.app-header-left, .app-header-right { gap: 10px; }
+
+.header-app-icon, .header-action {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 3px;
+  color: #fff;
+  background: transparent;
+  box-shadow: none;
 }
 
-.header-product strong {
-  font-size: 0.96rem;
-  line-height: 1.3;
+.header-action:hover, .header-app-icon:hover { background: rgba(255, 255, 255, 0.14); transform: none; }
+
+.menu-icon {
+  width: 16px;
+  height: 12px;
+  display: block;
+  border-top: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  position: relative;
 }
 
-.header-product span,
-.header-account {
-  font-size: 0.8rem;
+.menu-icon::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  left: 0;
+  top: 4px;
+  border-top: 1.5px solid currentColor;
 }
 
-.search-shell {
-  min-height: 40px;
-  padding: 0 13px;
-  border-radius: var(--admin-radius-sm);
-  border-color: rgba(37, 100, 207, 0.18);
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.86),
-    0 8px 18px rgba(17, 27, 39, 0.045);
+.app-grid-icon {
+  width: 15px;
+  height: 15px;
+  display: block;
+  background-image: radial-gradient(circle, currentColor 1.5px, transparent 1.6px);
+  background-size: 6px 6px;
 }
 
-.search-shell.is-header:focus-within {
-  border-color: rgba(37, 100, 207, 0.44);
-  box-shadow:
-    0 0 0 4px rgba(37, 100, 207, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 12px 26px rgba(17, 27, 39, 0.08);
+.header-product {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  color: #fff;
 }
+
+.header-product strong { color: inherit; font-size: 15px; font-weight: 600; }
+.header-product span { color: rgba(255, 255, 255, 0.78); font-size: 12px; }
+
+.search-shell, .search-shell.is-header {
+  min-height: 32px;
+  max-width: 680px;
+  gap: 8px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: none;
+}
+
+.search-shell.is-header:focus-within { color: var(--outlook-ink); background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2); }
+
+.search-icon {
+  width: 15px;
+  height: 15px;
+  display: inline-block;
+  border: 1.8px solid currentColor;
+  border-radius: 50%;
+  position: relative;
+  opacity: 0.9;
+}
+
+.search-icon::after {
+  content: "";
+  position: absolute;
+  width: 6px;
+  height: 1.8px;
+  right: -5px;
+  bottom: -2px;
+  border-radius: 2px;
+  background: currentColor;
+  transform: rotate(45deg);
+}
+
+.search-shell input { min-height: 30px; padding: 0; border: 0; color: inherit; background: transparent; box-shadow: none; }
+.search-shell input::placeholder { color: rgba(255, 255, 255, 0.86); }
+.search-shell input:focus { box-shadow: none; }
+.search-shell:focus-within input::placeholder { color: #707070; }
+
+.app-header-right { justify-content: flex-end; }
 
 .account-menu-trigger {
-  min-height: 38px;
-  border-radius: var(--admin-radius-sm);
-  border-color: var(--admin-line);
-  background: rgba(255, 255, 255, 0.88);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.86),
-    0 8px 18px rgba(17, 27, 39, 0.045);
+  min-height: 32px;
+  padding: 0 9px;
+  border: 0;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: none;
 }
 
+.account-menu-trigger:hover { background: rgba(255, 255, 255, 0.2); }
+.header-account { max-width: 220px; font-size: 12px; }
+
 .account-menu-popover {
-  border-radius: var(--admin-radius-md);
-  border-color: var(--admin-line);
-  background: var(--admin-panel-strong);
-  box-shadow: var(--admin-shadow-strong);
+  top: calc(100% + 8px);
+  min-width: 248px;
+  padding: 14px;
+  border: 1px solid #d1d1d1;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
 }
 
 .shell-row {
-  --shell-sidebar-min: 20rem;
-  --shell-sidebar-max: 20rem;
-  min-height: calc(100vh - 58px);
+  --shell-sidebar-min: 252px;
+  --shell-sidebar-max: 252px;
+  min-height: calc(100vh - 48px);
+  display: grid;
+  grid-template-columns: minmax(var(--shell-sidebar-min), var(--shell-sidebar-max)) minmax(0, 1fr);
 }
 
-.shell-row.is-sidebar-collapsed {
-  --shell-sidebar-min: 6rem;
-  --shell-sidebar-max: 6rem;
-}
+.shell-row.is-sidebar-collapsed { --shell-sidebar-min: 60px; --shell-sidebar-max: 60px; }
 
-.rail {
-  color: var(--nav-text);
-  border-right: 0;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 26%),
-    linear-gradient(180deg, var(--admin-dark) 0%, var(--admin-dark-soft) 100%);
-  box-shadow:
-    inset -1px 0 0 rgba(255, 255, 255, 0.08),
-    20px 0 40px rgba(12, 20, 31, 0.12);
-}
+.rail { color: var(--outlook-ink); border-right: 1px solid var(--outlook-line); background: #f8f9fa; box-shadow: none; }
+.sidebar-column { gap: 10px; padding: 12px 8px; }
+.sidebar-toolbar { min-height: 32px; padding: 0 4px; }
 
-.sidebar-column {
-  gap: 14px;
-  padding: 16px;
-}
-
-.brand-lockup {
-  padding: 14px;
-  border-radius: var(--admin-radius-lg);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
-}
-
-.brand-lockup h1 {
-  font-size: 1rem;
-  line-height: 1.35;
-}
+.brand-lockup { gap: 8px; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.brand-lockup h1 { color: var(--outlook-ink); font-size: 14px; }
+.brand-subtitle { color: var(--outlook-muted); font-size: 11px; }
 
 .brand-mark {
-  width: 46px;
-  height: 46px;
-  border-radius: var(--admin-radius-sm);
-  font-size: 0.82rem;
-  letter-spacing: 0.08em;
-  background: linear-gradient(135deg, var(--outlook-blue) 0%, #5da0ff 100%);
-}
-
-.collapse-toggle {
-  width: 38px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  color: var(--nav-text);
-  border-color: rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.08);
+  width: 28px;
+  height: 28px;
+  border-radius: 3px;
+  color: #fff;
+  font-size: 10px;
+  letter-spacing: 0;
+  background: var(--outlook-blue);
   box-shadow: none;
 }
 
-.compose-button {
-  min-height: 42px;
-  border-radius: var(--admin-radius-sm);
-  background: linear-gradient(135deg, var(--outlook-blue) 0%, var(--outlook-blue-strong) 100%);
-  box-shadow: 0 14px 28px rgba(37, 100, 207, 0.24);
+.collapse-toggle { width: 28px; height: 28px; color: var(--outlook-muted); border: 0; background: transparent; }
+.collapse-toggle:hover { color: var(--outlook-ink); background: #e9edf1; }
+
+.compose-button, .workspace-compose-button {
+  min-height: 34px;
+  justify-content: flex-start;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: #fff;
+  background: var(--outlook-blue);
+  box-shadow: none;
 }
 
-.compose-plus {
-  width: 20px;
-  height: 20px;
-  border-radius: var(--admin-radius-xs);
-}
+.compose-button:hover, .workspace-compose-button:hover { background: var(--outlook-blue-dark); box-shadow: none; transform: none; }
+.compose-plus { width: auto; height: auto; border: 0; border-radius: 0; background: transparent; }
+.sidebar-group, .folder-panel, .rail-summary { gap: 2px; }
 
-.panel-title,
-.eyebrow,
-.pane-kicker,
-.detail-label,
-.workspace-hero-eyebrow {
-  text-transform: none;
+.panel-title, .mailbox-header {
+  margin: 10px 8px 4px;
+  padding: 0;
+  color: #616161;
+  font-size: 11px;
+  font-weight: 600;
   letter-spacing: 0;
-  font-size: 0.82rem;
-  font-weight: 400;
+  text-transform: none;
 }
 
-.panel-title {
-  color: rgba(209, 221, 234, 0.58);
+.section-item, .tree-item {
+  min-height: 30px;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 3px;
+  color: var(--outlook-ink);
+  background: transparent;
 }
 
-.section-item,
-.tree-item,
-.tree-group {
-  min-height: 42px;
-  border-radius: var(--admin-radius-sm);
-}
-
-.section-item:hover,
-.tree-item:hover,
-.tree-group:hover,
-.section-item.is-active,
-.tree-item.is-active {
-  transform: translateY(-1px);
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.section-item.is-active,
-.tree-item.is-active {
-  border-color: rgba(255, 255, 255, 0.14);
-  box-shadow: inset 0 0 0 1px rgba(100, 160, 255, 0.12);
-}
-
-.section-item-icon,
-.tree-item-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--admin-radius-xs);
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.summary-card {
-  border-radius: var(--admin-radius-md);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.05);
-}
+.section-item:hover, .tree-item:hover, .section-item.is-active, .tree-item.is-active { color: var(--outlook-ink); background: #e8f1fb; box-shadow: none; transform: none; }
+.section-item.is-active, .tree-item.is-active { font-weight: 600; }
+.section-item-icon, .tree-item-icon { width: 17px; height: 17px; color: #486581; border-radius: 0; background: transparent; }
+.sidebar-meta { color: #616161; font-size: 12px; }
+.summary-card { padding: 7px 8px; border: 0; border-radius: 3px; color: var(--outlook-muted); background: transparent; }
 
 .workspace {
-  grid-template-rows: auto auto auto minmax(0, 1fr);
-  gap: 14px;
-  padding: 16px;
-  background: transparent;
-  backdrop-filter: none;
-}
-
-.workspace-toolbar,
-.workspace-heading-panel,
-.list-pane,
-.reading-pane-card,
-.reading-empty-state,
-.editor-shell,
-.settings-card {
   min-width: 0;
-  border: 1px solid var(--admin-line);
-  border-radius: var(--admin-radius-md);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.64)),
-    var(--admin-panel);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.75),
-    var(--admin-shadow);
-  backdrop-filter: blur(18px);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+  background: #fff;
 }
 
 .workspace-toolbar {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--admin-line);
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--outlook-line);
+  border-radius: 0;
+  background: #fff;
+  box-shadow: none;
 }
+
+.workspace-toolbar-actions, .workspace-toolbar-summary, .workspace-hero-meta { gap: 6px; }
+
+.workspace-toolbar .inline-flex, .workspace-toolbar button:not(.workspace-compose-button) {
+  min-height: 30px;
+  padding: 0 9px;
+  border-color: transparent;
+  border-radius: 3px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.workspace-toolbar .inline-flex:hover, .workspace-toolbar button:not(.workspace-compose-button):hover { border-color: transparent; background: #f0f2f4; box-shadow: none; transform: none; }
+
+.workspace-toolbar .locale-picker { display: inline-flex; align-items: center; gap: 5px; color: var(--outlook-muted); font-size: 12px; }
+.workspace-toolbar .locale-picker select { min-height: 28px; width: auto; padding: 0 20px 0 6px; border: 0; color: var(--outlook-ink); background-color: transparent; box-shadow: none; }
 
 .workspace-heading-panel {
+  min-height: 50px;
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  gap: 14px;
-  align-items: center;
-  padding: 14px 16px;
-}
-
-.workspace-heading-panel h1 {
-  margin: 2px 0 0;
-  font-size: 1.12rem;
-  line-height: 1.35;
-  letter-spacing: 0;
-}
-
-.workspace-hero-meta,
-.workspace-toolbar-summary,
-.workspace-toolbar-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.workspace-compose-button {
-  min-height: 38px;
-  border-radius: var(--admin-radius-sm);
-  background: linear-gradient(135deg, var(--outlook-blue), var(--outlook-blue-strong));
-  box-shadow: 0 12px 24px rgba(37, 100, 207, 0.2);
-}
-
-.workspace-chip,
-.workspace-stat-pill,
-.message-meta-pill,
-.status-pill,
-.flag-pill,
-.tag-pill,
-.category-pill {
-  min-height: 30px;
-  border-radius: var(--admin-radius-xs);
-  border: 1px solid rgba(204, 216, 229, 0.78);
-  padding: 5px 10px;
-  background: var(--admin-panel-soft);
-  color: var(--muted);
-  font-size: 0.8rem;
-}
-
-.workspace-stat-pill:not(.is-soft),
-.status-pill,
-.flag-pill,
-.tag-pill {
-  color: var(--outlook-blue-strong);
-  background: rgba(37, 100, 207, 0.1);
-}
-
-.notice-banner {
-  border-radius: var(--admin-radius-md);
-  border-color: rgba(191, 122, 18, 0.22);
-  background: rgba(191, 122, 18, 0.08);
-}
-
-.sync-status-strip {
-  display: flex;
-  justify-content: space-between;
-  gap: 14px;
-  align-items: center;
-  padding: 12px 14px;
-  border: 1px solid var(--admin-line);
-  border-radius: var(--admin-radius-md);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.64)),
-    var(--admin-panel);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.75),
-    var(--admin-shadow);
-}
-
-.sync-status-strip strong {
-  display: block;
-  margin-top: 2px;
-  font-size: 0.9rem;
-}
-
-.sync-status-counts {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.sync-status-counts span {
-  min-height: 30px;
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid rgba(204, 216, 229, 0.78);
-  border-radius: var(--admin-radius-xs);
-  padding: 5px 10px;
-  background: var(--admin-panel-soft);
-  color: var(--muted);
-  font-size: 0.8rem;
-}
-
-.content-grid {
-  gap: 14px;
-  padding: 0;
-}
-
-.content-grid.has-detail {
-  grid-template-columns: minmax(21rem, 26rem) minmax(0, 1fr);
-}
-
-.list-pane {
-  width: auto;
-  padding: 0;
-  overflow: hidden;
-}
-
-.pane-header {
-  padding: 14px 16px 12px;
-  border-bottom: 1px solid var(--admin-line);
-  background: rgba(248, 251, 254, 0.72);
-}
-
-.pane-header h3 {
-  margin: 2px 0 0;
-  font-size: 1rem;
-}
-
-.pane-count {
-  min-height: 30px;
-  display: inline-flex;
-  align-items: center;
-  border-radius: var(--admin-radius-xs);
-  padding: 5px 10px;
-  color: var(--muted);
-  background: var(--admin-panel-soft);
-}
-
-.message-list,
-.agenda-list,
-.contact-list {
-  gap: 0;
-  padding: 0;
-  overflow: auto;
-}
-
-.mail-list-card,
-.agenda-card,
-.contact-card {
-  border-width: 0 0 1px;
-  border-color: var(--admin-line);
+  gap: 12px;
+  padding: 8px 18px;
+  border: 0;
+  border-bottom: 1px solid var(--outlook-line);
   border-radius: 0;
-  background: rgba(255, 255, 255, 0.58);
+  background: #fff;
   box-shadow: none;
 }
 
-.mail-list-card {
-  gap: 8px;
-  padding: 13px 15px;
+.workspace-heading-panel h1 { margin: 0; color: var(--outlook-ink); font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+
+.workspace-stat-pill, .workspace-chip, .message-meta-pill, .flag-pill {
+  min-height: 24px;
+  padding: 2px 7px;
+  border: 0;
+  border-radius: 3px;
+  color: var(--outlook-muted);
+  font-size: 12px;
+  background: #f2f4f6;
 }
 
-.mail-list-card:hover,
-.mail-list-card.is-active,
-.agenda-card:hover,
-.agenda-card.is-active,
-.contact-card:hover,
-.contact-card.is-active {
-  transform: none;
-  border-color: var(--admin-line);
-  background:
-    linear-gradient(90deg, rgba(37, 100, 207, 0.1), rgba(255, 255, 255, 0.72));
-  box-shadow: inset 3px 0 0 var(--outlook-blue);
-}
+.notice-banner { margin: 8px 16px 0; padding: 8px 10px; border: 1px solid #b6d6f2; border-radius: 3px; color: #164b70; background: #eff8ff; }
 
-.mail-list-avatar,
-.sender-avatar,
-.contact-avatar {
-  width: 38px;
-  height: 38px;
-  border-radius: var(--admin-radius-xs);
-  color: var(--outlook-blue-strong);
-  background: rgba(37, 100, 207, 0.12);
-  box-shadow: none;
-}
-
-.message-preview {
-  line-height: 1.45;
-}
-
-.detail-pane {
-  min-width: 0;
-}
-
-.reading-pane-card,
-.reading-empty-state,
-.editor-shell {
-  padding: 20px;
-  border-radius: var(--admin-radius-md);
-}
-
-.reading-empty-state {
-  min-height: 360px;
-}
-
-.reading-empty-state h3 {
-  font-size: 1.25rem;
-  letter-spacing: 0;
-}
-
-.detail-header {
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--admin-line);
-}
-
-.detail-header h3 {
-  margin-top: 4px;
-  font-size: 1.28rem;
-  line-height: 1.35;
-  letter-spacing: 0;
-}
-
-.sender-card,
-.attachment-card,
-.settings-item,
-.toggle-field {
-  border: 1px solid rgba(204, 216, 229, 0.78);
-  border-radius: var(--admin-radius-md);
-  background: var(--admin-panel-soft);
-}
-
-.sender-card {
-  margin-top: 16px;
-}
-
-.message-body {
-  margin-top: 18px;
-  line-height: 1.65;
-}
-
-.attachment-panel {
-  margin-top: 22px;
-  padding-top: 18px;
-  border-top-color: var(--admin-line);
-}
-
-.editor-shell {
-  position: sticky;
-  top: 74px;
-  box-shadow: var(--admin-shadow-strong);
-}
-
-.editor-shell-header {
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--admin-line);
-}
-
-.editor-shell-header h3 {
-  margin: 4px 0 0;
-  font-size: 1.15rem;
-}
-
-.form-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.settings-shell {
-  gap: 14px;
-}
-
-.settings-card {
-  padding: 20px;
-}
-
-.settings-grid {
-  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
-}
-
-.settings-item {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(248, 251, 254, 0.72)),
-    var(--admin-panel-soft);
-}
-
-@media (max-width: 1160px) {
-  .content-grid.has-detail {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 900px) {
-  .app-header {
-    grid-template-columns: 1fr;
-  }
-
-  .shell-row,
-  .shell-row.is-sidebar-collapsed {
-    grid-template-columns: 1fr;
-  }
-
-  .rail,
-  .rail.is-collapsed {
-    width: min(22rem, calc(100vw - 24px));
-    inset: 0 auto 0 0;
-    max-width: calc(100vw - 24px);
-    border-radius: 0;
-  }
-
-  .workspace-heading-panel,
-  .sync-status-strip,
-  .detail-header,
-  .sender-card,
-  .editor-shell-header {
-    display: grid;
-    grid-template-columns: 1fr;
-  }
-
-  .sync-status-counts {
-    justify-content: flex-start;
-  }
-}
-
-@media (max-width: 640px) {
-  .workspace {
-    padding: 12px;
-  }
-
-  .workspace-toolbar,
-  .workspace-heading-panel,
-  .reading-pane-card,
-  .reading-empty-state,
-  .editor-shell,
-  .settings-card {
-    padding: 14px;
-  }
-
-  .form-grid,
-  .settings-grid,
-  .contact-photo {
-    grid-template-columns: 1fr;
-  }
-}
-
-.mobile-detail-back {
-  display: none;
-}
-
-/* Keep mail work dense and calm: one surface per pane, without glass layering. */
-.workspace-toolbar,
-.workspace-heading-panel,
-.sync-status-strip,
-.list-pane,
-.reading-pane-card,
-.reading-empty-state,
-.editor-shell,
-.settings-card {
-  background: var(--lpe-surface-strong);
-  backdrop-filter: none;
-}
-
-.workspace-compose-button,
-.compose-button,
-.brand-mark {
-  background: var(--lpe-primary);
-  box-shadow: none;
-}
-
-.contact-avatar img,
-.contact-photo-preview img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.contact-photo {
+.content-grid, .content-grid.has-detail {
+  min-height: 0;
   display: grid;
-  grid-template-columns: 72px minmax(0, 1fr) auto;
-  gap: 14px;
-  align-items: end;
-}
-
-.contact-photo-preview {
-  display: grid;
-  place-items: center;
-  width: 72px;
-  height: 72px;
+  grid-template-columns: minmax(330px, 430px) minmax(0, 1fr);
+  gap: 0;
+  align-items: stretch;
   overflow: hidden;
-  border-radius: var(--admin-radius-sm);
-  color: var(--outlook-blue-strong);
-  background: rgba(37, 100, 207, 0.12);
 }
 
+.content-grid:not(.has-detail) .list-pane { grid-column: 1 / -1; }
+.list-pane, .detail-pane, .reading-pane-card, .reading-empty-state, .editor-shell, .settings-card { border: 0; border-radius: 0; background: #fff; box-shadow: none; }
+
+.list-pane { min-height: 0; padding: 0; border-right: 1px solid var(--outlook-line); overflow: auto; }
+.pane-header { min-height: 44px; padding: 10px 14px; border-bottom: 1px solid #edf0f2; }
+.pane-header h3 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0; }
+.pane-kicker, .detail-label { display: none; }
+.pane-count { color: var(--outlook-muted); font-size: 12px; }
+
+.message-list, .agenda-list, .contact-list { display: grid; gap: 0; padding: 0; }
+
+.mail-list-card, .agenda-card, .contact-card {
+  min-height: 82px;
+  gap: 7px;
+  padding: 11px 14px;
+  border: 0;
+  border-bottom: 1px solid #edf0f2;
+  border-radius: 0;
+  color: var(--outlook-ink);
+  background: #fff;
+  box-shadow: none;
+}
+
+.mail-list-card:hover, .agenda-card:hover, .contact-card:hover { background: #f6f8fa; box-shadow: none; transform: none; }
+.mail-list-card.is-active, .agenda-card.is-active, .contact-card.is-active { background: #cfe8ff; box-shadow: none; transform: none; }
+.mail-list-card-top { gap: 9px; }
+
+.mail-list-avatar, .sender-avatar, .contact-avatar { width: 32px; height: 32px; border-radius: 50%; color: #365f85; font-size: 11px; background: #d8eaf8; box-shadow: none; }
+.mail-list-heading { gap: 0; }
+.mail-list-heading strong, .subject { font-size: 13px; font-weight: 600; }
+.mail-list-address, .message-preview, .message-time { color: var(--outlook-muted); font-size: 12px; line-height: 1.35; }
+.message-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.message-inline-meta { gap: 5px; }
+
+.detail-pane { min-width: 0; overflow: auto; }
+.reading-pane-card, .editor-shell { min-height: 100%; padding: 22px 28px; }
+.reading-empty-state { min-height: 100%; place-items: center; padding: 28px; border: 0; text-align: center; }
+.reading-empty-state h3 { color: var(--outlook-ink); font-size: 20px; letter-spacing: 0; }
+
+.detail-header { padding-bottom: 16px; border-bottom: 1px solid var(--outlook-line); }
+.detail-header h3 { margin: 0; color: var(--outlook-ink); font-size: 22px; line-height: 1.3; letter-spacing: -0.01em; }
+.detail-actions { gap: 4px; }
+.detail-actions .inline-flex { min-height: 30px; padding: 0 8px; border-color: transparent; border-radius: 3px; background: transparent; box-shadow: none; }
+.detail-actions .inline-flex:hover { background: #f0f2f4; transform: none; }
+
+.sender-card { margin-top: 16px; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.sender-card p, .sender-card span, .message-body, .message-body p { color: #393939; }
+.tag-row { margin-top: 10px; }
+.message-body { max-width: 76ch; margin-top: 22px; line-height: 1.65; }
+.attachment-panel { max-width: 76ch; margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--outlook-line); }
+.attachment-card { padding: 10px; border: 1px solid var(--outlook-line); border-radius: 3px; background: #fff; }
+
+.editor-shell { position: static; gap: 14px; }
+.editor-shell-header { padding-bottom: 12px; border-bottom: 1px solid var(--outlook-line); }
+.editor-shell-header h3 { margin: 0; font-size: 18px; }
+.field { gap: 5px; }
+.field > span { color: var(--outlook-muted); font-size: 12px; }
+
+.editor-shell input, .editor-shell select, .editor-shell textarea, .settings-card input, .settings-card select, .settings-card textarea {
+  padding: 8px 10px;
+  border: 1px solid #b9bec3;
+  color: var(--outlook-ink);
+  background: #fff;
+  box-shadow: none;
+}
+
+.editor-shell input, .editor-shell select { min-height: 34px; }
+.editor-shell textarea { min-height: 260px; }
+.editor-shell-actions { padding-top: 12px; border-top: 1px solid var(--outlook-line); }
+.editor-shell-actions .inline-flex { min-height: 32px; border-radius: 3px; box-shadow: none; }
+
+.empty-state { margin: 16px; padding: 18px; border: 1px solid #e4e7ea; border-radius: 3px; color: var(--outlook-muted); background: #fafbfc; }
+.settings-shell { padding: 20px; }
+.settings-card { padding: 16px; border: 1px solid var(--outlook-line); border-radius: 4px; }
+
 @media (max-width: 900px) {
-  .content-grid.is-mobile-detail-open .list-pane {
-    display: none;
-  }
+  .app-header { grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; padding: 0 8px; }
+  .header-product span, .header-account { display: none; }
+  .shell-toggle { display: inline-grid; }
+  .shell-row, .shell-row.is-sidebar-collapsed { display: block; min-height: calc(100vh - 48px); }
+  .rail, .rail.is-collapsed { position: fixed; inset: 48px auto 0 0; z-index: 40; width: min(296px, calc(100vw - 28px)); max-width: calc(100vw - 28px); border-radius: 0; box-shadow: 8px 0 20px rgba(0, 0, 0, 0.18); transform: translateX(-100%); }
+  .rail.is-mobile-open { transform: translateX(0); }
+  .rail.is-collapsed .brand-copy, .rail.is-collapsed .sidebar-label, .rail.is-collapsed .panel-title, .rail.is-collapsed .brand-subtitle, .rail.is-collapsed .sidebar-mobile-close { display: revert; }
+  .workspace-toolbar { align-items: flex-start; padding: 7px 10px; }
+  .workspace-toolbar-summary .workspace-chip, .workspace-toolbar .locale-picker > span { display: none; }
+  .content-grid, .content-grid.has-detail { grid-template-columns: 1fr; }
+  .list-pane { border-right: 0; }
+  .content-grid.is-mobile-detail-open .list-pane { display: none; }
+  .content-grid:not(.is-mobile-detail-open) .detail-pane { display: none; }
+  .mobile-detail-back { display: inline-flex; margin: 10px 12px 0; }
+  .reading-pane-card, .editor-shell { padding: 18px; }
+}
 
-  .content-grid:not(.is-mobile-detail-open) .detail-pane {
-    display: none;
-  }
-
-  .mobile-detail-back {
-    display: inline-flex;
-    margin: 0 0 0.75rem;
-  }
+@media (max-width: 620px) {
+  .app-header { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .header-product { display: none; }
+  .workspace-toolbar { min-height: 44px; }
+  .workspace-toolbar-actions, .workspace-toolbar-summary { gap: 2px; }
+  .workspace-heading-panel { min-height: 44px; padding: 7px 12px; }
+  .workspace-heading-panel h1 { font-size: 18px; }
+  .workspace-stat-pill.is-soft { display: none; }
+  .mail-list-card { min-height: 76px; padding: 10px 12px; }
+  .detail-header, .sender-card, .editor-shell-header { grid-template-columns: 1fr; }
+  .detail-actions { margin-top: 10px; }
 }
