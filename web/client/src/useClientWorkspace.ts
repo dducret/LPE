@@ -407,6 +407,22 @@ export function useClientWorkspace(
   }, [calendarCollectionId, calendarCollections]);
 
   React.useEffect(() => {
+    if (!authToken || !identity) return;
+    let polling = false;
+    const refresh = async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        await Promise.all([loadWorkspace(), loadSettings()]);
+      } finally {
+        polling = false;
+      }
+    };
+    const interval = window.setInterval(() => void refresh(), 10_000);
+    return () => window.clearInterval(interval);
+  }, [authToken, identity, loadSettings, loadWorkspace]);
+
+  React.useEffect(() => {
     if (!authToken) {
       setPushConnected(false);
       return;
