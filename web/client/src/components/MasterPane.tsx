@@ -70,6 +70,11 @@ export function MasterPane(props: {
               : props.section === "reminders"
                 ? props.copy.objectCount.reminders.replace("{count}", String(props.reminders.length))
                 : "";
+  const messageGroups = new Map<string, Message[]>();
+  for (const message of props.filteredMessages) {
+    const date = message.receivedAt.split(" ", 1)[0] || message.receivedAt;
+    messageGroups.set(date, [...(messageGroups.get(date) ?? []), message]);
+  }
 
   return (
     <section className="list-pane">
@@ -84,30 +89,32 @@ export function MasterPane(props: {
       {props.section === "mail" ? (
         <>
           <div className="message-list">
-            {props.filteredMessages.map((item) => (
-              <button
-                key={item.id}
-                className={props.messageId === item.id ? "mail-list-card is-active" : "mail-list-card"}
-                type="button"
-                onClick={() => props.onSelectMessage(item.id)}
-              >
-                <div className="mail-list-card-top">
-                  <div className="mail-list-avatar">{item.from.slice(0, 2).toUpperCase()}</div>
-                  <div className="mail-list-heading">
-                    <strong>{item.from}</strong>
-                    <span className="mail-list-address">{item.fromAddress}</span>
-                  </div>
-                  <span className="message-time">{item.timeLabel}</span>
-                </div>
-                <div className="mail-list-body">
-                  <span className={item.unread ? "subject unread" : "subject"}>{item.subject}</span>
-                  <span className="message-preview">{item.preview}</span>
-                </div>
-                <div className="message-inline-meta">
-                  {item.flagged ? <span className="flag-pill">{props.copy.flaggedShort}</span> : null}
-                  {item.attachments.length > 0 ? <span className="message-meta-pill">{props.copy.attachmentCount.replace("{count}", String(item.attachments.length))}</span> : null}
-                </div>
-              </button>
+            <div className="message-list-columns" aria-hidden="true">
+              <span>{props.copy.listColumns.from}</span>
+              <span>{props.copy.listColumns.subject}</span>
+              <span>{props.copy.listColumns.received}</span>
+            </div>
+            {[...messageGroups].map(([date, messages]) => (
+              <div className="message-group" key={date}>
+                <p className="message-group-label">{date}</p>
+                {messages.map((item) => (
+                  <button
+                    key={item.id}
+                    className={props.messageId === item.id ? "mail-list-row is-active" : "mail-list-row"}
+                    type="button"
+                    onClick={() => props.onSelectMessage(item.id)}
+                  >
+                    <span className={item.unread ? "mail-list-from unread" : "mail-list-from"}>{item.from}</span>
+                    <span className="mail-list-subject">
+                      <span className={item.unread ? "subject unread" : "subject"}>{item.subject}</span>
+                      <span className="message-preview">{item.preview}</span>
+                      {item.flagged ? <span className="flag-pill">{props.copy.flaggedShort}</span> : null}
+                      {item.attachments.length > 0 ? <span className="message-meta-pill">{props.copy.attachmentCount.replace("{count}", String(item.attachments.length))}</span> : null}
+                    </span>
+                    <span className="message-time">{item.timeLabel}</span>
+                  </button>
+                ))}
+              </div>
             ))}
             {props.filteredMessages.length === 0 ? <div className="empty-state">{props.copy.noMessages}</div> : null}
           </div>

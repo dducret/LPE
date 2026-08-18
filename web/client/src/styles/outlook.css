@@ -311,6 +311,67 @@ body { background: var(--outlook-canvas); }
 
 .message-list, .agenda-list, .contact-list { display: grid; gap: 0; padding: 0; }
 
+.message-list { display: block; }
+.message-list-columns,
+.mail-list-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.85fr) minmax(0, 1.65fr) 76px;
+  gap: 12px;
+  align-items: center;
+}
+
+.message-list-columns {
+  min-height: 28px;
+  padding: 0 14px;
+  border-bottom: 1px solid #edf0f2;
+  color: var(--outlook-muted);
+  font-size: 12px;
+}
+
+.message-list-columns span:last-child,
+.mail-list-row .message-time { text-align: right; }
+
+.message-group-label {
+  margin: 0;
+  padding: 7px 14px 5px;
+  border-bottom: 1px solid #edf0f2;
+  color: #424242;
+  font-size: 12px;
+  font-weight: 600;
+  background: #f5f6f8;
+}
+
+.mail-list-row {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 0;
+  border-bottom: 1px solid #edf0f2;
+  border-radius: 0;
+  color: var(--outlook-ink);
+  background: #fff;
+  text-align: left;
+}
+
+.mail-list-row:hover { background: #f6f8fa; }
+.mail-list-row.is-active { background: #cfe8ff; }
+
+.mail-list-from,
+.mail-list-subject,
+.mail-list-subject .subject,
+.mail-list-subject .message-preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mail-list-from { font-size: 13px; }
+.mail-list-subject { display: flex; align-items: center; gap: 8px; }
+.mail-list-subject .subject { flex: 0 1 auto; }
+.mail-list-subject .message-preview { flex: 1 1 auto; }
+.mail-list-row .message-time { font-variant-numeric: tabular-nums; }
+
 .mail-list-card, .agenda-card, .contact-card {
   min-height: 82px;
   gap: 7px;
@@ -597,6 +658,16 @@ body { background: var(--outlook-canvas); }
   .workspace-heading-panel h1 { font-size: 18px; }
   .workspace-stat-pill.is-soft { display: none; }
   .mail-list-card { min-height: 76px; padding: 10px 12px; }
+  .message-list-columns,
+  .mail-list-row {
+    grid-template-columns: minmax(84px, 0.85fr) minmax(0, 1.65fr) 62px;
+    gap: 8px;
+  }
+  .message-list-columns,
+  .mail-list-row { padding-inline: 12px; }
+  .mail-list-subject .message-preview,
+  .mail-list-subject .flag-pill,
+  .mail-list-subject .message-meta-pill { display: none; }
   .detail-header, .sender-card, .editor-shell-header { grid-template-columns: 1fr; }
   .detail-actions { margin-top: 10px; }
 }
