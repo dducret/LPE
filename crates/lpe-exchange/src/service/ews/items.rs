@@ -691,7 +691,10 @@ where
         let result = async {
             self.validate_mutating_item_change_keys(principal, request)
                 .await?;
-            let ids = requested_item_ids(request);
+            let ids = requested_operation_item_references(request, "CopyItem")?
+                .into_iter()
+                .map(|reference| reference.id)
+                .collect::<Vec<_>>();
             let message_ids = ids
                 .iter()
                 .filter_map(|id| id.strip_prefix("message:"))
@@ -1459,6 +1462,11 @@ fn validate_create_item_shape(request: &str) -> Result<()> {
         .sum::<usize>();
     if item_count != 1 {
         bail!("CreateItem requires exactly one supported canonical item");
+    }
+    if element_content(items, "Attachments").is_some() {
+        bail!(
+            "CreateItem does not support embedded attachments; use CreateAttachment for one canonical attachment"
+        );
     }
 
     requested_create_item_saved_folder_target(request).map(|_| ())

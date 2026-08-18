@@ -3327,6 +3327,50 @@ async fn create_item_saveonly_stores_message_as_canonical_draft() {
 }
 
 #[tokio::test]
+async fn create_item_rejects_embedded_attachments_before_saving_a_draft() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let saved_drafts = store.saved_drafts.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:CreateItem MessageDisposition="SaveOnly">
+                  <m:Items>
+                    <t:Message>
+                      <t:Subject>Attachment must not be discarded</t:Subject>
+                      <t:Attachments>
+                        <t:FileAttachment>
+                          <t:Name>brief.txt</t:Name>
+                          <t:Content>cGF5bG9hZA==</t:Content>
+                        </t:FileAttachment>
+                      </t:Attachments>
+                    </t:Message>
+                  </m:Items>
+                </m:CreateItem>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateItemResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("CreateItem does not support embedded attachments"));
+    assert!(saved_drafts.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn create_item_saveonly_stores_public_folder_post() {
     let public_folder_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap();
     let store = FakeStore {
@@ -12200,6 +12244,47 @@ async fn copy_item_copies_custom_mailbox_message_to_target_folder() {
         .unwrap();
     assert_eq!(source.mailbox_ids, vec![source.mailbox_id]);
     assert_eq!(copy.mailbox_id, target_mailbox_id);
+}
+
+#[tokio::test]
+async fn copy_item_rejects_misplaced_item_ids_without_copying_a_message() {
+    let source_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+    let target_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &target_id.to_string(),
+            "custom",
+            "Copy target",
+        )])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            &source_id.to_string(),
+            "44444444-4444-4444-4444-444444444444",
+            "inbox",
+            "Copy source",
+        )])),
+        ..Default::default()
+    };
+    let copied_emails = store.copied_emails.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:CopyItem><m:ToFolderId><t:FolderId Id="mailbox:{target_id}"/></m:ToFolderId><m:Unexpected><m:ItemIds><t:ItemId Id="message:{source_id}"/></m:ItemIds></m:Unexpected></m:CopyItem></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CopyItemResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("CopyItem requires exactly one direct ItemIds collection"));
+    assert!(copied_emails.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
