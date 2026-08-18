@@ -33,12 +33,6 @@ export function MailRibbon(props: {
   );
 }
 
-function dateFromEvent(event: EventItem | undefined) {
-  if (!event) return new Date();
-  const value = new Date(`${event.date}T12:00:00`);
-  return Number.isNaN(value.getTime()) ? new Date() : value;
-}
-
 function startOfWeek(value: Date) {
   const result = new Date(value);
   const day = result.getDay();
@@ -58,19 +52,11 @@ function isoDate(value: Date) {
 export function CalendarWorkspace(props: {
   copy: ClientCopy;
   events: EventItem[];
+  selectedDate: Date;
   selectedEventId: string;
   onSelectEvent: (id: string) => void;
 }) {
-  const [selectedDate, setSelectedDate] = React.useState(() => dateFromEvent(props.events[0]));
-  const [monthAnchor, setMonthAnchor] = React.useState(() => new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1));
-  const firstVisible = new Date(monthAnchor);
-  firstVisible.setDate(1 - ((firstVisible.getDay() + 6) % 7));
-  const monthDays = Array.from({ length: 42 }, (_, index) => {
-    const date = new Date(firstVisible);
-    date.setDate(firstVisible.getDate() + index);
-    return date;
-  });
-  const weekStart = startOfWeek(selectedDate);
+  const weekStart = startOfWeek(props.selectedDate);
   const weekDays = Array.from({ length: 7 }, (_, index) => {
     const date = new Date(weekStart);
     date.setDate(weekStart.getDate() + index);
@@ -78,29 +64,8 @@ export function CalendarWorkspace(props: {
   });
   const hours = Array.from({ length: 11 }, (_, index) => index + 8);
   const formatter = new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric" });
-  const monthFormatter = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" });
-
-  const selectDate = (date: Date) => {
-    setSelectedDate(date);
-    setMonthAnchor(new Date(date.getFullYear(), date.getMonth(), 1));
-  };
-
   return (
     <section className="calendar-workspace" aria-label={props.copy.sections.calendar}>
-      <aside className="calendar-month-pane">
-        <div className="calendar-month-title">
-          <button type="button" aria-label="Previous month" onClick={() => setMonthAnchor((value) => new Date(value.getFullYear(), value.getMonth() - 1, 1))}><span className="calendar-arrow is-previous" aria-hidden="true" /></button>
-          <strong>{monthFormatter.format(monthAnchor)}</strong>
-          <button type="button" aria-label="Next month" onClick={() => setMonthAnchor((value) => new Date(value.getFullYear(), value.getMonth() + 1, 1))}><span className="calendar-arrow" aria-hidden="true" /></button>
-        </div>
-        <div className="calendar-month-grid" role="grid">
-          {Array.from({ length: 7 }, (_, index) => <span key={index} className="calendar-weekday">{new Intl.DateTimeFormat(undefined, { weekday: "narrow" }).format(new Date(2024, 0, index + 1))}</span>)}
-          {monthDays.map((date) => {
-            const hasEvent = props.events.some((event) => event.date === isoDate(date));
-            return <button key={isoDate(date)} className={`${date.getMonth() === monthAnchor.getMonth() ? "" : "is-outside "}${sameDay(date, selectedDate) ? "is-selected" : ""}${hasEvent ? " has-event" : ""}`} type="button" onClick={() => selectDate(date)}>{date.getDate()}</button>;
-          })}
-        </div>
-      </aside>
       <div className="calendar-week-pane">
         <header className="calendar-week-heading">
           <strong>{weekDays.map((day) => formatter.format(day)).join(" – ")}</strong>
@@ -108,7 +73,7 @@ export function CalendarWorkspace(props: {
         <div className="calendar-week-grid">
           <div className="calendar-time-column">{hours.map((hour) => <span key={hour}>{`${hour}:00`}</span>)}</div>
           <div className="calendar-days">
-            {weekDays.map((day) => <div className={sameDay(day, selectedDate) ? "calendar-day is-selected" : "calendar-day"} key={isoDate(day)}>
+            {weekDays.map((day) => <div className={sameDay(day, props.selectedDate) ? "calendar-day is-selected" : "calendar-day"} key={isoDate(day)}>
               <div className="calendar-day-label">{formatter.format(day)}</div>
               {hours.map((hour) => <div className="calendar-hour" key={hour} />)}
               {props.events.filter((event) => event.date === isoDate(day)).map((event) => {

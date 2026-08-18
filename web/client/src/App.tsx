@@ -53,6 +53,7 @@ export function App() {
   const [calendarEditorOpen, setCalendarEditorOpen] = React.useState(false);
   const [contactEditorOpen, setContactEditorOpen] = React.useState(false);
   const [taskEditorOpen, setTaskEditorOpen] = React.useState(false);
+  const [calendarDate, setCalendarDate] = React.useState(() => new Date());
   const [isNarrowScreen, setIsNarrowScreen] = React.useState(() => window.matchMedia("(max-width: 900px)").matches);
   const accountMenuRef = React.useRef<HTMLDivElement | null>(null);
   const accountMenuTriggerRef = React.useRef<HTMLButtonElement | null>(null);
@@ -326,6 +327,11 @@ export function App() {
           isNarrowScreen={isNarrowScreen}
           onToggleCollapse={() => setSidebarCollapsed((value) => !value)}
           onCloseMobile={() => closeSidebarMobile()}
+          calendarDate={calendarDate}
+          onSelectCalendarDate={setCalendarDate}
+          calendarCollections={workspace.calendarCollections}
+          calendarCollectionId={workspace.calendarCollectionId}
+          setCalendarCollectionId={workspace.setCalendarCollectionId}
         />
 
         <section className="workspace">
@@ -413,6 +419,7 @@ export function App() {
               <CalendarWorkspace
                 copy={copy}
                 events={workspace.filteredEvents}
+                selectedDate={calendarDate}
                 selectedEventId={workspace.eventId}
                 onSelectEvent={(id) => { workspace.setEventId(id); setCalendarEditorOpen(true); }}
               />

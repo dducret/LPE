@@ -1,6 +1,6 @@
 import React from "react";
 import type { ClientCopy } from "../i18n";
-import type { ClientMailbox, Folder, Section, SystemFolder } from "../client-types";
+import type { ClientMailbox, CollaborationCollection, Folder, Section, SystemFolder } from "../client-types";
 import { ClientIcon, type ClientIconName } from "./ClientIcon";
 
 const sectionIcons: Record<Section, ClientIconName> = {
@@ -23,6 +23,46 @@ function folderIcon(folder: Folder | null): ClientIconName {
   return "folder";
 }
 
+function calendarIsoDate(value: Date) {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+}
+
+function CalendarNavigation(props: {
+  copy: ClientCopy;
+  date: Date;
+  onSelectDate: (date: Date) => void;
+  collections: CollaborationCollection[];
+  collectionId: string;
+  setCollectionId: (id: string) => void;
+}) {
+  const [monthAnchor, setMonthAnchor] = React.useState(() => new Date(props.date.getFullYear(), props.date.getMonth(), 1));
+  React.useEffect(() => setMonthAnchor(new Date(props.date.getFullYear(), props.date.getMonth(), 1)), [props.date]);
+  const firstVisible = new Date(monthAnchor);
+  firstVisible.setDate(1 - ((firstVisible.getDay() + 6) % 7));
+  const monthDays = Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(firstVisible);
+    date.setDate(firstVisible.getDate() + index);
+    return date;
+  });
+  const monthFormatter = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" });
+  return <div className="calendar-navigation">
+    <div className="calendar-navigation-month">
+      <button type="button" aria-label="Previous month" onClick={() => setMonthAnchor((value) => new Date(value.getFullYear(), value.getMonth() - 1, 1))}><span className="calendar-arrow is-previous" aria-hidden="true" /></button>
+      <strong>{monthFormatter.format(monthAnchor)}</strong>
+      <button type="button" aria-label="Next month" onClick={() => setMonthAnchor((value) => new Date(value.getFullYear(), value.getMonth() + 1, 1))}><span className="calendar-arrow" aria-hidden="true" /></button>
+    </div>
+    <div className="calendar-navigation-grid">
+      {Array.from({ length: 7 }, (_, index) => <span key={index}>{new Intl.DateTimeFormat(undefined, { weekday: "narrow" }).format(new Date(2024, 0, index + 1))}</span>)}
+      {monthDays.map((date) => <button key={calendarIsoDate(date)} className={`${date.getMonth() === monthAnchor.getMonth() ? "" : "is-outside "}${calendarIsoDate(date) === calendarIsoDate(props.date) ? "is-selected" : ""}`} type="button" onClick={() => props.onSelectDate(date)}>{date.getDate()}</button>)}
+    </div>
+    <div className="calendar-navigation-collections">
+      <strong>{props.copy.sections.calendar}</strong>
+      <button className={!props.collectionId ? "is-active" : ""} type="button" onClick={() => props.setCollectionId("")}>{props.copy.sections.calendar}</button>
+      {props.collections.map((collection) => <button className={props.collectionId === collection.id ? "is-active" : ""} key={collection.id} type="button" onClick={() => props.setCollectionId(collection.id)}>{collection.displayName}</button>)}
+    </div>
+  </div>;
+}
+
 export function Sidebar(props: {
   copy: ClientCopy;
   section: Section;
@@ -42,6 +82,11 @@ export function Sidebar(props: {
   isNarrowScreen: boolean;
   onToggleCollapse: () => void;
   onCloseMobile: () => void;
+  calendarDate: Date;
+  onSelectCalendarDate: (date: Date) => void;
+  calendarCollections: CollaborationCollection[];
+  calendarCollectionId: string;
+  setCalendarCollectionId: (id: string) => void;
 }) {
   const mailFolders: Array<{ id: Folder | null; label: string; count?: number }> = [
     { id: "inbox", label: props.copy.folders.inbox, count: props.counts.inbox },
@@ -120,10 +165,12 @@ export function Sidebar(props: {
           </button>
         </div>
 
-        <button className="compose-button" type="button" title={props.copy.compose} aria-label={props.copy.compose} onClick={() => { props.onCompose(); props.onCloseMobile(); }}>
+        {props.section !== "calendar" ? <button className="compose-button" type="button" title={props.copy.compose} aria-label={props.copy.compose} onClick={() => { props.onCompose(); props.onCloseMobile(); }}>
           <ClientIcon name="compose" />
           <span className="sidebar-label">{props.copy.compose}</span>
-        </button>
+        </button> : null}
+
+        {props.section === "calendar" ? <CalendarNavigation copy={props.copy} date={props.calendarDate} onSelectDate={props.onSelectCalendarDate} collections={props.calendarCollections} collectionId={props.calendarCollectionId} setCollectionId={props.setCalendarCollectionId} /> : <>
 
         <div className="folder-panel is-tight">
           <p className="panel-title">{props.copy.favoritesLabel}</p>
@@ -169,6 +216,8 @@ export function Sidebar(props: {
             );
           })}
         </div>
+
+        </>}
 
         <button className="ghost-button sidebar-mobile-close" type="button" onClick={props.onCloseMobile}>{props.copy.editorActions.cancel}</button>
       </div>

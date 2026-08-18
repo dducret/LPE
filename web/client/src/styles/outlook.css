@@ -863,3 +863,29 @@ body { background: var(--outlook-canvas); }
   .tasks-workspace { grid-template-columns: 1fr; }
   .task-list-pane { border-right: 0; border-bottom: 1px solid var(--outlook-line); }
 }
+
+/* Calendar uses the left navigation pane for month and collection selection. */
+.calendar-navigation { display: grid; gap: 18px; padding: 4px 8px 12px; }
+.calendar-navigation-month { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; }
+.calendar-navigation-month button { width: 26px; height: 26px; padding: 0; border: 0; border-radius: 3px; color: var(--outlook-ink); background: transparent; }
+.calendar-navigation-month button:hover { background: #edf1f5; }
+.calendar-navigation-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.calendar-navigation-grid > span { display: grid; place-items: center; height: 20px; color: var(--outlook-muted); font-size: 10px; font-weight: 600; }
+.calendar-navigation-grid button { aspect-ratio: 1; min-width: 0; padding: 0; border: 0; border-radius: 50%; color: var(--outlook-ink); font-size: 10px; background: transparent; }
+.calendar-navigation-grid button:hover { background: #e5edf5; }
+.calendar-navigation-grid button.is-outside { color: #a7adb3; }
+.calendar-navigation-grid button.is-selected { color: #fff; background: var(--outlook-blue); }
+.calendar-navigation-collections { display: grid; gap: 3px; padding-top: 4px; border-top: 1px solid var(--outlook-line); }
+.calendar-navigation-collections strong { padding: 8px 4px 4px; font-size: 12px; }
+.calendar-navigation-collections button { min-height: 30px; padding: 0 8px; border: 0; border-radius: 3px; color: var(--outlook-ink); font-size: 12px; text-align: left; background: transparent; }
+.calendar-navigation-collections button:hover { background: #edf1f5; }
+.calendar-navigation-collections button.is-active { color: #0f5c9d; background: #e3effa; font-weight: 600; }
+
+.calendar-workspace { min-width: 860px; display: block; }
+.calendar-week-pane { min-height: 100%; }
+.calendar-week-heading { height: 52px; padding: 0 16px; border-bottom: 1px solid var(--outlook-line); }
+.calendar-week-grid { min-width: 860px; }
+
+@media (max-width: 900px) {
+  .calendar-workspace { min-width: 700px; }
+}
