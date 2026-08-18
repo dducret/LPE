@@ -84,6 +84,7 @@ type AccountPanelMode = "new" | "details" | "import" | "export";
 type LoginResponse = { token: string; admin: { email: string; display_name: string; role: string; permissions: string[]; auth_method: string } };
 type OidcMetadataResponse = { enabled: boolean; provider_label: string };
 type PageKey = "server" | "domain" | "accounts" | "antispam" | "audit" | "operations";
+type TenantSection = "overview" | "domains" | "accounts" | "mail-flow" | "quarantine";
 type ServerTab = "status" | "server" | "security" | "ai" | "domains" | "admins";
 type DomainTab = "overview" | "accounts" | "aliases" | "admins";
 type AntispamTab = "content" | "engines" | "rules" | "quarantine";
@@ -116,6 +117,7 @@ function App() {
   const [loginForm, setLoginForm] = React.useState(() => ({ email: window.localStorage.getItem("lpe.admin.lastEmail") ?? "", password: "" }));
   const [adminIdentity, setAdminIdentity] = React.useState<LoginResponse["admin"] | null>(null);
   const [page, setPage] = React.useState<PageKey>("server");
+  const [tenantSection, setTenantSection] = React.useState<TenantSection>("overview");
   const [serverTab, setServerTab] = React.useState<ServerTab>("status");
   const [domainTab, setDomainTab] = React.useState<DomainTab>("overview");
   const [antispamTab, setAntispamTab] = React.useState<AntispamTab>("content");
@@ -412,10 +414,24 @@ function App() {
   ];
   const visibleSidebarPages = tenantDashboard ? sidebarPages.slice(0, 1) : sidebarPages;
   const overview = tenantDashboard?.overview ?? state?.overview;
+  const tenantSections: { key: TenantSection; label: string; icon: string }[] = [
+    { key: "overview", label: tenantLabels.overview, icon: "overview" },
+    { key: "domains", label: copy.domains, icon: "address" },
+    { key: "accounts", label: copy.accounts, icon: "digest" },
+    { key: "mail-flow", label: tenantLabels.mailFlow, icon: "verification" },
+    { key: "quarantine", label: copy.quarantine, icon: "quarantine" },
+  ];
+  const tenantActiveDomains = tenantDashboard?.domains.filter((domain) => domain.status === "active").length ?? 0;
+  const tenantActiveAccounts = tenantDashboard?.accounts.filter((account) => account.status === "active").length ?? 0;
 
   function navigatePage(nextPage: PageKey) {
     setPage(nextPage);
     if (nextPage === "accounts") setDomainTab("accounts");
+  }
+
+  function navigateTenantSection(nextSection: TenantSection) {
+    setTenantSection(nextSection);
+    document.getElementById(`tenant-${nextSection}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   React.useEffect(() => {
@@ -442,21 +458,16 @@ function App() {
     </main>;
   }
 
-  return <main className={sidebarCollapsed ? "console-shell is-sidebar-collapsed" : "console-shell"}>
+  return <main className={tenantDashboard ? "console-shell tenant-console" : sidebarCollapsed ? "console-shell is-sidebar-collapsed" : "console-shell"}>
     {sidebarMobileOpen ? <button className="sidebar-backdrop" type="button" aria-label={copy.close} onClick={() => setSidebarMobileOpen(false)} /> : null}
     <aside className={sidebarCollapsed ? sidebarMobileOpen ? "sidebar is-collapsed is-mobile-open" : "sidebar is-collapsed" : sidebarMobileOpen ? "sidebar is-mobile-open" : "sidebar"}>
       <div className="sidebar-stack">
         <section className="sidebar-brand">
           <div className="brand-mark" aria-hidden="true">LP</div>
-          <div className="brand-copy"><p className="eyebrow">{copy.eyebrow}</p><h1>{copy.title}</h1><p className="sidebar-text">{copy.subtitle}</p></div>
+          <div className="brand-copy">{tenantDashboard ? <><p className="eyebrow">{tenantLabels.navigation}</p><h1>{tenantLabels.title}</h1></> : <><p className="eyebrow">{copy.eyebrow}</p><h1>{copy.title}</h1><p className="sidebar-text">{copy.subtitle}</p></>}</div>
           <button className="icon-button sidebar-toggle" type="button" aria-label={sidebarCollapsed ? copy.open : copy.close} title={sidebarCollapsed ? copy.open : copy.close} onClick={() => setSidebarCollapsed((value) => !value)}><span className="menu-icon" aria-hidden="true" /></button>
         </section>
-        <div className="sidebar-group">
-          <nav className="page-list">{visibleSidebarPages.slice(0, 4).map((entry) => <button key={entry.key} type="button" title={entry.label} aria-label={entry.label} className={page === entry.key ? "page-button is-active" : "page-button"} onClick={() => navigatePage(entry.key)}><span className={`page-icon page-icon-${entry.icon}`} aria-hidden="true" /><span className="page-copy"><span className="page-label">{entry.label}</span></span></button>)}</nav>
-        </div>
-        <div className="sidebar-group">
-          <nav className="page-list">{visibleSidebarPages.slice(4).map((entry) => <button key={entry.key} type="button" title={entry.label} aria-label={entry.label} className={page === entry.key ? "page-button is-active" : "page-button"} onClick={() => navigatePage(entry.key)}><span className={`page-icon page-icon-${entry.icon}`} aria-hidden="true" /><span className="page-copy"><span className="page-label">{entry.label}</span></span></button>)}</nav>
-        </div>
+        {tenantDashboard ? <div className="sidebar-group"><nav className="page-list">{tenantSections.map((entry) => <button key={entry.key} type="button" className={tenantSection === entry.key ? "page-button is-active" : "page-button"} onClick={() => navigateTenantSection(entry.key)}><span className={`page-icon page-icon-${entry.icon}`} aria-hidden="true" /><span className="page-copy"><span className="page-label">{entry.label}</span></span></button>)}</nav></div> : <><div className="sidebar-group"><nav className="page-list">{visibleSidebarPages.slice(0, 4).map((entry) => <button key={entry.key} type="button" title={entry.label} aria-label={entry.label} className={page === entry.key ? "page-button is-active" : "page-button"} onClick={() => navigatePage(entry.key)}><span className={`page-icon page-icon-${entry.icon}`} aria-hidden="true" /><span className="page-copy"><span className="page-label">{entry.label}</span></span></button>)}</nav></div><div className="sidebar-group"><nav className="page-list">{visibleSidebarPages.slice(4).map((entry) => <button key={entry.key} type="button" title={entry.label} aria-label={entry.label} className={page === entry.key ? "page-button is-active" : "page-button"} onClick={() => navigatePage(entry.key)}><span className={`page-icon page-icon-${entry.icon}`} aria-hidden="true" /><span className="page-copy"><span className="page-label">{entry.label}</span></span></button>)}</nav></div></>}
       </div>
       <div className="sidebar-footer">
         <label className="locale-picker sidebar-locale"><span>{copy.languageLabel}</span><select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>{supportedLocales.map((entry) => <option key={entry} value={entry}>{localeLabels[entry]}</option>)}</select></label>
@@ -464,24 +475,22 @@ function App() {
       </div>
     </aside>
     <section className="workspace">
-      <header className="topbar"><div className="topbar-copy"><div className="topbar-heading"><button className="icon-button shell-toggle" type="button" aria-label={sidebarMobileOpen ? copy.close : copy.open} aria-expanded={sidebarMobileOpen} onClick={() => setSidebarMobileOpen((value) => !value)}>☰</button><h2>{visibleSidebarPages.find((entry) => entry.key === page)?.label}</h2></div><p>{adminIdentity ? `${copy.banner} · ${adminIdentity.email}` : copy.banner}</p></div><div className="topbar-actions"><span className="pill">{adminIdentity?.role ?? "admin"}</span><span className="pill">{overview ? `${overview.total_domains} ${copy.domains}` : copy.loading}</span><div className="inline-form"><button className="secondary-button" type="button" onClick={() => void load()}>{copy.refresh}</button><button className="secondary-button" type="button" onClick={() => { setToken(null); setState(null); setTenantDashboard(null); }}>{copy.logout}</button></div></div></header>
+      <header className="topbar"><div className="topbar-copy"><div className="topbar-heading"><button className="icon-button shell-toggle" type="button" aria-label={sidebarMobileOpen ? copy.close : copy.open} aria-expanded={sidebarMobileOpen} onClick={() => setSidebarMobileOpen((value) => !value)}>☰</button><h2>{tenantDashboard ? tenantLabels.title : visibleSidebarPages.find((entry) => entry.key === page)?.label}</h2></div><p>{tenantDashboard ? tenantLabels.subtitle : adminIdentity ? `${copy.banner} · ${adminIdentity.email}` : copy.banner}</p></div><div className="topbar-actions"><span className="pill">{adminIdentity?.role ?? "admin"}</span><span className="pill">{overview ? `${overview.total_domains} ${copy.domains}` : copy.loading}</span><div className="inline-form"><button className="secondary-button" type="button" onClick={() => void load()}>{copy.refresh}</button><button className="secondary-button" type="button" onClick={() => { setToken(null); setState(null); setTenantDashboard(null); }}>{copy.logout}</button></div></div></header>
       {error ? <p className="feedback error">{error}</p> : null}
       {notice ? <p className="feedback notice">{notice}</p> : null}
       {!state && !tenantDashboard ? <p className="feedback muted">{busy === "load" ? copy.loading : copy.noData}</p> : null}
       {tenantDashboard && page === "server" ? <section className="page-card tenant-dashboard">
-        <div className="tenant-dashboard-heading">
-          <div><h3>{tenantLabels.title}</h3><p className="muted">{adminIdentity?.email}</p></div>
-        </div>
-        <section className="tenant-pulse" aria-label={tenantLabels.title}>
-          <div className="tenant-pulse-item"><span>{copy.domains}</span><strong>{tenantDashboard.overview.total_domains}</strong><small>{tenantDashboard.domains.filter((domain) => domain.status === "active").length} {copy.enabled.toLowerCase()}</small></div>
-          <div className="tenant-pulse-item"><span>{copy.accounts}</span><strong>{tenantDashboard.overview.total_accounts}</strong><small>{tenantDashboard.overview.total_mailboxes} {copy.mailboxName.toLowerCase()}</small></div>
-          <div className="tenant-pulse-item"><span>{tenantLabels.mailFlow}</span><strong>{tenantDashboard.overview.pending_queue_items}</strong><small>{copy.queue}</small></div>
-          <div className="tenant-pulse-item"><span>{copy.quarantine}</span><strong>{tenantDashboard.quarantine.source}</strong><small>{tenantDashboard.quarantine.available ? copy.enabled : tenantLabels.quarantineManaged}</small></div>
+        <section id="tenant-overview" className="tenant-overview-metrics" aria-label={tenantLabels.title}>
+          <article className="tenant-overview-card tenant-overview-card-domains"><div className="tenant-overview-card-head"><span className="tenant-overview-icon"><span className="page-icon page-icon-address" aria-hidden="true" /></span><div><h3>{copy.domains}</h3><span>{tenantActiveDomains === tenantDashboard.domains.length ? copy.enabled : tenantLabels.active}</span></div></div><div className="tenant-overview-card-body"><strong>{tenantDashboard.overview.total_domains}</strong><dl><div><dt>{tenantLabels.active}</dt><dd>{tenantActiveDomains}</dd></div><div><dt>{tenantLabels.inactive}</dt><dd>{tenantDashboard.overview.total_domains - tenantActiveDomains}</dd></div></dl></div><button className="tenant-overview-link" type="button" onClick={() => navigateTenantSection("domains")}>{tenantLabels.viewDomains}</button></article>
+          <article className="tenant-overview-card tenant-overview-card-mail"><div className="tenant-overview-card-head"><span className="tenant-overview-icon"><span className="page-icon page-icon-digest" aria-hidden="true" /></span><div><h3>{tenantLabels.mailFlow}</h3><span>{copy.queue}</span></div></div><div className="tenant-overview-card-body"><strong>{tenantDashboard.overview.pending_queue_items}</strong><dl><div><dt>{tenantLabels.pendingHandoffs}</dt><dd>{tenantDashboard.overview.pending_queue_items}</dd></div><div><dt>{copy.mailboxName}</dt><dd>{tenantDashboard.overview.total_mailboxes}</dd></div></dl></div><button className="tenant-overview-link" type="button" onClick={() => navigateTenantSection("mail-flow")}>{tenantLabels.viewMailFlow}</button></article>
+          <article className="tenant-overview-card tenant-overview-card-quarantine"><div className="tenant-overview-card-head"><span className="tenant-overview-icon"><span className="page-icon page-icon-quarantine" aria-hidden="true" /></span><div><h3>{copy.quarantine}</h3><span>{tenantLabels.perimeter}</span></div></div><div className="tenant-overview-card-body"><strong>{tenantDashboard.quarantine.source}</strong><dl><div><dt>{tenantLabels.status}</dt><dd>{tenantLabels.perimeter}</dd></div></dl></div><button className="tenant-overview-link" type="button" onClick={() => navigateTenantSection("quarantine")}>{tenantLabels.viewQuarantine}</button></article>
+          <article className="tenant-overview-card tenant-overview-card-accounts"><div className="tenant-overview-card-head"><span className="tenant-overview-icon"><span className="page-icon page-icon-verification" aria-hidden="true" /></span><div><h3>{copy.accounts}</h3><span>{tenantActiveAccounts === tenantDashboard.accounts.length ? copy.enabled : tenantLabels.active}</span></div></div><div className="tenant-overview-card-body"><strong>{tenantDashboard.overview.total_accounts}</strong><dl><div><dt>{tenantLabels.active}</dt><dd>{tenantActiveAccounts}</dd></div><div><dt>{tenantLabels.inactive}</dt><dd>{tenantDashboard.overview.total_accounts - tenantActiveAccounts}</dd></div></dl></div><button className="tenant-overview-link" type="button" onClick={() => navigateTenantSection("accounts")}>{tenantLabels.viewAccounts}</button></article>
         </section>
         <div className="tenant-dashboard-grid">
-          <section className="tenant-dashboard-section"><div className="section-title-row"><h3>{copy.domains}</h3><span className="pill">{tenantDashboard.domains.length}</span></div><div className="tenant-dashboard-list">{tenantDashboard.domains.length ? tenantDashboard.domains.map((domain) => <div className="tenant-dashboard-row" key={domain.id}><div><strong>{domain.name}</strong><span>{domain.inbound_enabled ? copy.inbound : copy.disabled} · {domain.outbound_enabled ? copy.outbound : copy.disabled}</span></div><span className={domain.status === "active" ? "pill ok" : "pill warn"}>{domain.status}</span></div>) : <p className="muted">{copy.noData}</p>}</div></section>
-          <section className="tenant-dashboard-section"><div className="section-title-row"><h3>{copy.accounts}</h3><span className="pill">{tenantDashboard.accounts.length}</span></div><div className="tenant-dashboard-list">{tenantDashboard.accounts.length ? tenantDashboard.accounts.map((account) => <div className="tenant-dashboard-row" key={account.id}><div><strong>{account.display_name}</strong><span>{account.email} · {account.used_mb}/{account.quota_mb} MB</span></div><span className={account.status === "active" ? "pill ok" : "pill warn"}>{account.status}</span></div>) : <p className="muted">{copy.noData}</p>}</div></section>
+          <section id="tenant-domains" className="tenant-dashboard-section tenant-overview-panel"><div className="section-title-row"><div><h3>{copy.domains}</h3><p>{tenantLabels.domainInventory}</p></div><span className="pill">{tenantDashboard.domains.length}</span></div><div className="tenant-dashboard-list">{tenantDashboard.domains.length ? tenantDashboard.domains.map((domain) => <div className="tenant-dashboard-row" key={domain.id}><div><strong>{domain.name}</strong><span>{domain.inbound_enabled ? copy.inbound : copy.disabled} · {domain.outbound_enabled ? copy.outbound : copy.disabled}</span></div><span className={domain.status === "active" ? "pill ok" : "pill warn"}>{domain.status}</span></div>) : <p className="muted">{copy.noData}</p>}</div></section>
+          <section id="tenant-accounts" className="tenant-dashboard-section tenant-overview-panel"><div className="section-title-row"><div><h3>{copy.accounts}</h3><p>{tenantLabels.accountInventory}</p></div><span className="pill">{tenantDashboard.accounts.length}</span></div><div className="tenant-dashboard-list">{tenantDashboard.accounts.length ? tenantDashboard.accounts.map((account) => <div className="tenant-dashboard-row" key={account.id}><div><strong>{account.display_name}</strong><span>{account.email} · {account.used_mb}/{account.quota_mb} MB</span></div><span className={account.status === "active" ? "pill ok" : "pill warn"}>{account.status}</span></div>) : <p className="muted">{copy.noData}</p>}</div></section>
         </div>
+        <section className="tenant-dashboard-notes"><article id="tenant-mail-flow"><h3>{tenantLabels.pendingHandoffs}</h3><p>{tenantDashboard.overview.pending_queue_items} {copy.queue.toLowerCase()}</p></article><article id="tenant-quarantine"><h3>{copy.quarantine}</h3><p>{tenantLabels.quarantineManaged}</p></article></section>
       </section> : null}
       {state ? <>
         {page === "server" ? <section className="page-card">
