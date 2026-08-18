@@ -600,3 +600,266 @@ body { background: var(--outlook-canvas); }
   .detail-header, .sender-card, .editor-shell-header { grid-template-columns: 1fr; }
   .detail-actions { margin-top: 10px; }
 }
+
+/* Contextual action ribbon and type-specific work surfaces. */
+.contextual-ribbon {
+  min-height: 56px;
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--outlook-line);
+  background: #fff;
+}
+
+.ribbon-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 7px 10px;
+  border-right: 1px solid var(--outlook-line);
+}
+
+.ribbon-command {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--outlook-ink);
+  font-size: 12px;
+  background: transparent;
+  white-space: nowrap;
+}
+
+.ribbon-command:hover:not(:disabled) { background: #f1f4f7; }
+.ribbon-command:disabled { color: #a7adb3; cursor: not-allowed; }
+.ribbon-command.is-primary { color: #fff; background: var(--outlook-blue); }
+.ribbon-command.is-primary:hover { background: var(--outlook-blue-dark); }
+
+.content-grid.is-surface-view {
+  display: block;
+  position: relative;
+  overflow: auto;
+}
+
+.calendar-workspace {
+  min-height: 100%;
+  display: grid;
+  grid-template-columns: 264px minmax(700px, 1fr);
+  background: #fff;
+}
+
+.calendar-month-pane {
+  padding: 14px 12px;
+  border-right: 1px solid var(--outlook-line);
+  background: #fafbfc;
+}
+
+.calendar-month-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.calendar-month-title button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 3px;
+  color: var(--outlook-ink);
+  font-size: 20px;
+  background: transparent;
+}
+
+.calendar-month-title button:hover { background: #edf1f5; }
+.calendar-arrow { width: 8px; height: 8px; display: block; margin-left: 8px; border-top: 1.5px solid currentColor; border-right: 1.5px solid currentColor; transform: rotate(45deg); }
+.calendar-arrow.is-previous { margin-left: 11px; transform: rotate(-135deg); }
+
+.calendar-month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.calendar-weekday {
+  display: grid;
+  place-items: center;
+  height: 24px;
+  color: var(--outlook-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.calendar-month-grid button {
+  aspect-ratio: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--outlook-ink);
+  font-size: 11px;
+  background: transparent;
+}
+
+.calendar-month-grid button:hover { background: #e5edf5; }
+.calendar-month-grid button.is-outside { color: #a7adb3; }
+.calendar-month-grid button.is-selected { color: #fff; background: var(--outlook-blue); }
+.calendar-month-grid button.has-event:not(.is-selected) { box-shadow: inset 0 -2px 0 var(--outlook-blue); }
+
+.calendar-week-pane { min-width: 0; overflow: auto; }
+
+.calendar-week-heading {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--outlook-line);
+  font-size: 15px;
+}
+
+.calendar-week-grid {
+  min-width: 840px;
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+}
+
+.calendar-time-column {
+  display: grid;
+  grid-template-rows: repeat(11, 48px);
+  padding-top: 32px;
+  color: var(--outlook-muted);
+  font-size: 10px;
+  text-align: right;
+}
+
+.calendar-time-column span { padding: 5px 7px 0 0; }
+
+.calendar-days { display: grid; grid-template-columns: repeat(7, minmax(110px, 1fr)); }
+
+.calendar-day {
+  position: relative;
+  min-height: 560px;
+  border-left: 1px solid var(--outlook-line);
+}
+
+.calendar-day.is-selected { background: #fbfdff; }
+.calendar-day-label { height: 32px; padding: 8px 8px 0; color: #365f85; font-size: 11px; font-weight: 600; }
+.calendar-hour { height: 48px; border-top: 1px solid #edf0f2; }
+
+.calendar-event {
+  position: absolute;
+  right: 4px;
+  left: 4px;
+  z-index: 1;
+  display: grid;
+  gap: 2px;
+  align-content: start;
+  padding: 5px 6px;
+  overflow: hidden;
+  border: 0;
+  border-left: 1px solid var(--outlook-blue);
+  border-radius: 3px;
+  color: #153958;
+  font-size: 10px;
+  text-align: left;
+  background: #bedbf4;
+}
+
+.calendar-event:hover, .calendar-event.is-active { background: #9ec9ed; }
+.calendar-event span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.contacts-workspace { min-height: 100%; background: #fff; }
+.contacts-workspace > header, .task-items-pane > header {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 22px;
+  border-bottom: 1px solid var(--outlook-line);
+  font-size: 14px;
+}
+
+.contacts-workspace > header span, .task-items-pane > header span { color: var(--outlook-muted); font-size: 12px; }
+
+.contacts-table-head, .contact-table-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 29%) minmax(280px, 1fr) minmax(160px, 23%);
+  gap: 12px;
+  align-items: center;
+  padding: 0 24px;
+}
+
+.contacts-table-head {
+  height: 36px;
+  border-bottom: 1px solid var(--outlook-line);
+  color: var(--outlook-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.contact-table-row {
+  width: 100%;
+  min-height: 54px;
+  border: 0;
+  border-bottom: 1px solid #edf0f2;
+  color: var(--outlook-ink);
+  font-size: 12px;
+  text-align: left;
+  background: #fff;
+}
+
+.contact-table-row:hover { background: #f6f8fa; }
+.contact-table-row.is-active { background: #d7ebfb; }
+.contact-table-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.contact-table-name strong, .contact-table-name small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contact-table-name small { margin-top: 2px; color: var(--outlook-muted); }
+.contact-initials { width: 28px; height: 28px; display: grid; flex: 0 0 auto; place-items: center; border-radius: 50%; color: #345a78; font-size: 10px; background: #dbeaf6; }
+
+.tasks-workspace { min-height: 100%; display: grid; grid-template-columns: 236px minmax(360px, 1fr); background: #fff; }
+.task-list-pane { display: grid; align-content: start; gap: 3px; padding: 14px 8px; border-right: 1px solid var(--outlook-line); background: #f7f8fa; }
+.task-list-pane strong { padding: 5px 8px 9px; font-size: 14px; }
+.task-list-pane span { padding: 7px 8px; border-radius: 3px; color: var(--outlook-ink); font-size: 12px; }
+.task-list-pane span:first-of-type { background: #e3edf8; font-weight: 600; }
+.task-items-pane { min-width: 0; }
+.task-item-list { max-width: 600px; }
+.task-item-row { width: 100%; display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; align-items: center; min-height: 48px; padding: 8px 16px; border: 0; border-bottom: 1px solid #edf0f2; color: var(--outlook-ink); text-align: left; background: #fff; }
+.task-item-row:hover { background: #f6f8fa; }
+.task-item-row.is-active { background: #d7ebfb; }
+.task-item-row strong, .task-item-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-item-row small { margin-top: 2px; color: var(--outlook-muted); font-size: 11px; }
+.task-check { width: 16px; height: 16px; border: 1px solid #7a848d; border-radius: 50%; }
+.task-check.is-complete { border-color: #237b4b; background: #bce2cc; }
+
+.workspace-edit-drawer {
+  position: fixed;
+  top: 48px;
+  right: 0;
+  bottom: 0;
+  z-index: 25;
+  width: min(470px, 100vw);
+  padding: 18px;
+  overflow: auto;
+  border-left: 1px solid var(--outlook-line);
+  background: #fff;
+  box-shadow: -8px 0 22px rgba(0, 0, 0, 0.14);
+}
+
+.workspace-edit-close { float: right; margin-bottom: 8px; }
+
+@media (max-width: 900px) {
+  .contextual-ribbon { min-height: 48px; }
+  .ribbon-group { padding: 5px 6px; }
+  .calendar-workspace { grid-template-columns: 220px minmax(620px, 1fr); }
+  .contacts-table-head, .contact-table-row { grid-template-columns: minmax(180px, 1fr) minmax(160px, 1fr); padding-inline: 14px; }
+  .contacts-table-head span:last-child, .contact-table-row > span:last-child { display: none; }
+}
+
+@media (max-width: 620px) {
+  .calendar-workspace { display: block; }
+  .calendar-month-pane { border-right: 0; border-bottom: 1px solid var(--outlook-line); }
+  .calendar-month-grid { max-width: 310px; }
+  .tasks-workspace { grid-template-columns: 1fr; }
+  .task-list-pane { border-right: 0; border-bottom: 1px solid var(--outlook-line); }
+}

@@ -8,6 +8,7 @@ import { ContactEditor } from "./components/ContactEditor";
 import { CanonicalItemEditor } from "./components/CanonicalItemEditor";
 import { SettingsWorkspace } from "./components/SettingsWorkspace";
 import { ClientIcon } from "./components/ClientIcon";
+import { CalendarWorkspace, ContactsWorkspace, MailRibbon, TasksWorkspace } from "./components/ContextualWorkspace";
 import { useClientWorkspace } from "./useClientWorkspace";
 import type { ClientIdentity } from "./client-types";
 import { Button, Card, Input, Select } from "../../ui/src/components/primitives";
@@ -49,6 +50,9 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
   const [sidebarMobileOpen, setSidebarMobileOpen] = React.useState(false);
   const [mobileDetailOpen, setMobileDetailOpen] = React.useState(false);
+  const [calendarEditorOpen, setCalendarEditorOpen] = React.useState(false);
+  const [contactEditorOpen, setContactEditorOpen] = React.useState(false);
+  const [taskEditorOpen, setTaskEditorOpen] = React.useState(false);
   const [isNarrowScreen, setIsNarrowScreen] = React.useState(() => window.matchMedia("(max-width: 900px)").matches);
   const accountMenuRef = React.useRef<HTMLDivElement | null>(null);
   const accountMenuTriggerRef = React.useRef<HTMLButtonElement | null>(null);
@@ -72,6 +76,12 @@ export function App() {
     window.history.replaceState(null, "", "/mail/");
   }, []);
   const workspace = useClientWorkspace(copy, authToken, identity, handleSessionExpired);
+
+  React.useEffect(() => {
+    setCalendarEditorOpen(false);
+    setContactEditorOpen(false);
+    setTaskEditorOpen(false);
+  }, [workspace.section]);
 
   React.useEffect(() => {
     document.documentElement.lang = locale;
@@ -242,12 +252,6 @@ export function App() {
 
   const isMailWorkspace = workspace.section === "mail";
   const showMailPane = isMailWorkspace;
-  const attachmentCount = workspace.section === "mail"
-    ? workspace.filtered.reduce((total, item) => total + item.attachments.length, 0)
-    : 0;
-  const unreadCount = workspace.section === "mail"
-    ? workspace.filtered.filter((item) => item.unread).length
-    : 0;
   const workspaceTitle = workspace.section === "mail"
     ? workspace.folder.startsWith("mailbox:")
       ? workspace.mailboxes.find((mailbox) => `mailbox:${mailbox.id}` === workspace.folder)?.name ?? copy.folders.inbox
@@ -337,21 +341,23 @@ export function App() {
               </button>
             ))}
           </nav>
+          {isMailWorkspace ? <MailRibbon
+            copy={copy}
+            current={workspace.current}
+            busy={workspace.messageBusy}
+            onCompose={() => { workspace.openComposer("new"); setMobileDetailOpen(true); }}
+            onReply={(message) => { workspace.openComposer("reply", message); setMobileDetailOpen(true); }}
+            onForward={(message) => { workspace.openComposer("forward", message); setMobileDetailOpen(true); }}
+            onToggleFlag={(message) => void workspace.toggleMessageFlag(message)}
+            onRefresh={() => void workspace.refreshWorkspace()}
+          /> : (
           <div className="workspace-toolbar">
             <div className="workspace-toolbar-actions">
-              <Button className="workspace-compose-button" variant="primary" type="button" onClick={() => { workspace.openComposer("new"); setMobileDetailOpen(true); }}>{copy.compose}</Button>
-              {isMailWorkspace && workspace.mailboxAccounts.length > 1 ? (
-                <label className="locale-picker compact">
-                  <span>{copy.mailboxLabel}</span>
-                  <Select value={workspace.workspaceMailboxAccountId} onChange={(event) => workspace.selectWorkspaceMailbox(event.target.value)}>
-                    {workspace.mailboxAccounts.map((mailbox) => <option key={mailbox.accountId} value={mailbox.accountId}>{`${mailbox.displayName} <${mailbox.email}>`}</option>)}
-                  </Select>
-                </label>
-              ) : null}
+              {workspace.section === "calendar" ? <Button className="workspace-compose-button" variant="primary" type="button" onClick={() => { workspace.resetEventForm(); setCalendarEditorOpen(true); }}>{copy.calendarActions.new}</Button> : null}
+              {workspace.section === "contacts" ? <Button className="workspace-compose-button" variant="primary" type="button" onClick={() => { workspace.resetContactForm(); setContactEditorOpen(true); }}>{copy.contactActions.new}</Button> : null}
+              {workspace.section === "tasks" ? <Button className="workspace-compose-button" variant="primary" type="button" onClick={() => { workspace.resetTaskForm(); setTaskEditorOpen(true); }}>{copy.objectEditor.tasks.new}</Button> : null}
             </div>
             <div className="workspace-toolbar-summary">
-              {isMailWorkspace ? <span className="workspace-chip">{copy.summaryUnread.replace("{count}", String(unreadCount))}</span> : null}
-              {isMailWorkspace ? <span className="workspace-chip">{copy.attachmentCount.replace("{count}", String(attachmentCount))}</span> : null}
               <Button variant="ghost" type="button" onClick={() => void workspace.refreshWorkspace()}>{copy.topActions.sync}</Button>
               <label className="locale-picker compact">
                 <span>{copy.languageLabel}</span>
@@ -361,11 +367,12 @@ export function App() {
               </label>
             </div>
           </div>
+          )}
 
           {workspace.notice ? <div className="notice-banner">{workspace.notice}</div> : null}
 
-          <div className={`${showMailPane || workspace.section !== "mail" ? "content-grid has-detail" : "content-grid"}${mobileDetailOpen ? " is-mobile-detail-open" : ""}`}>
-            {workspace.section !== "settings" ? (
+          <div className={`${["calendar", "contacts", "tasks"].includes(workspace.section) ? "content-grid is-surface-view" : showMailPane || workspace.section !== "mail" ? "content-grid has-detail" : "content-grid"}${mobileDetailOpen ? " is-mobile-detail-open" : ""}`}>
+            {workspace.section !== "settings" && !["calendar", "contacts", "tasks"].includes(workspace.section) ? (
               <MasterPane
                 copy={copy}
                 section={workspace.section}
@@ -402,6 +409,26 @@ export function App() {
               />
             ) : null}
 
+            {workspace.section === "calendar" ? <>
+              <CalendarWorkspace
+                copy={copy}
+                events={workspace.filteredEvents}
+                selectedEventId={workspace.eventId}
+                onSelectEvent={(id) => { workspace.setEventId(id); setCalendarEditorOpen(true); }}
+              />
+              {calendarEditorOpen ? <aside className="workspace-edit-drawer"><Button className="workspace-edit-close" variant="ghost" size="sm" type="button" onClick={() => setCalendarEditorOpen(false)}>{copy.editorActions.cancel}</Button><EventEditor copy={copy} currentEvent={workspace.currentEvent} eventForm={workspace.eventForm} setEventForm={workspace.setEventForm} resources={workspace.resources} onNew={workspace.resetEventForm} onSave={() => void workspace.saveEvent()} onDelete={() => void workspace.deleteEvent()} /></aside> : null}
+            </> : null}
+
+            {workspace.section === "contacts" ? <>
+              <ContactsWorkspace copy={copy} contacts={workspace.filteredContacts} selectedId={workspace.contactId} onSelect={(id) => { workspace.setContactId(id); setContactEditorOpen(true); }} />
+              {contactEditorOpen ? <aside className="workspace-edit-drawer"><Button className="workspace-edit-close" variant="ghost" size="sm" type="button" onClick={() => setContactEditorOpen(false)}>{copy.editorActions.cancel}</Button><ContactEditor copy={copy} currentContact={workspace.currentContact} contactForm={workspace.contactForm} setContactForm={workspace.setContactForm} onNew={workspace.resetContactForm} onSave={() => void workspace.saveContact()} onDelete={() => void workspace.deleteContact()} /></aside> : null}
+            </> : null}
+
+            {workspace.section === "tasks" ? <>
+              <TasksWorkspace copy={copy} taskLists={workspace.taskLists} tasks={workspace.filteredTasks} selectedId={workspace.taskId} onSelect={(id) => { workspace.setTaskId(id); setTaskEditorOpen(true); }} />
+              {taskEditorOpen ? <aside className="workspace-edit-drawer"><Button className="workspace-edit-close" variant="ghost" size="sm" type="button" onClick={() => setTaskEditorOpen(false)}>{copy.editorActions.cancel}</Button><CanonicalItemEditor copy={copy} section="tasks" taskLists={workspace.taskLists} currentTask={workspace.currentTask} taskForm={workspace.taskForm} setTaskForm={workspace.setTaskForm} currentNote={workspace.currentNote} noteForm={workspace.noteForm} setNoteForm={workspace.setNoteForm} currentJournalEntry={workspace.currentJournalEntry} journalEntryForm={workspace.journalEntryForm} setJournalEntryForm={workspace.setJournalEntryForm} currentReminder={workspace.currentReminder} onNewTask={workspace.resetTaskForm} onSaveTask={() => void workspace.saveTask()} onDeleteTask={() => void workspace.deleteTask()} onNewNote={workspace.resetNoteForm} onSaveNote={() => void workspace.saveNote()} onDeleteNote={() => void workspace.deleteNote()} onNewJournalEntry={workspace.resetJournalEntryForm} onSaveJournalEntry={() => void workspace.saveJournalEntry()} onDeleteJournalEntry={() => void workspace.deleteJournalEntry()} /></aside> : null}
+            </> : null}
+
             {showMailPane ? (
               <section className="detail-pane">
                 <Button className="mobile-detail-back" variant="ghost" size="sm" type="button" onClick={() => setMobileDetailOpen(false)}>{copy.navigation.backToList}</Button>
@@ -429,37 +456,6 @@ export function App() {
                   onOpenAttachment={workspace.openAttachment}
                 />
               </section>
-            ) : null}
-
-            {workspace.section === "calendar" ? (
-            <section className="detail-pane">
-              <Button className="mobile-detail-back" variant="ghost" size="sm" type="button" onClick={() => setMobileDetailOpen(false)}>{copy.navigation.backToList}</Button>
-              <EventEditor
-                copy={copy}
-                currentEvent={workspace.currentEvent}
-                eventForm={workspace.eventForm}
-                setEventForm={workspace.setEventForm}
-                resources={workspace.resources}
-                onNew={workspace.resetEventForm}
-                onSave={() => void workspace.saveEvent()}
-                onDelete={() => void workspace.deleteEvent()}
-              />
-            </section>
-            ) : null}
-
-            {workspace.section === "contacts" ? (
-            <section className="detail-pane">
-              <Button className="mobile-detail-back" variant="ghost" size="sm" type="button" onClick={() => setMobileDetailOpen(false)}>{copy.navigation.backToList}</Button>
-              <ContactEditor
-                copy={copy}
-                currentContact={workspace.currentContact}
-                contactForm={workspace.contactForm}
-                setContactForm={workspace.setContactForm}
-                onNew={workspace.resetContactForm}
-                onSave={() => void workspace.saveContact()}
-                onDelete={() => void workspace.deleteContact()}
-              />
-            </section>
             ) : null}
 
             {workspace.section === "settings" ? (
@@ -490,7 +486,7 @@ export function App() {
             </section>
             ) : null}
 
-            {["tasks", "notes", "journal", "reminders"].includes(workspace.section) ? (
+            {["notes", "journal", "reminders"].includes(workspace.section) ? (
             <section className="detail-pane">
               <Button className="mobile-detail-back" variant="ghost" size="sm" type="button" onClick={() => setMobileDetailOpen(false)}>{copy.navigation.backToList}</Button>
               <CanonicalItemEditor
