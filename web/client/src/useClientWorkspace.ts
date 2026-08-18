@@ -267,7 +267,7 @@ export function useClientWorkspace(
     return () => window.removeEventListener(sessionExpiredEvent, handleSessionExpired);
   }, [clearWorkspaceState, onSessionExpired]);
 
-  const loadWorkspace = React.useCallback(async (requestedMailboxAccountId?: string) => {
+  const loadWorkspace = React.useCallback(async (requestedMailboxAccountId?: string, background = false) => {
     if (!authToken || !identity) {
       clearWorkspaceState();
       return;
@@ -275,8 +275,10 @@ export function useClientWorkspace(
 
     const accountId = requestedMailboxAccountId || workspaceMailboxAccountId || identity.account_id;
 
-    setLoading(true);
-    setLoadError("");
+    if (!background) {
+      setLoading(true);
+      setLoadError("");
+    }
     try {
       const [payload, nextNotes, nextJournalEntries, nextReminders] = await Promise.all([
         apiJson<ClientWorkspacePayload>(`mail/workspace?accountId=${encodeURIComponent(accountId)}`, authToken),
@@ -298,9 +300,9 @@ export function useClientWorkspace(
       setWorkspaceMailboxAccountId(accountId);
       setLastRefreshedAt(new Date().toISOString());
     } catch {
-      setLoadError(copy.loadError);
+      if (!background) setLoadError(copy.loadError);
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
   }, [authToken, clearWorkspaceState, copy.loadError, identity, workspaceMailboxAccountId]);
 
@@ -413,14 +415,14 @@ export function useClientWorkspace(
       if (polling) return;
       polling = true;
       try {
-        await Promise.all([loadWorkspace(), loadSettings()]);
+        await loadWorkspace(undefined, true);
       } finally {
         polling = false;
       }
     };
     const interval = window.setInterval(() => void refresh(), 10_000);
     return () => window.clearInterval(interval);
-  }, [authToken, identity, loadSettings, loadWorkspace]);
+  }, [authToken, identity, loadWorkspace]);
 
   React.useEffect(() => {
     if (!authToken) {

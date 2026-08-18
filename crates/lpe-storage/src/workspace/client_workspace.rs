@@ -230,6 +230,7 @@ fn body_paragraphs(body_text: &str) -> Vec<String> {
 
 fn client_folder(role: &str, mailbox_id: Uuid) -> String {
     match role {
+        "inbox" => "inbox",
         "drafts" => "drafts",
         "sent" => "sent",
         "archive" => "archive",
@@ -327,6 +328,11 @@ fn client_contact_from_accessible(contact: AccessibleContact) -> super::ClientCo
 mod tests {
     use super::client_folder;
     use uuid::Uuid;
+
+    #[test]
+    fn client_folder_keeps_inbox_as_inbox() {
+        assert_eq!(client_folder("inbox", Uuid::from_u128(1)), "inbox");
+    }
 
     #[test]
     fn client_folder_keeps_custom_mailboxes_distinct() {
