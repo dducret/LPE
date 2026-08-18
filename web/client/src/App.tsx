@@ -56,10 +56,41 @@ export function App() {
   const [calendarDate, setCalendarDate] = React.useState(() => new Date());
   const [selectedTaskListId, setSelectedTaskListId] = React.useState("");
   const [isNarrowScreen, setIsNarrowScreen] = React.useState(() => window.matchMedia("(max-width: 900px)").matches);
+  const [messageListWidth, setMessageListWidth] = React.useState(430);
   const accountMenuRef = React.useRef<HTMLDivElement | null>(null);
   const accountMenuTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   const accountMenuActionRef = React.useRef<HTMLButtonElement | null>(null);
   const sidebarTriggerRef = React.useRef<HTMLButtonElement | null>(null);
+  const contentGridRef = React.useRef<HTMLDivElement | null>(null);
+
+  const setClampedMessageListWidth = React.useCallback((width: number) => {
+    const gridWidth = contentGridRef.current?.clientWidth ?? window.innerWidth;
+    setMessageListWidth(Math.min(Math.max(330, width), Math.max(330, gridWidth - 320)));
+  }, []);
+
+  const startMessageListResize = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = messageListWidth;
+    const resize = (moveEvent: PointerEvent) => setClampedMessageListWidth(startWidth + moveEvent.clientX - startX);
+    const stop = () => {
+      window.removeEventListener("pointermove", resize);
+      window.removeEventListener("pointerup", stop);
+    };
+    window.addEventListener("pointermove", resize);
+    window.addEventListener("pointerup", stop, { once: true });
+  }, [messageListWidth, setClampedMessageListWidth]);
+
+  const resizeMessageListWithKeyboard = React.useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = event.shiftKey ? 64 : 20;
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      setClampedMessageListWidth(messageListWidth - step);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      setClampedMessageListWidth(messageListWidth + step);
+    }
+  }, [messageListWidth, setClampedMessageListWidth]);
 
   const closeAccountMenu = React.useCallback((restoreFocus = true) => {
     setAccountMenuOpen(false);
@@ -426,7 +457,11 @@ export function App() {
 
           {workspace.notice ? <div className="notice-banner">{workspace.notice}</div> : null}
 
-          <div className={`${["calendar", "contacts", "tasks"].includes(workspace.section) ? "content-grid is-surface-view" : showMailPane || workspace.section !== "mail" ? "content-grid has-detail" : "content-grid"}${mobileDetailOpen ? " is-mobile-detail-open" : ""}`}>
+          <div
+            ref={contentGridRef}
+            className={`${["calendar", "contacts", "tasks"].includes(workspace.section) ? "content-grid is-surface-view" : showMailPane || workspace.section !== "mail" ? "content-grid has-detail" : "content-grid"}${isMailWorkspace && !isNarrowScreen ? " has-resizable-list" : ""}${mobileDetailOpen ? " is-mobile-detail-open" : ""}`}
+            style={isMailWorkspace && !isNarrowScreen ? { "--message-list-width": `${messageListWidth}px` } as React.CSSProperties : undefined}
+          >
             {workspace.section !== "settings" && !["calendar", "contacts", "tasks"].includes(workspace.section) ? (
               <MasterPane
                 copy={copy}
@@ -463,6 +498,19 @@ export function App() {
                 onSelectReminder={(id) => { workspace.setReminderId(id); setMobileDetailOpen(true); }}
               />
             ) : null}
+
+            {isMailWorkspace && !isNarrowScreen ? <div
+              className="list-pane-resizer"
+              role="separator"
+              aria-label={copy.navigation.resizeMessageList}
+              aria-orientation="vertical"
+              aria-valuemin={330}
+              aria-valuemax={Math.max(330, (contentGridRef.current?.clientWidth ?? window.innerWidth) - 320)}
+              aria-valuenow={messageListWidth}
+              tabIndex={0}
+              onPointerDown={startMessageListResize}
+              onKeyDown={resizeMessageListWithKeyboard}
+            /> : null}
 
             {workspace.section === "calendar" ? <>
               <CalendarWorkspace

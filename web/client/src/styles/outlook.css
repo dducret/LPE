@@ -301,6 +301,27 @@ body { background: var(--outlook-canvas); }
 }
 
 .content-grid:not(.has-detail) .list-pane { grid-column: 1 / -1; }
+.content-grid.has-detail.has-resizable-list {
+  grid-template-columns: minmax(330px, var(--message-list-width, 430px)) 8px minmax(0, 1fr);
+}
+
+.list-pane-resizer {
+  position: relative;
+  z-index: 1;
+  cursor: col-resize;
+  touch-action: none;
+  outline: 0;
+}
+
+.list-pane-resizer::after {
+  position: absolute;
+  inset: 0 3px;
+  content: "";
+  background: transparent;
+}
+
+.list-pane-resizer:hover::after,
+.list-pane-resizer:focus-visible::after { background: #cfe8ff; }
 .list-pane, .detail-pane, .reading-pane-card, .reading-empty-state, .editor-shell, .settings-card { border: 0; border-radius: 0; background: #fff; box-shadow: none; }
 
 .list-pane { min-height: 0; padding: 0; border-right: 1px solid var(--outlook-line); overflow: auto; }
