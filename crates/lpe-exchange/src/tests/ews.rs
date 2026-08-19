@@ -2461,6 +2461,133 @@ async fn get_user_availability_returns_suggestions_when_requested() {
 }
 
 #[tokio::test]
+// [MS-OXWAVLS] §3.1.4.1: one response is returned for each MailboxData entry.
+async fn get_user_availability_returns_ordered_responses_for_multiple_readable_mailboxes() {
+    let alice = FakeStore::account();
+    let alice_calendar = FakeStore::collection("default", "calendar", "Calendar");
+    let mut bob_calendar = FakeStore::collection(
+        "shared-calendar-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "calendar",
+        "Bob Calendar",
+    );
+    bob_calendar.owner_account_id =
+        Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    bob_calendar.owner_email = "bob@example.test".to_string();
+    bob_calendar.owner_display_name = "Bob".to_string();
+    bob_calendar.is_owned = false;
+    let alice_event = AccessibleEvent {
+        id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
+        uid: "alice-availability".to_string(),
+        collection_id: alice_calendar.id.clone(),
+        owner_account_id: alice.account_id,
+        owner_email: alice.email.clone(),
+        owner_display_name: "Alice".to_string(),
+        rights: FakeStore::rights(),
+        date: "2026-05-04".to_string(),
+        time: "09:00".to_string(),
+        time_zone: "UTC".to_string(),
+        duration_minutes: 30,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
+        title: "Alice private event".to_string(),
+        location: String::new(),
+        organizer_json: "{}".to_string(),
+        attendees: String::new(),
+        attendees_json: "[]".to_string(),
+        notes: String::new(),
+        body_html: String::new(),
+    };
+    let mut bob_event = alice_event.clone();
+    bob_event.id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbc").unwrap();
+    bob_event.uid = "bob-availability".to_string();
+    bob_event.collection_id = bob_calendar.id.clone();
+    bob_event.owner_account_id = bob_calendar.owner_account_id;
+    bob_event.owner_email = bob_calendar.owner_email.clone();
+    bob_event.owner_display_name = bob_calendar.owner_display_name.clone();
+    bob_event.time = "11:00".to_string();
+    bob_event.title = "Bob private event".to_string();
+    let service = ExchangeService::new(FakeStore {
+        session: Some(alice),
+        calendar_collections: Arc::new(Mutex::new(vec![alice_calendar, bob_calendar])),
+        events: Arc::new(Mutex::new(vec![alice_event, bob_event])),
+        ..Default::default()
+    });
+
+    let request = br#"<s:Envelope><s:Body><m:GetUserAvailabilityRequest><m:MailboxDataArray><t:MailboxData><t:Email><t:Address>alice@example.test</t:Address></t:Email></t:MailboxData><t:MailboxData><t:Email><t:Address>bob@example.test</t:Address></t:Email></t:MailboxData></m:MailboxDataArray><t:FreeBusyViewOptions><t:TimeWindow><t:StartTime>2026-05-04T00:00:00Z</t:StartTime><t:EndTime>2026-05-05T00:00:00Z</t:EndTime></t:TimeWindow></t:FreeBusyViewOptions></m:GetUserAvailabilityRequest></s:Body></s:Envelope>"#;
+    let response = service.handle(&bearer_headers(), request).await.unwrap();
+    let body = response_text(response).await;
+
+    assert_eq!(body.matches("<m:FreeBusyResponse>").count(), 2);
+    let alice_busy = body.find("2026-05-04T09:00:00Z").unwrap();
+    let bob_busy = body.find("2026-05-04T11:00:00Z").unwrap();
+    assert!(alice_busy < bob_busy);
+    assert!(!body.contains("Alice private event"));
+    assert!(!body.contains("Bob private event"));
+}
+
+#[tokio::test]
+async fn get_user_availability_redacts_an_unreadable_mailbox_without_hiding_other_results() {
+    let alice = FakeStore::account();
+    let alice_calendar = FakeStore::collection("default", "calendar", "Calendar");
+    let mut bob_calendar = FakeStore::collection(
+        "shared-calendar-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "calendar",
+        "Bob Calendar",
+    );
+    bob_calendar.owner_account_id =
+        Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    bob_calendar.owner_email = "bob@example.test".to_string();
+    bob_calendar.owner_display_name = "Bob".to_string();
+    bob_calendar.is_owned = false;
+    bob_calendar.rights.may_read = false;
+    let alice_event = AccessibleEvent {
+        id: Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap(),
+        uid: "alice-availability".to_string(),
+        collection_id: alice_calendar.id.clone(),
+        owner_account_id: alice.account_id,
+        owner_email: alice.email.clone(),
+        owner_display_name: "Alice".to_string(),
+        rights: FakeStore::rights(),
+        date: "2026-05-04".to_string(),
+        time: "09:00".to_string(),
+        time_zone: "UTC".to_string(),
+        duration_minutes: 30,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
+        title: "Alice private event".to_string(),
+        location: String::new(),
+        organizer_json: "{}".to_string(),
+        attendees: String::new(),
+        attendees_json: "[]".to_string(),
+        notes: String::new(),
+        body_html: String::new(),
+    };
+    let service = ExchangeService::new(FakeStore {
+        session: Some(alice),
+        calendar_collections: Arc::new(Mutex::new(vec![alice_calendar, bob_calendar])),
+        events: Arc::new(Mutex::new(vec![alice_event])),
+        ..Default::default()
+    });
+
+    let request = br#"<s:Envelope><s:Body><m:GetUserAvailabilityRequest><m:MailboxDataArray><t:MailboxData><t:Email><t:Address>alice@example.test</t:Address></t:Email></t:MailboxData><t:MailboxData><t:Email><t:Address>bob@example.test</t:Address></t:Email></t:MailboxData></m:MailboxDataArray><t:FreeBusyViewOptions><t:TimeWindow><t:StartTime>2026-05-04T00:00:00Z</t:StartTime><t:EndTime>2026-05-05T00:00:00Z</t:EndTime></t:TimeWindow></t:FreeBusyViewOptions></m:GetUserAvailabilityRequest></s:Body></s:Envelope>"#;
+    let response = service.handle(&bearer_headers(), request).await.unwrap();
+    let body = response_text(response).await;
+
+    assert_eq!(body.matches("<m:FreeBusyResponse>").count(), 2);
+    assert!(body.contains("2026-05-04T09:00:00Z"));
+    assert!(body.contains("<m:ResponseCode>ErrorFreeBusyGenerationFailed</m:ResponseCode>"));
+    assert!(!body.contains("Bob Calendar"));
+}
+
+#[tokio::test]
 async fn get_user_availability_enforces_calendar_grants_and_redacts_failures() {
     let mut shared_calendar = FakeStore::collection(
         "shared-calendar-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
@@ -7599,6 +7726,39 @@ async fn rooms_are_projected_from_canonical_directory_entries() {
 }
 
 #[tokio::test]
+async fn get_rooms_rejects_a_late_unsupported_room_list_without_projection() {
+    let room_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000036").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        extra_address_book_entries: Arc::new(Mutex::new(vec![ExchangeAddressBookEntry {
+            id: room_id,
+            display_name: "Room 102".to_string(),
+            email: "room102@example.test".to_string(),
+            entry_kind: ExchangeAddressBookEntryKind::Account,
+            directory_kind: ExchangeAddressBookDirectoryKind::Room,
+            member_emails: Vec::new(),
+            details: ExchangeAddressBookEntryDetails::default(),
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetRooms><m:RoomList><t:EmailAddress>rooms@example.test</t:EmailAddress></m:RoomList><m:RoomList><t:EmailAddress>custom-list@example.test</t:EmailAddress></m:RoomList></m:GetRooms></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetRoomsResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(!body.contains("<m:Rooms>"));
+    assert!(!body.contains("Room 102"));
+}
+
+#[tokio::test]
 async fn pull_and_streaming_notifications_replay_canonical_sql_change_cursor() {
     let mailbox_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000041").unwrap();
     let message_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000042").unwrap();
@@ -12502,12 +12662,19 @@ async fn archive_item_moves_message_to_canonical_archive_mailbox() {
             FakeStore::mailbox("44444444-4444-4444-4444-444444444444", "inbox", "Inbox"),
             FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "archive", "Archive"),
         ])),
-        emails: Arc::new(Mutex::new(vec![FakeStore::email(
-            "99999999-9999-9999-9999-999999999999",
-            "44444444-4444-4444-4444-444444444444",
-            "inbox",
-            "Archive target",
-        )])),
+        emails: Arc::new(Mutex::new(vec![{
+            let mut message = FakeStore::email(
+                "99999999-9999-9999-9999-999999999999",
+                "44444444-4444-4444-4444-444444444444",
+                "inbox",
+                "Archive target",
+            );
+            message.bcc.push(JmapEmailAddress {
+                address: "hidden-archive@example.test".to_string(),
+                display_name: None,
+            });
+            message
+        }])),
         ..Default::default()
     };
     let moved_emails = store.moved_emails.clone();
@@ -12517,7 +12684,7 @@ async fn archive_item_moves_message_to_canonical_archive_mailbox() {
     let response = service
         .handle(
             &bearer_headers(),
-            br#"<s:Envelope><s:Body><m:ArchiveItem><m:ItemIds><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/></m:ItemIds></m:ArchiveItem></s:Body></s:Envelope>"#,
+            br#"<s:Envelope><s:Body><m:ArchiveItem><m:ArchiveSourceFolderId><t:FolderId Id="mailbox:44444444-4444-4444-4444-444444444444"/></m:ArchiveSourceFolderId><m:ItemIds><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/></m:ItemIds></m:ArchiveItem></s:Body></s:Envelope>"#,
         )
         .await
         .unwrap();
@@ -12527,6 +12694,7 @@ async fn archive_item_moves_message_to_canonical_archive_mailbox() {
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(body.contains("message:99999999-9999-9999-9999-999999999999"));
     assert!(body.contains("mailbox:55555555-5555-5555-5555-555555555555"));
+    assert!(!body.contains("hidden-archive@example.test"));
     assert_eq!(
         moved_emails.lock().unwrap().as_slice(),
         &[(message_id, archive_mailbox_id)]
@@ -12535,6 +12703,122 @@ async fn archive_item_moves_message_to_canonical_archive_mailbox() {
     let archived = stored.iter().find(|email| email.id == message_id).unwrap();
     assert_eq!(archived.mailbox_id, archive_mailbox_id);
     assert_eq!(archived.mailbox_role, "archive");
+}
+
+#[tokio::test]
+async fn archive_item_rejects_an_inaccessible_source_before_moving_or_projecting_bcc() {
+    let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999998").unwrap();
+    let archive_mailbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let mut message = FakeStore::email(
+        "99999999-9999-9999-9999-999999999998",
+        "44444444-4444-4444-4444-444444444444",
+        "inbox",
+        "Protected archive target",
+    );
+    message.bcc.push(JmapEmailAddress {
+        address: "hidden-archive@example.test".to_string(),
+        display_name: None,
+    });
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox("44444444-4444-4444-4444-444444444444", "inbox", "Inbox"),
+            FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "archive", "Archive"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![message])),
+        ..Default::default()
+    };
+    let moved_emails = store.moved_emails.clone();
+    let emails = store.emails.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:ArchiveItem><m:ArchiveSourceFolderId><t:FolderId Id="mailbox:66666666-6666-6666-6666-666666666666"/></m:ArchiveSourceFolderId><m:ItemIds><t:ItemId Id="message:99999999-9999-9999-9999-999999999998"/></m:ItemIds></m:ArchiveItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ArchiveItemResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(!body.contains("hidden-archive@example.test"));
+    assert!(moved_emails.lock().unwrap().is_empty());
+    assert_eq!(
+        emails.lock().unwrap()[0].mailbox_ids,
+        vec![Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap()]
+    );
+    assert_ne!(emails.lock().unwrap()[0].mailbox_ids, vec![archive_mailbox_id]);
+    assert_eq!(emails.lock().unwrap()[0].id, message_id);
+}
+
+#[tokio::test]
+async fn archive_item_preflights_source_membership_for_the_entire_batch() {
+    let inbox_message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999997").unwrap();
+    let other_message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999996").unwrap();
+    let inbox_mailbox_id = Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
+    let other_mailbox_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+    let archive_mailbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox("44444444-4444-4444-4444-444444444444", "inbox", "Inbox"),
+            FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "archive", "Archive"),
+            FakeStore::mailbox("77777777-7777-7777-7777-777777777777", "", "Other"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![
+            FakeStore::email(
+                "99999999-9999-9999-9999-999999999997",
+                "44444444-4444-4444-4444-444444444444",
+                "inbox",
+                "Inbox archive target",
+            ),
+            FakeStore::email(
+                "99999999-9999-9999-9999-999999999996",
+                "77777777-7777-7777-7777-777777777777",
+                "",
+                "Other archive target",
+            ),
+        ])),
+        ..Default::default()
+    };
+    let moved_emails = store.moved_emails.clone();
+    let emails = store.emails.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:ArchiveItem><m:ArchiveSourceFolderId><t:FolderId Id="mailbox:44444444-4444-4444-4444-444444444444"/></m:ArchiveSourceFolderId><m:ItemIds><t:ItemId Id="message:99999999-9999-9999-9999-999999999997"/><t:ItemId Id="message:99999999-9999-9999-9999-999999999996"/></m:ItemIds></m:ArchiveItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ArchiveItemResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(moved_emails.lock().unwrap().is_empty());
+    let emails = emails.lock().unwrap();
+    assert_eq!(
+        emails
+            .iter()
+            .find(|email| email.id == inbox_message_id)
+            .unwrap()
+            .mailbox_ids,
+        vec![inbox_mailbox_id]
+    );
+    assert_eq!(
+        emails
+            .iter()
+            .find(|email| email.id == other_message_id)
+            .unwrap()
+            .mailbox_ids,
+        vec![other_mailbox_id]
+    );
+    assert!(emails
+        .iter()
+        .all(|email| !email.mailbox_ids.contains(&archive_mailbox_id)));
 }
 
 #[tokio::test]
@@ -13900,6 +14184,50 @@ async fn ews_catalog_gate_covers_documented_operations_and_unsupported_gaps() {
         "EWS operation catalog coverage manifest must match the Microsoft EWS operation catalog snapshot"
     );
 
+    let contract_status_entries = contract_ews_operation_status_entries();
+    let contract_statuses = contract_status_entries
+        .iter()
+        .copied()
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(
+        contract_status_entries.len(),
+        contract_statuses.len(),
+        "docs/architecture/ews-operation-contract.md must not duplicate catalog operation status rows"
+    );
+    let contract_operations = contract_statuses
+        .keys()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        documented, contract_operations,
+        "docs/architecture/ews-operation-contract.md statuses must cover exactly the Microsoft EWS operation catalog snapshot"
+    );
+
+    let mut manifest_status_counts = std::collections::BTreeMap::new();
+    let mut contract_status_counts = std::collections::BTreeMap::new();
+    for entry in EWS_CATALOG_COVERAGE {
+        let expected_status = contract_status_for_coverage_kind(entry.kind);
+        *manifest_status_counts
+            .entry(expected_status)
+            .or_insert(0usize) += 1;
+        let actual_status = contract_statuses
+            .get(entry.operation)
+            .copied()
+            .unwrap_or("missing contract status");
+        *contract_status_counts
+            .entry(actual_status)
+            .or_insert(0usize) += 1;
+        assert_eq!(
+            actual_status, expected_status,
+            "{} contract status must match the EWS catalog coverage manifest",
+            entry.operation
+        );
+    }
+    assert_eq!(
+        contract_status_counts, manifest_status_counts,
+        "docs/architecture/ews-operation-contract.md status counts must match the EWS catalog coverage manifest"
+    );
+
     let unsupported_reasons = unsupported_reason_map();
     let mut duplicate_unsupported_reasons = Vec::new();
     let mut seen_unsupported_reasons = std::collections::BTreeSet::new();
@@ -13954,44 +14282,49 @@ async fn ews_catalog_gate_covers_documented_operations_and_unsupported_gaps() {
         extra_unsupported_reasons.is_empty(),
         "unsupported reason table contains non-unsupported operations: {extra_unsupported_reasons:?}"
     );
-    let store = FakeStore {
-        session: Some(FakeStore::account()),
-        ..Default::default()
-    };
-    let service = ExchangeService::new(store);
-
-    for entry in &unsupported {
+    for entry in EWS_CATALOG_COVERAGE {
+        let service = ExchangeService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            ..Default::default()
+        });
         let request = ews_catalog_gate_soap_request(entry.operation);
         let response = service
             .handle(&bearer_headers(), request.as_bytes())
             .await
             .unwrap();
-        let reason = unsupported_reasons
-            .get(entry.operation)
-            .copied()
-            .unwrap_or("missing unsupported reason");
         assert_eq!(response.status(), StatusCode::OK, "{}", entry.operation);
         let body = response_text(response).await;
         assert!(
-            body.contains(&format!("<m:{}Response>", entry.operation)),
-            "{} did not return an operation-shaped response for tracked gap `{reason}`: {body}",
+            body.contains(&format!("<m:{}Response", entry.operation)),
+            "{} did not return an operation-shaped parseable SOAP response: {body}",
             entry.operation,
         );
         assert!(
-            body.contains("ResponseClass=\"Error\""),
-            "{} did not return an explicit error response for tracked gap `{reason}`: {body}",
+            body.contains("ResponseClass=\"") && body.contains("<m:ResponseCode>"),
+            "{} did not return a parseable EWS response class and code: {body}",
             entry.operation,
         );
-        assert!(
-            body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"),
-            "{} did not return the unsupported EWS response code for tracked gap `{reason}`: {body}",
-            entry.operation,
-        );
-        assert!(
-            body.contains("is not implemented by the EWS MVP"),
-            "{} did not document unsupported behavior in the SOAP payload for tracked gap `{reason}`: {body}",
-            entry.operation,
-        );
+        if entry.kind == EwsCatalogCoverageKind::Unsupported {
+            let reason = unsupported_reasons
+                .get(entry.operation)
+                .copied()
+                .unwrap_or("missing unsupported reason");
+            assert!(
+                body.contains("ResponseClass=\"Error\""),
+                "{} did not return an explicit error response for tracked gap `{reason}`: {body}",
+                entry.operation,
+            );
+            assert!(
+                body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"),
+                "{} did not return the unsupported EWS response code for tracked gap `{reason}`: {body}",
+                entry.operation,
+            );
+            assert!(
+                body.contains("is not implemented by the EWS MVP"),
+                "{} did not document unsupported behavior in the SOAP payload for tracked gap `{reason}`: {body}",
+                entry.operation,
+            );
+        }
     }
 
     let soap_evidence_count = EWS_CATALOG_COVERAGE.len();
@@ -14027,6 +14360,25 @@ fn parity_matrix_ews_operation_names() -> std::collections::BTreeSet<&'static st
             Some(operation)
         })
         .collect()
+}
+
+fn contract_ews_operation_status_entries() -> Vec<(&'static str, &'static str)> {
+    include_str!("../../../../docs/architecture/ews-operation-contract.md")
+        .lines()
+        .filter_map(|line| {
+            let rest = line.strip_prefix("| `")?;
+            let (operation, rest) = rest.split_once('`')?;
+            let status = rest.strip_prefix(" | ")?.split(" |").next()?.trim();
+            Some((operation, status))
+        })
+        .collect()
+}
+
+fn contract_status_for_coverage_kind(kind: EwsCatalogCoverageKind) -> &'static str {
+    match kind {
+        EwsCatalogCoverageKind::Behavioral => "Partial",
+        EwsCatalogCoverageKind::Unsupported => "Explicitly unsupported",
+    }
 }
 
 fn ews_catalog_gate_soap_request(operation: &str) -> String {

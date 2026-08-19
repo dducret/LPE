@@ -139,7 +139,7 @@ pub(in crate::service) fn requested_item_references(request: &str) -> Vec<Reques
     ids
 }
 
-fn direct_child_contents<'a>(xml: &'a str, local_name: &str) -> Vec<&'a str> {
+pub(in crate::service) fn direct_child_contents<'a>(xml: &'a str, local_name: &str) -> Vec<&'a str> {
     let mut values = Vec::new();
     let mut cursor = 0;
     let mut depth: usize = 0;

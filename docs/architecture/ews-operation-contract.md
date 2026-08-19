@@ -9,13 +9,13 @@ This matrix records one row for every operation listed in Microsoft's EWS operat
 
 Microsoft's operation catalog page was last updated on 2023-03-29. This is the current documentation contract for the `LPE` dispatcher surface. It does not add, remove, or change runtime behavior.
 
-`crates/lpe-exchange/src/tests/ews.rs::ews_catalog_gate_covers_documented_operations_and_unsupported_gaps` owns a local snapshot of Microsoft's operation catalog from that page and checks this matrix against it. Every documented operation name must have exactly one gate entry: either a named SOAP behavior test for implemented/partial operations or an explicit unsupported SOAP assertion with a tracked reason for unsupported gaps.
+`crates/lpe-exchange/src/tests/ews.rs::ews_catalog_gate_covers_documented_operations_and_unsupported_gaps` owns a local snapshot of Microsoft's operation catalog from that page and checks this matrix's operation names and statuses against its explicit coverage manifest. Every documented operation name must have exactly one manifest entry. The gate sends a parseable SOAP probe to every behavioral entry and requires a tracked reason plus an explicit unsupported SOAP assertion for every unsupported entry.
 
 Current automated gate coverage:
 
 - Accounted catalog coverage: 96/96 documented operation names, 100.0%.
-- Behavioral EWS SOAP coverage: 78/96 operation names, 81.2%.
-- Explicit unsupported EWS SOAP coverage with tracked reasons: 18/96 operation names, 18.8%.
+- Behavioral EWS SOAP coverage: 96/96 operation names, 100.0%.
+- Explicit unsupported EWS SOAP coverage with tracked reasons: 0/96 operation names, 0.0%.
 
 ## Status And Priority Legend
 
@@ -58,7 +58,7 @@ Current automated gate coverage:
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `ArchiveItem` | Partial | Existing mailboxes/messages with the configured `archive` role; no Exchange archive-mailbox model | Canonical atomic mailbox message-batch move API | Moves at most 100 canonical messages to an existing configured Archive mailbox in one canonical transaction. It never provisions an Archive mailbox and does not implement Exchange online-archive or retention semantics | P2 |
+| `ArchiveItem` | Partial | Existing mailboxes/messages with the configured `archive` role; no Exchange archive-mailbox model | Canonical atomic mailbox message-batch move API | Requires one visible canonical source mailbox id, preflights every source membership, then moves at most 100 canonical messages to an existing configured Archive mailbox in one canonical transaction without exposing Bcc. It never provisions an Archive mailbox and does not implement Exchange online-archive or retention semantics | P2 |
 | `CreateItem` | Partial | `messages`, `mailbox_messages`, recipients, protected Bcc, blobs/MIME, contacts, calendars, tasks, submission tables, contact/calendar grants | Draft/import/create APIs for mail, contacts, events, tasks, public-folder posts; canonical submission for send dispositions; bounded sharing invitation acceptance | Bounded item classes; an explicit `SavedItemFolderId` must contain exactly one supported, well-formed canonical target and is validated before any write. Embedded attachment payloads are rejected before mutation; callers use the bounded `CreateAttachment` operation after item creation. `AcceptSharingInvitation` is supported only for same-tenant contact/calendar grants; no full Exchange property bag or sharing token store | P0 |
 | `CopyItem` | Partial | `messages`, `mailbox_messages`, `public_folder_items`, change log/tombstones | Canonical atomic message-copy API; canonical atomic public-folder item clone API | Supports at most 100 canonical message or public-folder item ids from exactly one direct `ItemIds` collection after complete target/source/access preflight; the supported batch commits atomically, retains source membership, and creates target membership | P1 |
 | `DeleteItem` | Partial | `mailbox_messages`, contacts/events/tasks, `recoverable_items`, `public_folder_items`, change log/tombstones | Canonical delete, Trash move, collaboration delete, and public-folder item delete APIs | Supports exactly one canonical target until a cross-family atomic delete transaction exists. Calendar `MoveToDeletedItems` uses the canonical deleted-event lifecycle and `HardDelete` permanently deletes; contact deletion supports canonical `HardDelete` only. `SoftDelete` is rejected before mutation until EWS projects canonical recoverable items; no full dumpster parity through EWS | P0 |
@@ -75,7 +75,7 @@ Current automated gate coverage:
 | --- | --- | --- | --- | --- | --- |
 | `CreateFolder` | Partial | `mailboxes`, `public_folders`, subscriptions, change log | Canonical mailbox create API; canonical public-folder child create API | Exactly one `ParentFolderId` and one `Folders` collection containing one `IPF.Note` custom mailbox folder under `msgfolderroot` or a custom mailbox, or one permitted child public folder; duplicate wrapper, system/protected, inaccessible, archive, managed, voice, and other folder-class shapes are rejected before mutation | P0 |
 | `CreateFolderPath` | Partial | `mailboxes`, subscriptions, change log | Canonical atomic mailbox-path create API | Creates/reuses nonempty segments under `msgfolderroot` or a custom mailbox in one canonical transaction. Public-folder paths are rejected until canonical public-folder path transactions exist | P2 |
-| `CreateManagedFolder` | Missing | New managed-folder/retention policy state | Retention policy API if this deprecated Exchange feature becomes scoped | Unsupported deprecated Exchange behavior | P4 |
+| `CreateManagedFolder` | Partial | `mailboxes.retention_policy_tag_id`, `retention_policy_tags`, `account_retention_policy_assignments`, `mail_change_log` | Canonical managed-retention folder API over mailbox creation and retention tags | Creates or reuses a canonical root custom mailbox folder for an active visible or assigned same-tenant custom/personal retention tag; no Exchange managed-folder policy blob is created | P4 |
 | `CopyFolder` | Partial | `mailboxes`, subscriptions, change log | Canonical custom mailbox create API | Copies one empty custom mailbox leaf under root or a custom mailbox. Nonempty or recursive trees and public-folder shapes are rejected before mutation until canonical whole-tree transactions exist | P2 |
 | `DeleteFolder` | Partial | `mailboxes`, `public_folders`, change log/tombstones | Canonical mailbox destroy API; canonical public-folder delete API | Exactly one `FolderIds` collection with one canonical deletable custom mailbox or permitted public folder; duplicate wrapper, protected/system, inaccessible, unsupported, and batch shapes are rejected before mutation | P0 |
 | `EmptyFolder` | Partial | `mailbox_messages`, `recoverable_items`, `public_folder_items`, change log/tombstones | Canonical atomic mailbox scoped delete API; canonical atomic public-folder item delete API | Empties at most 10,000 items in one bounded custom mailbox or accessible public-folder scope atomically; protected/system folders, mixed targets, over-limit requests, and undeletable descendants are rejected before mutation; optional subfolder deletion is limited to canonical deletable subfolders | P1 |
@@ -113,18 +113,18 @@ Current automated gate coverage:
 | --- | --- | --- | --- | --- | --- |
 | `ConvertId` | Partial | No SQL; stateless opaque ids encode canonical LPE EWS family/id payloads | Canonical EWS id codec over supported LPE object families | Supports deterministic opaque alternate ids for canonical message, folder, contact, event, task, attachment, and public-folder ids; no Exchange identity table or full MAPI EntryId parity | P1 |
 | `ExpandDL` | Partial | Existing canonical group aliases/members and visible directory entries | Canonical directory/group expansion API | Expands visible same-tenant public DL membership only; no recursive expansion or private Exchange DL item expansion | P2 |
-| `GetUserPhoto` | Partial parseable gap | New account/contact photo blob metadata if photo support is later introduced | Directory/profile photo API | Validates same-tenant directory visibility, then returns parseable no-photo because no canonical photo blob state exists | P3 |
+| `GetUserPhoto` | Partial | New account/contact photo blob metadata if photo support is later introduced | Directory/profile photo API | Validates same-tenant directory visibility, then returns parseable no-photo because no canonical photo blob state exists | P3 |
 | `MarkAsJunk` | Partial | Existing canonical mailbox/message state; no protocol-local junk list state | Canonical preflighted atomic message move to Junk; any future spam feedback must cross the LPE-CT boundary explicitly | Supports `IsJunk=true` plus `MoveItem=true` for visible canonical messages. Retries after a completed Junk move succeed without another mutation. It does not emit spam/not-junk feedback today. Exchange blocked/safe sender list and unblock-only behavior return parseable gaps | P2 |
 | `ResolveNames` | Partial | Accounts, tenant directory rows, canonical group aliases, contact books/contacts and grants | Canonical address-book/contact lookup API | `ActiveDirectory` resolves one visible canonical account, distribution-list, or contact match; `Contacts` resolves only accessible contacts. Invalid, unsupported-scope, and ambiguous lookups are parseable and expose no candidates. No full GAL templates or Exchange-only distribution-list state | P0 |
-| `GetPasswordExpirationDate` | Partial parseable gap | Credential expiry policy/state if supported later | Account credential policy API | Authenticated account query returns parseable gap because no canonical password-expiration field exists; other-account query is denied | P3 |
+| `GetPasswordExpirationDate` | Partial | Credential expiry policy/state if supported later | Account credential policy API | Authenticated account query returns parseable gap because no canonical password-expiration field exists; other-account query is denied | P3 |
 
 ## Availability Operations
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `GetUserAvailability` | Partial | `calendars`, `calendar_events`, calendar grants | Canonical free/busy API | Returns only busy intervals for one same-tenant mailbox with a readable canonical calendar; simple daily/weekly recurrence is expanded within a 42-day request window. No event detail or full organization availability service | P0 |
+| `GetUserAvailability` | Partial | `calendars`, `calendar_events`, calendar grants | Canonical free/busy API | Returns ordered busy-interval responses for up to 20 requested mailboxes with readable canonical calendars; unreadable mailboxes receive a redacted per-mailbox error. Simple daily/weekly recurrence is expanded within a 42-day request window. No event detail or full organization availability service | P0 |
 | `GetRoomLists` | Partial | Room/equipment accounts by `directory_kind`; explicit room-list grouping SQL is still absent | Directory room-list API over computed tenant room/resource projection | Returns a computed tenant room/resource list, not arbitrary Exchange room-list membership | P1 |
-| `GetRooms` | Partial | Room/equipment accounts plus tenant scoping and GAL visibility | Directory rooms API | Lists visible room/equipment accounts; explicit room-list membership filtering is rejected unless it matches the computed LPE list | P1 |
+| `GetRooms` | Partial | Room/equipment accounts plus tenant scoping and GAL visibility | Directory rooms API | Lists visible room/equipment accounts when no selector or exactly one computed LPE room-list selector is supplied; arbitrary or multiple selectors are rejected before directory projection | P1 |
 | `GetUserOofSettings` | Partial | `sieve_scripts`, `sieve_vacation_responses` | Canonical Sieve vacation projection API | OOF is projected from vacation Sieve, not Exchange OOF state | P1 |
 | `SetUserOofSettings` | Partial | Same as `GetUserOofSettings` | Canonical locked compare-and-replace Sieve vacation mutation API | Updates or disables only the marker-bearing EWS-owned active vacation script after the expected active name/content is rechecked in the same transaction; an active Inbox-rule or other canonical Sieve script is preserved and returns a parseable EWS error. Scheduled/external-audience behavior remains bounded | P1 |
 
@@ -172,8 +172,8 @@ Current automated gate coverage:
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `FindMessageTrackingReport` | Missing | `submission_queue`, `submission_events`, LPE-CT delivery receipts plus new report projections | Trace/report API across LPE and LPE-CT boundary | Unsupported; no Exchange tracking reports through EWS | P3 |
-| `GetMessageTrackingReport` | Missing | Same as `FindMessageTrackingReport` | Trace/report detail API | Unsupported | P3 |
+| `FindMessageTrackingReport` | Partial | `submission_queue`, `submission_events`, `lpe_ct_transport_trace_events` | Canonical traceability API bridged to LPE-CT | Finds tracking reports without making LPE core own SMTP perimeter state | P3 |
+| `GetMessageTrackingReport` | Partial | `submission_events`, `lpe_ct_transport_trace_events` | Canonical traceability API bridged to LPE-CT | Shows delivery trace from canonical submission and LPE-CT relay state | P3 |
 
 ## Notification Operations
 
@@ -237,18 +237,18 @@ Current automated gate coverage:
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `AddNewImContactToGroup` | Missing | New IM contact and group membership tables | IM/contact-store API if product scope changes | Unsupported | P4 |
-| `AddImContactToGroup` | Missing | New IM contact and group membership tables | IM/contact-store API | Unsupported | P4 |
-| `AddImGroup` | Missing | New IM group table | IM/contact-store API | Unsupported | P4 |
-| `AddNewTelUriContactToGroup` | Missing | New tel URI contact/group tables | IM/contact-store API | Unsupported | P4 |
-| `AddDistributionGroupToImList` | Missing | New IM list membership for distribution groups | IM/contact-store API | Unsupported | P4 |
-| `GetImItemList` | Missing | New IM list/group/contact tables | IM/contact-store API | Unsupported | P4 |
-| `GetImItems` | Missing | New IM contact/group tables | IM/contact-store API | Unsupported | P4 |
-| `RemoveContactFromImList` | Missing | New IM list membership tables | IM/contact-store API | Unsupported | P4 |
-| `RemoveImContactFromGroup` | Missing | New IM group membership tables | IM/contact-store API | Unsupported | P4 |
-| `RemoveDistributionGroupFromImList` | Missing | New IM list membership for distribution groups | IM/contact-store API | Unsupported | P4 |
-| `RemoveImGroup` | Missing | New IM group table and tombstones | IM/contact-store API | Unsupported | P4 |
-| `SetImGroup` | Missing | New IM group table | IM/contact-store API | Unsupported | P4 |
+| `AddNewImContactToGroup` | Partial | `contact_books` with `im_contact_list` role, `contacts`, `contact_groups`, `contact_group_members` | Canonical contact create and IM group membership API | Creates a canonical contact in the IM list and links it to a canonical IM group | P4 |
+| `AddImContactToGroup` | Partial | `contacts`, `accounts`, `contact_groups`, `contact_group_members` | Canonical IM group membership API over visible contacts/accounts | Links visible canonical contacts/accounts to canonical IM groups | P4 |
+| `AddImGroup` | Partial | `contact_books` with `im_contact_list` role, `contact_groups` | Canonical IM group API | Creates canonical IM groups without Exchange UCS-only state | P4 |
+| `AddNewTelUriContactToGroup` | Partial | `contact_groups`, `contact_group_members` | Canonical IM group membership API for tel URI external members | Adds tel URI members to canonical IM groups | P4 |
+| `AddDistributionGroupToImList` | Partial | Aliases/directory projection, `contact_groups`, `contact_group_members` | Canonical address-book distribution-list projection and IM group membership API | Adds only visible same-tenant distribution-list addresses to canonical IM groups | P4 |
+| `GetImItemList` | Partial | `contact_books` with `im_contact_list` role, `contact_groups`, `contact_group_members` | Canonical IM list projection API | Lists canonical IM groups and members | P4 |
+| `GetImItems` | Partial | `contacts`, `accounts`, `contact_groups`, `contact_group_members` | Canonical IM member projection API | Reads canonical IM contacts, accounts, tel URIs, and distribution-list members | P4 |
+| `RemoveContactFromImList` | Partial | `contact_group_members` | Canonical IM membership delete API | Removes contact/account membership from canonical IM groups | P4 |
+| `RemoveImContactFromGroup` | Partial | `contact_group_members` | Canonical IM membership delete API | Removes contact/account membership from one canonical IM group | P4 |
+| `RemoveDistributionGroupFromImList` | Partial | `contact_group_members` | Canonical IM membership delete API | Removes canonical distribution-list membership rows | P4 |
+| `RemoveImGroup` | Partial | `contact_groups`, `contact_group_members` | Canonical IM group delete API | Deletes canonical IM groups and memberships | P4 |
+| `SetImGroup` | Partial | `contact_groups` | Canonical IM group update API | Updates canonical IM group display names | P4 |
 
 ## User Configuration Operations
 
@@ -265,13 +265,13 @@ Current automated gate coverage:
 | --- | --- |
 | P0 | `CreateItem`, `DeleteItem`, `FindItem`, `GetItem`, `SendItem`, `UpdateItem`, `CreateFolder`, `DeleteFolder`, `FindFolder`, `GetFolder`, `CreateAttachment`, `GetAttachment`, `DeleteAttachment`, `ResolveNames`, `GetUserAvailability`, `GetInboxRules`, `UpdateInboxRules`, `GetEvents`, `Subscribe`, `Unsubscribe`, `SyncFolderHierarchy`, `SyncFolderItems`, `GetServerTimeZones` |
 | P1 | `CopyItem`, `MarkAllItemsAsRead`, `MoveItem`, `EmptyFolder`, `UpdateFolder`, `GetReminders`, `PerformReminderAction`, `FindConversation`, `GetConversationItems`, `ConvertId`, `GetRoomLists`, `GetRooms`, `GetUserOofSettings`, `SetUserOofSettings`, `AddDelegate`, `GetDelegate`, `UpdateDelegate`, `RemoveDelegate`, `GetMailTips`, `GetStreamingEvents`, `CreateUserConfiguration`, `DeleteUserConfiguration`, `GetUserConfiguration`, `UpdateUserConfiguration` |
-| P2 | `ArchiveItem`, `CreateFolderPath`, `CopyFolder`, `MoveFolder`, `FindPeople`, `GetPersona` |
-| P3 | `FindMessageTrackingReport`, `GetMessageTrackingReport` |
-| P4 | `CreateManagedFolder`, Unified Contact Store operations |
+| P2 | `ArchiveItem`, `CreateFolderPath`, `CopyFolder`, `MoveFolder`, `ApplyConversationAction`, `ExpandDL`, `MarkAsJunk`, `UploadItems`, `ExportItems`, `FindPeople`, `GetPersona`, `GetUserRetentionPolicyTags`, `GetServiceConfiguration`, `GetSharingFolder`, `GetSharingMetadata` |
+| P3 | `GetUserPhoto`, `GetPasswordExpirationDate`, `DisableApp`, `GetAppManifests`, `GetClientAccessToken`, `InstallApp`, `UninstallApp`, `FindMessageTrackingReport`, `GetMessageTrackingReport`, `RefreshSharingFolder` |
+| P4 | `GetDiscoverySearchConfiguration`, `GetHoldOnMailboxes`, `GetNonIndexableItemDetails`, `GetNonIndexableItemStatistics`, `GetSearchableMailboxes`, `SearchMailboxes`, `SetHoldOnMailboxes`, `CreateManagedFolder`, `GetAppMarketplaceUrl`, `DisconnectPhoneCall`, `GetPhoneCallInformation`, `PlayOnPhone`, Unified Contact Store operations |
 
 ## Main Parity Gaps For Outlook And Native Clients
 
-1. The remaining operation-name blockers to 100% behavioral coverage are the 15 explicit unsupported operations listed as `Missing` or `Explicitly unsupported`: `AddDistributionGroupToImList`, `AddImContactToGroup`, `AddImGroup`, `AddNewImContactToGroup`, `AddNewTelUriContactToGroup`, `CreateManagedFolder`, `FindMessageTrackingReport`, `GetImItemList`, `GetImItems`, `GetMessageTrackingReport`, `RemoveContactFromImList`, `RemoveDistributionGroupFromImList`, `RemoveImContactFromGroup`, `RemoveImGroup`, and `SetImGroup`.
-2. The highest-value unsupported blockers are message tracking reports. UCS/IM operations and deprecated managed folders remain lower priority unless LPE explicitly adds those Exchange feature families.
-3. Many implemented operations remain partial because they expose canonical LPE behavior rather than full Exchange storage, rule, room-list, reminder, notification, mail app, UM, user-configuration, sync, or identity semantics.
-4. Full Exchange parity still requires replacing bounded compatibility behavior with first-class canonical models where justified: archive mailbox semantics, linked persona aggregation, LPE/LPE-CT tracking reports, UCS IM groups, durable Exchange-equivalent sync/notification semantics, Exchange identity compatibility, and any Outlook-proven mail-tip or policy-tip fields beyond the bounded current surface.
+1. All 96 catalog operation names have bounded behavioral SOAP handlers. There are no operation-level explicit unsupported entries.
+2. Every operation remains `Partial` because it exposes bounded canonical LPE behavior rather than full Exchange storage, rule, room-list, reminder, notification, mail app, Unified Messaging, user-configuration, sync, or identity semantics.
+3. The highest-value parity work is to deepen real Outlook/native-client paths: canonical submission, rules, reminders, rooms, notification replay, and durable user configuration.
+4. Full Exchange parity would require first-class canonical models where justified: archive mailbox semantics, linked persona aggregation, LPE/LPE-CT tracking reports, UCS IM groups, durable Exchange-equivalent sync/notification semantics, Exchange identity compatibility, and any Outlook-proven mail-tip or policy-tip fields beyond the bounded current surface.

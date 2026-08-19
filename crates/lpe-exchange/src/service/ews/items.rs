@@ -609,15 +609,17 @@ where
         request: &str,
     ) -> Result<String> {
         let result = async {
+            let item_references = requested_operation_item_references(request, "ArchiveItem")?;
+            let source_mailbox_id = requested_archive_source_mailbox_id(request)?;
             self.validate_mutating_item_change_keys(principal, request)
                 .await?;
-            let ids = requested_item_ids(request);
-            let message_ids = ids
+            let message_ids = item_references
                 .iter()
+                .map(|reference| reference.id.as_str())
                 .filter_map(|id| id.strip_prefix("message:"))
                 .map(Uuid::parse_str)
                 .collect::<std::result::Result<Vec<_>, _>>()?;
-            if ids.is_empty() || message_ids.len() != ids.len() {
+            if item_references.is_empty() || message_ids.len() != item_references.len() {
                 return Ok(operation_error_response(
                     "ArchiveItem",
                     "ErrorInvalidOperation",
@@ -644,6 +646,23 @@ where
                     "The canonical Archive mailbox was not found.",
                 ));
             };
+            if !mailboxes
+                .iter()
+                .any(|mailbox| mailbox.id == source_mailbox_id)
+            {
+                return Ok(operation_error_response(
+                    "ArchiveItem",
+                    "ErrorFolderNotFound",
+                    "The canonical Archive source mailbox was not found.",
+                ));
+            }
+            if source_mailbox_id == archive_mailbox_id {
+                return Ok(operation_error_response(
+                    "ArchiveItem",
+                    "ErrorInvalidOperation",
+                    "ArchiveItem source messages must not belong to the canonical Archive mailbox.",
+                ));
+            }
 
             let existing = self
                 .store
@@ -654,6 +673,16 @@ where
                     "ArchiveItem",
                     "ErrorItemNotFound",
                     "message not found",
+                ));
+            }
+            if existing
+                .iter()
+                .any(|message| !message.mailbox_ids.contains(&source_mailbox_id))
+            {
+                return Ok(operation_error_response(
+                    "ArchiveItem",
+                    "ErrorItemNotFound",
+                    "message not found in the specified Archive source mailbox",
                 ));
             }
             if existing.iter().any(|message| {
@@ -1467,6 +1496,34 @@ where
         }
         Ok(())
     }
+}
+
+/// [MS-OXWSARCH] §3.1.4.1.3.1 requires one ArchiveSourceFolderId before the
+/// ItemIds collection. LPE accepts only one visible canonical mailbox source.
+fn requested_archive_source_mailbox_id(request: &str) -> Result<Uuid> {
+    let operations = element_contents(request, "ArchiveItem");
+    let [operation] = operations.as_slice() else {
+        bail!("ArchiveItem requires exactly one operation element");
+    };
+    let sources = direct_child_contents(operation, "ArchiveSourceFolderId");
+    if sources.len() != 1 || element_contents(operation, "ArchiveSourceFolderId").len() != 1 {
+        bail!("ArchiveItem requires exactly one direct ArchiveSourceFolderId");
+    }
+    let source = sources[0];
+    let folders = direct_child_contents(source, "FolderId");
+    let distinguished = direct_child_contents(source, "DistinguishedFolderId");
+    let ids = attribute_values_for_tag(source, "FolderId", "Id");
+    if folders.len() != 1
+        || distinguished.len() != 0
+        || ids.len() != 1
+        || attribute_values_for_tag(source, "DistinguishedFolderId", "Id").len() != 0
+    {
+        bail!("ArchiveItem ArchiveSourceFolderId requires one canonical mailbox FolderId");
+    }
+    let id = ids[0]
+        .strip_prefix("mailbox:")
+        .ok_or_else(|| anyhow!("ArchiveItem source folder must be a canonical mailbox id"))?;
+    Uuid::parse_str(id).map_err(|_| anyhow!("ArchiveItem source mailbox id is invalid"))
 }
 
 // [MS-OXWSMSG] section 3.1.4.2: this bounded adapter accepts exactly one

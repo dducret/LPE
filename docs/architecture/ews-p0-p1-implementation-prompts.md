@@ -9,7 +9,7 @@ historical P0/P1 prompt backlog. It avoids reopening completed bounded work.
 | --- | --- | --- |
 | P0 | All 23 rows are `Partial`; none is `Missing` or explicitly unsupported. | Active implementation and hardening work. |
 | P1 | All 24 rows are `Partial`; none is `Missing` or explicitly unsupported. | Active implementation and hardening work. |
-| P2 | `ArchiveItem` is missing; the remaining P2 rows are bounded partial compatibility surfaces. The contract's two persona rows are stale against the implemented matrix and tests. | Active, deliberately scoped follow-up work. |
+| P2 | All 15 catalog rows are `Partial`; none is `Missing` or explicitly unsupported. This includes the existing bounded `ArchiveItem`, `FindPeople`, and `GetPersona` behavior; the worklist also includes the P2 `AcceptSharingInvitation` sub-slice of `CreateItem`. | Active, deliberately scoped semantic-hardening work. |
 
 `Partial` means the current implementation is bounded and differs from full
 Exchange semantics. It is not a completion marker. Each P0/P1 prompt must
@@ -79,23 +79,7 @@ happy-path test.
 
 ## P2 — active prompts
 
-### 1. Reconcile implemented persona documentation
-
-```text
-Reconcile the P2 FindPeople and GetPersona rows in
-docs/architecture/ews-operation-contract.md with the already implemented
-bounded behavior. Apply the shared preamble, but this is documentation-only
-unless the evidence exposes a real implementation defect.
-
-The interoperability matrix, EWS dispatcher, and focused tests already show
-stateless visible account/contact personas. Verify the exact ID forms,
-visibility behavior, and unsupported linked-person scope. Update only the
-stale contract rows and, if necessary, their direct cross-references. Do not
-add a persona table, linked-contact aggregation, social sources, or Exchange
-persona state. Run the EWS catalog gate and git diff --check.
-```
-
-### 2. Archive and folder-tree lifecycle
+### 1. Archive and folder-tree lifecycle
 
 ```text
 Implement the next bounded P2 folder lifecycle slice: ArchiveItem,
@@ -115,7 +99,7 @@ cross-protocol visibility tests. Update the contract and matrix only for the
 actually delivered bounded subset.
 ```
 
-### 3. Directory and conversation follow-up
+### 2. Directory and conversation follow-up
 
 ```text
 Harden the remaining bounded P2 directory and conversation behavior for
@@ -134,7 +118,7 @@ and no mutation for unsupported persistent conversation actions. Preserve
 parseable gaps when the canonical model is absent.
 ```
 
-### 4. Junk classification and LPE-CT feedback boundary
+### 3. Junk classification and LPE-CT feedback boundary
 
 ```text
 Harden P2 MarkAsJunk without moving perimeter filtering into core LPE. Apply
@@ -153,7 +137,7 @@ split canonical state, and the strict LPE/LPE-CT boundary. Update architecture
 and installation documentation with any real interface change.
 ```
 
-### 5. Bounded transfer jobs
+### 4. Bounded transfer jobs
 
 ```text
 Extend P2 UploadItems and ExportItems only through canonical transfer jobs.
@@ -171,7 +155,7 @@ Test job ownership, retry/idempotency, failed-entry isolation, blob
 deduplication, Bcc exclusion, export reconstruction, and tenant boundaries.
 ```
 
-### 6. Retention and service configuration
+### 5. Retention and service configuration
 
 ```text
 Harden P2 GetUserRetentionPolicyTags and GetServiceConfiguration against their
@@ -190,7 +174,7 @@ unknown configuration requests, and response-shape stability. Do not build an
 Exchange managed-folder engine or a parallel policy store.
 ```
 
-### 7. Canonical same-tenant sharing
+### 6. Canonical same-tenant sharing
 
 ```text
 Harden P2 sharing compatibility for AcceptSharingInvitation, GetSharingFolder,
@@ -208,18 +192,22 @@ Test grant create/update idempotency, owner/delegate visibility, revocation,
 tenant isolation, response redaction, and no partial grants on malformed input.
 ```
 
-## P2 coverage
+## P2 semantic-hardening worklist
+
+Every row below already has bounded `Partial` SOAP behavior. Use these prompts
+only to close evidence-backed semantic gaps; they do not authorize reopening
+operation-name coverage or claiming that ArchiveItem or persona support is
+missing.
 
 | Prompt | Contract rows |
 | --- | --- |
-| 1 | `FindPeople`, `GetPersona` documentation drift only; current implementation is already bounded partial support. |
-| 2 | `ArchiveItem`, `CreateFolderPath`, `CopyFolder`, `MoveFolder` |
-| 3 | `ExpandDL`, `ApplyConversationAction` |
-| 4 | `MarkAsJunk` |
-| 5 | `UploadItems`, `ExportItems` |
-| 6 | `GetUserRetentionPolicyTags`, `GetServiceConfiguration` |
-| 7 | `CreateItem` with `AcceptSharingInvitation`, `GetSharingFolder`, `GetSharingMetadata` |
+| 1 | `ArchiveItem`, `CreateFolderPath`, `CopyFolder`, `MoveFolder` |
+| 2 | `ExpandDL`, `ApplyConversationAction` |
+| 3 | `MarkAsJunk` |
+| 4 | `UploadItems`, `ExportItems` |
+| 5 | `GetUserRetentionPolicyTags`, `GetServiceConfiguration` |
+| 6 | `CreateItem` with `AcceptSharingInvitation`, `GetSharingFolder`, `GetSharingMetadata` |
 
-Run P2 prompt 1 first. The others are independent only after their shared
+The P2 prompts are independent only after their shared
 canonical storage or architecture preconditions have been checked; do not run
 two prompts that edit the same EWS dispatcher or schema area concurrently.

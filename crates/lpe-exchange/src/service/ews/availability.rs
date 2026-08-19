@@ -9,6 +9,12 @@ const EWS_TIME_ZONE_CATALOG: [(&str, &str); 2] = [
         "(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna",
     ),
 ];
+const MAX_AVAILABILITY_MAILBOXES: usize = 20;
+
+enum AvailabilityMailboxResponse {
+    Events(Vec<AccessibleEvent>),
+    Error,
+}
 
 impl<S, V> ExchangeService<S, V>
 where
@@ -20,7 +26,7 @@ where
         principal: &AccountPrincipal,
         request: &str,
     ) -> Result<String> {
-        let (mailbox_email, window_start, window_end) = match parse_availability_request(request) {
+        let (mailbox_emails, window_start, window_end) = match parse_availability_request(request) {
             Ok(request) => request,
             Err(message) => return Ok(get_user_availability_error_response(&message)),
         };
@@ -28,38 +34,42 @@ where
             .store
             .fetch_accessible_calendar_collections(principal.account_id)
             .await?;
-        let collection_id = collections.into_iter().find_map(|collection| {
-            (collection.rights.may_read
-                && collection.owner_email.eq_ignore_ascii_case(&mailbox_email)
-                && ((collection.owner_account_id == principal.account_id
-                    && collection.id == "default")
-                    || collection.id == format!("shared-calendar-{}", collection.owner_account_id)))
-            .then_some(collection.id)
-        });
-        let Some(collection_id) = collection_id else {
-            return Ok(get_user_availability_error_response(
-                "No readable canonical calendar is available for the requested mailbox.",
-            ));
-        };
+        let mut responses = Vec::with_capacity(mailbox_emails.len());
+        for mailbox_email in mailbox_emails {
+            let collection_id = collections.iter().find_map(|collection| {
+                (collection.rights.may_read
+                    && collection.owner_email.eq_ignore_ascii_case(&mailbox_email)
+                    && ((collection.owner_account_id == principal.account_id
+                        && collection.id == "default")
+                        || collection.id
+                            == format!("shared-calendar-{}", collection.owner_account_id)))
+                .then_some(collection.id.clone())
+            });
+            let Some(collection_id) = collection_id else {
+                responses.push(AvailabilityMailboxResponse::Error);
+                continue;
+            };
 
-        let mut events = self
-            .store
-            .fetch_accessible_events_in_collection(principal.account_id, &collection_id)
-            .await?
-            .into_iter()
-            .filter(|event| {
-                event.rights.may_read
-                    && event.owner_email.eq_ignore_ascii_case(&mailbox_email)
-                    && !event.status.eq_ignore_ascii_case("cancelled")
-            })
-            .flat_map(|event| expand_availability_event(&event, window_start, window_end))
-            .filter(|event| event_overlaps_window(event, window_start, window_end))
-            .collect::<Vec<_>>();
-        events.sort_by(|left, right| {
-            availability_event_start_minutes(left).cmp(&availability_event_start_minutes(right))
-        });
+            let mut events = self
+                .store
+                .fetch_accessible_events_in_collection(principal.account_id, &collection_id)
+                .await?
+                .into_iter()
+                .filter(|event| {
+                    event.rights.may_read
+                        && event.owner_email.eq_ignore_ascii_case(&mailbox_email)
+                        && !event.status.eq_ignore_ascii_case("cancelled")
+                })
+                .flat_map(|event| expand_availability_event(&event, window_start, window_end))
+                .filter(|event| event_overlaps_window(event, window_start, window_end))
+                .collect::<Vec<_>>();
+            events.sort_by(|left, right| {
+                availability_event_start_minutes(left).cmp(&availability_event_start_minutes(right))
+            });
+            responses.push(AvailabilityMailboxResponse::Events(events));
+        }
         Ok(get_user_availability_success_response(
-            &events,
+            &responses,
             availability_suggestions_response(request).as_deref(),
         ))
     }
@@ -109,44 +119,67 @@ pub(in crate::service) fn canonical_ews_time_zone(value: &str) -> Option<&'stati
         .find_map(|(id, _)| id.eq_ignore_ascii_case(value.trim()).then_some(*id))
 }
 
-pub(in crate::service) fn get_user_availability_success_response(
-    events: &[AccessibleEvent],
+fn get_user_availability_success_response(
+    mailbox_responses: &[AvailabilityMailboxResponse],
     suggestions_response: Option<&str>,
 ) -> String {
-    let events = events
+    let responses = mailbox_responses
         .iter()
-        .map(|event| {
-            format!(
-                concat!(
-                    "<t:CalendarEvent>",
-                    "<t:StartTime>{}</t:StartTime>",
-                    "<t:EndTime>{}</t:EndTime>",
-                    "<t:BusyType>Busy</t:BusyType>",
-                    "</t:CalendarEvent>"
-                ),
-                escape_xml(&availability_event_start_datetime(event)),
-                escape_xml(&availability_event_end_datetime(event)),
+        .map(|response| match response {
+            AvailabilityMailboxResponse::Events(events) => {
+                let events = events
+                    .iter()
+                    .map(|event| {
+                        format!(
+                            concat!(
+                                "<t:CalendarEvent>",
+                                "<t:StartTime>{}</t:StartTime>",
+                                "<t:EndTime>{}</t:EndTime>",
+                                "<t:BusyType>Busy</t:BusyType>",
+                                "</t:CalendarEvent>"
+                            ),
+                            escape_xml(&availability_event_start_datetime(event)),
+                            escape_xml(&availability_event_end_datetime(event)),
+                        )
+                    })
+                    .collect::<String>();
+                format!(
+                    concat!(
+                        "<m:FreeBusyResponse>",
+                        "<m:ResponseMessage ResponseClass=\"Success\">",
+                        "<m:ResponseCode>NoError</m:ResponseCode>",
+                        "</m:ResponseMessage>",
+                        "<m:FreeBusyView>",
+                        "<t:FreeBusyViewType>Detailed</t:FreeBusyViewType>",
+                        "<t:CalendarEventArray>{events}</t:CalendarEventArray>",
+                        "</m:FreeBusyView>",
+                        "</m:FreeBusyResponse>"
+                    ),
+                    events = events,
+                )
+            }
+            AvailabilityMailboxResponse::Error => concat!(
+                "<m:FreeBusyResponse>",
+                "<m:ResponseMessage ResponseClass=\"Error\">",
+                "<m:MessageText>No readable canonical calendar is available for the requested mailbox.</m:MessageText>",
+                "<m:ResponseCode>ErrorFreeBusyGenerationFailed</m:ResponseCode>",
+                "<m:DescriptiveLinkKey>0</m:DescriptiveLinkKey>",
+                "</m:ResponseMessage>",
+                "</m:FreeBusyResponse>"
             )
+            .to_string(),
         })
         .collect::<String>();
     format!(
         concat!(
             "<m:GetUserAvailabilityResponse>",
             "<m:FreeBusyResponseArray>",
-            "<m:FreeBusyResponse>",
-            "<m:ResponseMessage ResponseClass=\"Success\">",
-            "<m:ResponseCode>NoError</m:ResponseCode>",
-            "</m:ResponseMessage>",
-            "<m:FreeBusyView>",
-            "<t:FreeBusyViewType>Detailed</t:FreeBusyViewType>",
-            "<t:CalendarEventArray>{events}</t:CalendarEventArray>",
-            "</m:FreeBusyView>",
-            "</m:FreeBusyResponse>",
+            "{responses}",
             "</m:FreeBusyResponseArray>",
             "{suggestions_response}",
             "</m:GetUserAvailabilityResponse>"
         ),
-        events = events,
+        responses = responses,
         suggestions_response = suggestions_response.unwrap_or_default(),
     )
 }
@@ -230,23 +263,32 @@ fn requested_server_time_zone_ids(
     Ok(Some(ids))
 }
 
-fn parse_availability_request(request: &str) -> std::result::Result<(String, i64, i64), String> {
-    // [MS-OXWAVLS] §§3.1.4.1.3.13-.14 bounds this adapter to one mailbox/window.
+fn parse_availability_request(
+    request: &str,
+) -> std::result::Result<(Vec<String>, i64, i64), String> {
+    // [MS-OXWAVLS] §§3.1.4.1 and 3.1.4.1.3.14 define an ordered MailboxDataArray.
     let mailbox_arrays = element_contents(request, "MailboxDataArray");
     if mailbox_arrays.len() != 1 {
         return Err("GetUserAvailability requires exactly one MailboxDataArray.".to_string());
     }
     let mailbox_data = element_contents(mailbox_arrays[0], "MailboxData");
-    if mailbox_data.len() != 1 {
-        return Err("LPE supports exactly one MailboxData entry per request.".to_string());
+    if mailbox_data.is_empty() || mailbox_data.len() > MAX_AVAILABILITY_MAILBOXES {
+        return Err(format!(
+            "LPE supports between one and {MAX_AVAILABILITY_MAILBOXES} MailboxData entries per request."
+        ));
     }
-    let email = element_contents(mailbox_data[0], "Email");
-    let address = email
-        .first()
-        .and_then(|email| element_text(email, "Address"))
-        .map(|address| address.trim().to_ascii_lowercase())
-        .filter(|address| !address.is_empty())
-        .ok_or_else(|| "MailboxData requires a non-empty Email Address.".to_string())?;
+    let addresses = mailbox_data
+        .iter()
+        .map(|mailbox| {
+            let email = element_contents(mailbox, "Email");
+            email
+                .first()
+                .and_then(|email| element_text(email, "Address"))
+                .map(|address| address.trim().to_ascii_lowercase())
+                .filter(|address| !address.is_empty())
+                .ok_or_else(|| "MailboxData requires a non-empty Email Address.".to_string())
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?;
     let windows = element_contents(request, "TimeWindow");
     if windows.len() != 1 {
         return Err("FreeBusyViewOptions requires exactly one TimeWindow.".to_string());
@@ -260,7 +302,7 @@ fn parse_availability_request(request: &str) -> std::result::Result<(String, i64
     if end <= start || end - start > 42 * 24 * 60 {
         return Err("TimeWindow must be positive and no longer than 42 days.".to_string());
     }
-    Ok((address, start, end))
+    Ok((addresses, start, end))
 }
 
 fn expand_availability_event(

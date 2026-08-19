@@ -11,7 +11,7 @@ where
         request: &str,
     ) -> Result<String> {
         let result = async {
-            if let Some(room_list) = requested_room_list_address(request) {
+            if let Some(room_list) = requested_room_list_address(request)? {
                 let expected = computed_room_list_address(principal);
                 if !room_list.eq_ignore_ascii_case(&expected) {
                     bail!(
@@ -47,11 +47,28 @@ pub(in crate::service) fn computed_room_list_address(principal: &AccountPrincipa
     format!("rooms@{domain}")
 }
 
-pub(in crate::service) fn requested_room_list_address(request: &str) -> Option<String> {
-    let room_list = element_content(request, "RoomList")?;
-    element_text(room_list, "EmailAddress")
-        .or_else(|| element_text(room_list, "Address"))
-        .filter(|value| !value.trim().is_empty())
+/// [MS-OXWSGTRM] §3.1.4.2.3.2 defines one RoomList request element. Validate
+/// the bounded LPE selector before reading the canonical directory projection.
+pub(in crate::service) fn requested_room_list_address(request: &str) -> Result<Option<String>> {
+    let room_lists = element_contents(request, "RoomList");
+    let Some(room_list) = room_lists.first() else {
+        return Ok(None);
+    };
+    if room_lists.len() != 1 {
+        bail!("GetRooms accepts at most one RoomList");
+    }
+
+    let email_addresses = element_contents(room_list, "EmailAddress");
+    let addresses = element_contents(room_list, "Address");
+    if email_addresses.len() + addresses.len() > 1 {
+        bail!("GetRooms RoomList accepts at most one address");
+    }
+
+    Ok(email_addresses
+        .first()
+        .map(|value| xml_text(value))
+        .or_else(|| addresses.first().map(|value| xml_text(value)))
+        .filter(|value| !value.trim().is_empty()))
 }
 
 pub(in crate::service) fn get_rooms_response(entries: &[ExchangeAddressBookEntry]) -> String {
