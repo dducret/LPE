@@ -206,21 +206,42 @@ where
                 ));
             }
 
-            let mut moved_item_ids = String::new();
-            for message_id in message_ids {
-                let moved = self
-                    .store
-                    .move_jmap_email(
+            let message_ids_to_move = existing
+                .iter()
+                .filter(|email| !email.mailbox_ids.contains(&junk_mailbox_id))
+                .map(|email| email.id)
+                .collect::<Vec<_>>();
+            if !message_ids_to_move.is_empty() {
+                self.store
+                    .move_jmap_emails(
                         principal.account_id,
-                        message_id,
+                        &message_ids_to_move,
                         junk_mailbox_id,
                         AuditEntryInput {
                             actor: principal.email.clone(),
                             action: "ews-mark-as-junk".to_string(),
-                            subject: format!("{message_id}->{junk_mailbox_id}"),
+                            subject: format!("{}->{junk_mailbox_id}", message_ids_to_move.len()),
                         },
                     )
                     .await?;
+            }
+
+            let moved = self
+                .store
+                .fetch_jmap_emails(principal.account_id, &message_ids)
+                .await?;
+            if moved.len() != message_ids.len() {
+                bail!("message visibility changed before MarkAsJunk completed");
+            }
+            let moved_by_id = moved
+                .into_iter()
+                .map(|email| (email.id, email))
+                .collect::<std::collections::HashMap<_, _>>();
+            let mut moved_item_ids = String::new();
+            for message_id in message_ids {
+                let moved = moved_by_id
+                    .get(&message_id)
+                    .ok_or_else(|| anyhow::anyhow!("message visibility changed before MarkAsJunk completed"))?;
                 moved_item_ids.push_str(&format!(
                     "<m:MovedItemId Id=\"message:{}\" ChangeKey=\"{}\"/>",
                     moved.id,

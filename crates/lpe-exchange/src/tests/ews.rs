@@ -4307,6 +4307,98 @@ async fn mark_as_junk_keeps_exchange_only_block_sender_behavior_parseable() {
 }
 
 #[tokio::test]
+async fn mark_as_junk_preflights_visibility_before_moving_any_message() {
+    let inbox_id = "44444444-4444-4444-4444-444444444444";
+    let junk_id = "55555555-5555-5555-5555-555555555555";
+    let visible_id = "66666666-6666-6666-6666-666666666666";
+    let denied_id = "77777777-7777-7777-7777-777777777777";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(inbox_id, "inbox", "Inbox"),
+            FakeStore::mailbox(junk_id, "junk", "Junk Email"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![
+            FakeStore::email(visible_id, inbox_id, "inbox", "Visible"),
+            FakeStore::email(denied_id, inbox_id, "inbox", "Not visible"),
+        ])),
+        inaccessible_jmap_email_ids: Arc::new(Mutex::new(
+            vec![Uuid::parse_str(denied_id).unwrap()],
+        )),
+        ..Default::default()
+    };
+    let moved_emails = store.moved_emails.clone();
+    let service = ExchangeService::new(store);
+    let request = format!(
+        r#"
+        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+          <s:Body><m:MarkAsJunk IsJunk="true" MoveItem="true"><m:ItemIds>
+            <t:ItemId Id="message:{visible_id}"/><t:ItemId Id="message:{denied_id}"/>
+          </m:ItemIds></m:MarkAsJunk></s:Body>
+        </s:Envelope>
+        "#
+    );
+
+    let response = service
+        .handle(&bearer_headers(), request.as_bytes())
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorItemNotFound</m:ResponseCode>"));
+    assert!(moved_emails.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mark_as_junk_is_idempotent_after_the_message_is_already_in_junk() {
+    let inbox_id = "44444444-4444-4444-4444-444444444444";
+    let junk_id = "55555555-5555-5555-5555-555555555555";
+    let message_id = "66666666-6666-6666-6666-666666666666";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(inbox_id, "inbox", "Inbox"),
+            FakeStore::mailbox(junk_id, "junk", "Junk Email"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            message_id,
+            inbox_id,
+            "inbox",
+            "Suspicious",
+        )])),
+        ..Default::default()
+    };
+    let moved_emails = store.moved_emails.clone();
+    let service = ExchangeService::new(store);
+    let request = format!(
+        r#"
+        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+          <s:Body><m:MarkAsJunk IsJunk="true" MoveItem="true"><m:ItemIds>
+            <t:ItemId Id="message:{message_id}"/>
+          </m:ItemIds></m:MarkAsJunk></s:Body>
+        </s:Envelope>
+        "#
+    );
+
+    let first = service
+        .handle(&bearer_headers(), request.as_bytes())
+        .await
+        .unwrap();
+    let second = service
+        .handle(&bearer_headers(), request.as_bytes())
+        .await
+        .unwrap();
+
+    assert!(response_text(first)
+        .await
+        .contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(response_text(second)
+        .await
+        .contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert_eq!(moved_emails.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn delegate_operations_use_canonical_permissions_and_preferences() {
     let delegate = AuthenticatedAccount {
         tenant_id: FakeStore::account().tenant_id,

@@ -4237,6 +4237,7 @@ struct FakeStore {
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
     imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
     emails: Arc<Mutex<Vec<JmapEmail>>>,
+    inaccessible_jmap_email_ids: Arc<Mutex<Vec<Uuid>>>,
     public_folders: Arc<Mutex<Vec<PublicFolder>>>,
     deleted_public_folders: Arc<Mutex<Vec<Uuid>>>,
     public_folder_items: Arc<Mutex<Vec<PublicFolderItem>>>,
@@ -12772,12 +12773,13 @@ impl ExchangeStore for FakeStore {
         _account_id: Uuid,
         ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<JmapEmail>> {
+        let inaccessible = self.inaccessible_jmap_email_ids.lock().unwrap().clone();
         let emails = self
             .emails
             .lock()
             .unwrap()
             .iter()
-            .filter(|email| ids.contains(&email.id))
+            .filter(|email| ids.contains(&email.id) && !inaccessible.contains(&email.id))
             .cloned()
             .map(|mut email| {
                 email.bcc.clear();

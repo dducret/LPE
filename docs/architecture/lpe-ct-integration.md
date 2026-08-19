@@ -21,6 +21,15 @@
   - repeated `LPE -> LPE-CT` handoffs for the same queue item reuse the existing `LPE-CT` spool custody record across `outbound`, `deferred`, `held`, `quarantine`, `bounces`, and `sent` instead of creating a second relay attempt
   - duplicate handoff suppression is recorded in the transport audit stream
   - terminal states must not regress
+- Junk classification boundary:
+  - EWS `MarkAsJunk` currently performs only the canonical mailbox move to the
+    owner-visible Junk mailbox in core `LPE`; it does not call `LPE-CT`, train
+    a classifier, or create sender-list state.
+  - A future spam or not-junk feedback feature must use one separately
+    documented signed `LPE -> LPE-CT` HTTP handoff with a stable idempotency
+    key and a durable core audit record. Its delivery must remain independent
+    of the canonical mailbox-move transaction so a bridge failure cannot
+    create split canonical mailbox state.
 - Inbound flow `LPE-CT -> LPE`:
   - base URL: `${LPE_CT_CORE_DELIVERY_BASE_URL}`
   - default `LPE` port: `8080`
