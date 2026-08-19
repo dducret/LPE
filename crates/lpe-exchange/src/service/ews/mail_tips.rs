@@ -83,13 +83,13 @@ pub(in crate::service) struct MailTipProjection {
     pub(in crate::service) out_of_office_message: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::service) enum RequestedServiceConfiguration {
     MailTips,
     UnifiedMessaging,
     ProtectionRules,
     PolicyTips,
-    Unsupported,
+    Unsupported(String),
 }
 
 pub(in crate::service) fn get_mail_tips_response(tips: &[MailTipProjection]) -> String {
@@ -142,8 +142,8 @@ pub(in crate::service) fn get_service_configuration_response(
                 "PolicyTips",
                 "Policy Tips service configuration is not implemented by LPE.",
             ),
-            RequestedServiceConfiguration::Unsupported => service_configuration_error_message(
-                "Unknown",
+            RequestedServiceConfiguration::Unsupported(configuration_name) => service_configuration_error_message(
+                configuration_name,
                 "The requested service configuration is not implemented by LPE.",
             ),
         })
@@ -224,11 +224,9 @@ pub(in crate::service) fn requested_service_configurations(
                 RequestedServiceConfiguration::ProtectionRules
             }
             "PolicyTips" | "PolicyTipsConfiguration" => RequestedServiceConfiguration::PolicyTips,
-            _ => RequestedServiceConfiguration::Unsupported,
+            _ => RequestedServiceConfiguration::Unsupported(normalized.to_string()),
         };
-        if !configs.contains(&config) {
-            configs.push(config);
-        }
+        configs.push(config);
     }
     if configs.is_empty() {
         configs.push(RequestedServiceConfiguration::MailTips);

@@ -7142,8 +7142,10 @@ async fn get_user_retention_policy_tags_projects_same_tenant_assignment_visibili
     let assigned_hidden_tag_id = Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
     let hidden_unassigned_tag_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
     let foreign_tag_id = Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
+    let disabled_tag_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
     let store = FakeStore {
         session: Some(account.clone()),
+        disabled_ews_retention_policy_tag_ids: Arc::new(Mutex::new(vec![disabled_tag_id])),
         ews_retention_policy_tags: Arc::new(Mutex::new(vec![
             FakeRetentionPolicyTag {
                 tenant_id: account.tenant_id,
@@ -7197,6 +7199,19 @@ async fn get_user_retention_policy_tags_projects_same_tenant_assignment_visibili
                     "Foreign tenant",
                 ),
             },
+            FakeRetentionPolicyTag {
+                tenant_id: account.tenant_id,
+                assigned_account_id: Some(account.account_id),
+                tag: retention_policy_tag(
+                    disabled_tag_id,
+                    "Disabled assigned tag",
+                    "all",
+                    "delete_and_allow_recovery",
+                    Some(365),
+                    true,
+                    "Disabled default tag",
+                ),
+            },
         ])),
         ..Default::default()
     };
@@ -7224,6 +7239,7 @@ async fn get_user_retention_policy_tags_projects_same_tenant_assignment_visibili
     assert!(body.contains("<t:IsArchive>true</t:IsArchive>"));
     assert!(!body.contains("Hidden unassigned"));
     assert!(!body.contains("Foreign tenant tag"));
+    assert!(!body.contains("Disabled assigned tag"));
 }
 
 #[tokio::test]

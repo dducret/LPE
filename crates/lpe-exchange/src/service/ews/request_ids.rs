@@ -27,7 +27,9 @@ pub(in crate::service) fn requested_operation_item_references(
         bail!("{operation} ItemIds collection is duplicated or misplaced");
     }
     let references = requested_item_references(item_ids_content);
-    if references.is_empty() || requested_item_references(operation_content).len() != references.len() {
+    if references.is_empty()
+        || requested_item_references(operation_content).len() != references.len()
+    {
         bail!("{operation} ItemIds requires one or more direct ItemId values");
     }
     Ok(references)
@@ -181,7 +183,11 @@ fn direct_child_contents<'a>(xml: &'a str, local_name: &str) -> Vec<&'a str> {
     values
 }
 
-fn matching_element_content<'a>(xml: &'a str, content_start: usize, local_name: &str) -> Option<&'a str> {
+fn matching_element_content<'a>(
+    xml: &'a str,
+    content_start: usize,
+    local_name: &str,
+) -> Option<&'a str> {
     let mut cursor = content_start;
     let mut depth = 1;
     while let Some(relative_start) = xml[cursor..].find('<') {
@@ -222,6 +228,47 @@ pub(in crate::service) fn requested_transfer_item_ids(request: &str) -> Vec<Stri
             .filter(|value| !value.trim().is_empty()),
     );
     ids
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::service) struct RequestedTransferUpload {
+    pub parent_folder_id: String,
+    pub data: String,
+}
+
+pub(in crate::service) fn requested_transfer_uploads(
+    request: &str,
+) -> Result<Vec<RequestedTransferUpload>> {
+    let items = element_contents(request, "Items");
+    let [items] = items.as_slice() else {
+        bail!("UploadItems requires exactly one Items collection");
+    };
+    let uploads = element_contents(items, "Item")
+        .into_iter()
+        .map(|item| {
+            let parent = element_contents(item, "ParentFolderId");
+            let [parent] = parent.as_slice() else {
+                bail!("UploadItems requires one ParentFolderId per item");
+            };
+            let parent_folder_id = attribute_value_after(parent, "FolderId", "Id")
+                .ok_or_else(|| anyhow!("UploadItems supports only canonical ParentFolderId"))?;
+            let data = element_contents(item, "Data");
+            let [data] = data.as_slice() else {
+                bail!("UploadItems requires one Data payload per item");
+            };
+            if data.trim().is_empty() {
+                bail!("UploadItems Data payload must not be empty");
+            }
+            Ok(RequestedTransferUpload {
+                parent_folder_id: parent_folder_id.to_string(),
+                data: data.trim().to_string(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if uploads.is_empty() {
+        bail!("UploadItems requires one or more items");
+    }
+    Ok(uploads)
 }
 
 pub(in crate::service) fn requested_folder_ids(request: &str) -> Vec<String> {
@@ -302,7 +349,6 @@ pub(in crate::service) fn requested_mailbox_folder_ids_in(
 pub(in crate::service) fn requested_mailbox_role(request: &str) -> Option<&'static str> {
     requested_distinguished_folder_id(request).and_then(ews_distinguished_mailbox_role)
 }
-
 
 pub(in crate::service) fn requested_distinguished_folder_id(request: &str) -> Option<&str> {
     attribute_values_for_tag(request, "DistinguishedFolderId", "Id")

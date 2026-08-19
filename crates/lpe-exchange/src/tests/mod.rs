@@ -1,4 +1,5 @@
 use anyhow::bail;
+use crate::store::EwsTransferExport;
 use argon2::password_hash::{rand_core::OsRng, PasswordHasher, SaltString};
 use axum::body::{to_bytes, Body};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
@@ -4322,6 +4323,7 @@ struct FakeStore {
     ews_user_configuration_audits: Arc<Mutex<Vec<lpe_storage::AuditEntryInput>>>,
     ews_delegates: Arc<Mutex<Vec<EwsDelegate>>>,
     ews_retention_policy_tags: Arc<Mutex<Vec<FakeRetentionPolicyTag>>>,
+    disabled_ews_retention_policy_tag_ids: Arc<Mutex<Vec<Uuid>>>,
     ews_sharing_grants: Arc<Mutex<Vec<CollaborationGrant>>>,
     ews_discovery_search_configs: Arc<Mutex<Vec<EwsDiscoverySearchConfig>>>,
     ews_discovery_search_results: Arc<Mutex<Vec<EwsDiscoverySearchResult>>>,
@@ -5897,12 +5899,18 @@ impl ExchangeStore for FakeStore {
         &'a self,
         principal: &'a AccountPrincipal,
     ) -> StoreFuture<'a, Vec<EwsRetentionPolicyTag>> {
+        let disabled_tag_ids = self
+            .disabled_ews_retention_policy_tag_ids
+            .lock()
+            .unwrap()
+            .clone();
         let tags = self
             .ews_retention_policy_tags
             .lock()
             .unwrap()
             .iter()
             .filter(|entry| entry.tenant_id == principal.tenant_id)
+            .filter(|entry| !disabled_tag_ids.contains(&entry.tag.id))
             .filter(|entry| {
                 entry.tag.is_visible || entry.assigned_account_id == Some(principal.account_id)
             })
@@ -6332,6 +6340,33 @@ impl ExchangeStore for FakeStore {
             };
             jobs.lock().unwrap().push(job.clone());
             Ok(job)
+        })
+    }
+
+    fn fetch_ews_transfer_exports<'a>(
+        &'a self,
+        _principal: &'a AccountPrincipal,
+        message_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<EwsTransferExport>> {
+        let emails = self.emails.lock().unwrap().clone();
+        let message_ids = message_ids.to_vec();
+        Box::pin(async move {
+            let exports = message_ids
+                .into_iter()
+                .filter_map(|message_id| {
+                    emails.iter().find(|email| email.id == message_id).map(|email| {
+                        EwsTransferExport {
+                            message_id,
+                            raw_message: format!(
+                                "From: {}\r\nSubject: {}\r\n\r\n{}",
+                                email.from_address, email.subject, email.body_text
+                            )
+                            .into_bytes(),
+                        }
+                    })
+                })
+                .collect::<Vec<_>>();
+            Ok(exports)
         })
     }
 

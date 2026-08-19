@@ -164,8 +164,12 @@ where
             "GetNonIndexableItemStatistics" => {
                 self.get_non_indexable_item_statistics(&principal).await?
             }
-            "UploadItems" => self.upload_items(&principal, &body).await?,
-            "ExportItems" => self.export_items(&principal, &body).await?,
+            "UploadItems" => self.upload_items(&principal, &body).await.unwrap_or_else(|error| {
+                operation_error_response("UploadItems", "ErrorInvalidOperation", &error.to_string())
+            }),
+            "ExportItems" => self.export_items(&principal, &body).await.unwrap_or_else(|error| {
+                operation_error_response("ExportItems", "ErrorInvalidOperation", &error.to_string())
+            }),
             "GetAppManifests" => self.get_app_manifests(&principal).await?,
             "GetAppMarketplaceUrl" => self.get_app_marketplace_url(&principal).await?,
             "InstallApp" => self.install_app(&principal, &body).await?,

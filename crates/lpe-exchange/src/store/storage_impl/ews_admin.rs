@@ -1337,6 +1337,54 @@ macro_rules! store_impl_ews_admin {
         })
     }
 
+    fn fetch_ews_transfer_exports<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        message_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<EwsTransferExport>> {
+        Box::pin(async move {
+            if message_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let rows = sqlx::query(
+                r#"
+                WITH requested(message_id, ordinal) AS (
+                    SELECT * FROM unnest($3::uuid[]) WITH ORDINALITY
+                )
+                SELECT requested.message_id, b.blob_bytes AS raw_message
+                FROM requested
+                JOIN mailbox_messages mm
+                  ON mm.tenant_id = $1
+                 AND mm.account_id = $2
+                 AND mm.message_id = requested.message_id
+                 AND mm.visibility = 'visible'
+                JOIN messages m
+                  ON m.tenant_id = mm.tenant_id
+                 AND m.id = mm.message_id
+                JOIN blobs b
+                  ON b.tenant_id = m.tenant_id
+                 AND b.domain_id = m.domain_id
+                 AND b.id = m.blob_id
+                 AND b.blob_kind = 'raw_message'
+                ORDER BY requested.ordinal
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(principal.account_id)
+            .bind(message_ids)
+            .fetch_all(self.pool())
+            .await?;
+            rows.into_iter()
+                .map(|row| {
+                    Ok(EwsTransferExport {
+                        message_id: row.try_get("message_id")?,
+                        raw_message: row.try_get("raw_message")?,
+                    })
+                })
+                .collect()
+        })
+    }
+
     };
 }
 

@@ -454,6 +454,12 @@ pub trait ExchangeStore: AccountAuthStore {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, EwsTransferJob>;
 
+    fn fetch_ews_transfer_exports<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        message_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<EwsTransferExport>>;
+
     fn fetch_ews_mail_app_manifests<'a>(
         &'a self,
         principal: &'a AccountPrincipal,

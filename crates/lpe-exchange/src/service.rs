@@ -48,7 +48,7 @@ use crate::{
         EwsHoldMailbox, EwsImGroup, EwsImGroupMember, EwsImList, EwsImMemberInput,
         EwsMailAppManifest, EwsMailAppTokenEvent, EwsMessageTrackingReport,
         EwsMessageTrackingReportDetail, EwsNonIndexableReport, EwsNotificationEventType,
-        EwsNotificationFolderScope, EwsRetentionPolicyTag, EwsSearchableMailbox, EwsTransferJob,
+        EwsNotificationFolderScope, EwsRetentionPolicyTag, EwsSearchableMailbox,
         EwsUnifiedMessagingCall, EwsUserConfiguration, EwsUserConfigurationKey,
         ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry,
         ExchangeAddressBookEntryDetails, ExchangeAddressBookEntryKind, ExchangeStore,

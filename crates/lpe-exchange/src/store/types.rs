@@ -581,6 +581,12 @@ pub(crate) struct EwsTransferJob {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsTransferExport {
+    pub(crate) message_id: Uuid,
+    pub(crate) raw_message: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EwsMailAppManifest {
     pub(crate) catalog_id: Uuid,
     pub(crate) app_id: String,
