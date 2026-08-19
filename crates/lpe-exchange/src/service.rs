@@ -473,108 +473,39 @@ where
         request: &str,
     ) -> Result<String> {
         let result = async {
-            let segments = requested_folder_path_segments(request);
-            if segments.is_empty() {
-                bail!("CreateFolderPath requires at least one folder DisplayName.");
-            }
-            if let Some(parent_folder_id) =
-                requested_public_folder_ids_in(request, "ParentFolderId")
-                    .into_iter()
-                    .next()
-            {
-                let mut created = Vec::new();
-                let mut parent_id = parent_folder_id;
-                for segment in segments {
-                    let existing = self
-                        .store
-                        .fetch_public_folder_children(principal.account_id, parent_id)
-                        .await?
-                        .into_iter()
-                        .find(|folder| folder.display_name.eq_ignore_ascii_case(&segment));
-                    let folder = match existing {
-                        Some(folder) => folder,
-                        None => {
-                            self.store
-                                .create_public_folder_child(
-                                    CreatePublicFolderInput {
-                                        account_id: principal.account_id,
-                                        parent_folder_id: parent_id,
-                                        display_name: segment.clone(),
-                                        folder_class: "IPF.Note".to_string(),
-                                        sort_order: 0,
-                                    },
-                                    AuditEntryInput {
-                                        actor: principal.email.clone(),
-                                        action: "ews-create-public-folder-path".to_string(),
-                                        subject: segment,
-                                    },
-                                )
-                                .await?
-                        }
-                    };
-                    parent_id = folder.id;
-                    created.push(public_folder_xml(&folder, folder.parent_folder_id, 0, 0));
-                }
-                return Ok(folders_operation_success_response(
-                    "CreateFolderPath",
-                    created.join(""),
-                ));
+            let segments = requested_folder_path_segments(request)?;
+            let parent = parse_create_folder_parent(request)?;
+            if matches!(parent, CreateFolderParent::PublicFolder(_)) {
+                bail!("CreateFolderPath public-folder paths are unsupported until canonical public-folder path transactions exist.");
             }
 
             let mailboxes = self
                 .store
                 .fetch_jmap_mailboxes(principal.account_id)
                 .await?;
-            let mut parent_id = requested_mailbox_folder_ids_in(request, "ParentFolderId")
-                .into_iter()
-                .next()
-                .or_else(|| {
-                    requested_mailbox_role_in(request, "ParentFolderId").and_then(|role| {
-                        mailboxes
-                            .iter()
-                            .find(|mailbox| mailbox.role == role)
-                            .map(|mailbox| mailbox.id)
-                    })
-                });
-            let mut current = mailboxes;
-            let mut created = Vec::new();
-            for segment in segments {
-                let existing = current
-                    .iter()
-                    .find(|mailbox| {
-                        mailbox.parent_id == parent_id
-                            && mailbox.name.eq_ignore_ascii_case(&segment)
-                    })
-                    .cloned();
-                let mailbox = match existing {
-                    Some(mailbox) => mailbox,
-                    None => {
-                        self.store
-                            .create_jmap_mailbox(
-                                JmapMailboxCreateInput {
-                                    account_id: principal.account_id,
-                                    name: segment.clone(),
-                                    parent_id,
-                                    sort_order: None,
-                                    is_subscribed: true,
-                                    copy_source_mailbox_id: None,
-                                },
-                                AuditEntryInput {
-                                    actor: principal.email.clone(),
-                                    action: "ews-create-folder-path".to_string(),
-                                    subject: segment,
-                                },
-                            )
-                            .await?
-                    }
-                };
-                parent_id = Some(mailbox.id);
-                created.push(mailbox_folder_xml(&mailbox));
-                current = self
-                    .store
-                    .fetch_jmap_mailboxes(principal.account_id)
-                    .await?;
+            let parent_id = match parent {
+                CreateFolderParent::Mailbox(parent_id) => parent_id,
+                CreateFolderParent::PublicFolder(_) => unreachable!("public paths returned above"),
+            };
+            if let Some(parent_id) = parent_id {
+                ensure_custom_mailbox(mailbox_by_id(&mailboxes, parent_id)?)?;
             }
+            let created = self
+                .store
+                .create_jmap_mailbox_path(
+                    principal.account_id,
+                    parent_id,
+                    &segments,
+                    AuditEntryInput {
+                        actor: principal.email.clone(),
+                        action: "ews-create-folder-path".to_string(),
+                        subject: segments.join("/"),
+                    },
+                )
+                .await?
+                .iter()
+                .map(mailbox_folder_xml)
+                .collect::<Vec<_>>();
 
             Ok(folders_operation_success_response(
                 "CreateFolderPath",
@@ -594,41 +525,50 @@ where
 
     async fn copy_folder(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
         let result = async {
-            if !requested_public_folder_ids(request).is_empty() {
-                let target_parent_id = requested_public_folder_ids_in(request, "ToFolderId")
-                    .into_iter()
-                    .next()
-                    .ok_or_else(|| anyhow!("CopyFolder requires a public folder target."))?;
-                let mut copied = Vec::new();
-                for source_id in requested_public_folder_ids_in(request, "FolderIds") {
-                    let folder = self
-                        .copy_public_folder_tree(principal, source_id, target_parent_id)
-                        .await?;
-                    copied.push(public_folder_xml(&folder, folder.parent_folder_id, 0, 0));
-                }
-                return Ok(folders_operation_success_response(
-                    "CopyFolder",
-                    copied.join(""),
-                ));
+            let (source_id, target_parent_id) =
+                requested_single_mailbox_folder_transfer(request, "CopyFolder")?;
+            let mailboxes = self
+                .store
+                .fetch_jmap_mailboxes(principal.account_id)
+                .await?;
+            let source = mailbox_by_id(&mailboxes, source_id)?;
+            ensure_custom_mailbox(source)?;
+            if mailboxes
+                .iter()
+                .any(|mailbox| mailbox.parent_id == Some(source_id))
+                || !self
+                    .store
+                    .query_jmap_email_ids(principal.account_id, Some(source_id), None, 0, 1)
+                    .await?
+                    .ids
+                    .is_empty()
+            {
+                bail!("CopyFolder currently supports only empty custom mailbox leaves");
             }
-
-            let target_parent_id = requested_mailbox_folder_ids_in(request, "ToFolderId")
-                .into_iter()
-                .next();
-            let mailbox_ids = requested_mailbox_folder_ids_in(request, "FolderIds");
-            if mailbox_ids.is_empty() {
-                bail!("CopyFolder requires at least one mailbox FolderId.");
+            if let Some(target_parent_id) = target_parent_id {
+                ensure_custom_mailbox(mailbox_by_id(&mailboxes, target_parent_id)?)?;
             }
-            let mut copied = Vec::new();
-            for source_id in mailbox_ids {
-                let mailbox = self
-                    .copy_mailbox_folder_tree(principal, source_id, target_parent_id)
-                    .await?;
-                copied.push(mailbox_folder_xml(&mailbox));
-            }
+            let mailbox = self
+                .store
+                .create_jmap_mailbox(
+                    JmapMailboxCreateInput {
+                        account_id: principal.account_id,
+                        name: source.name.clone(),
+                        parent_id: target_parent_id,
+                        sort_order: Some(source.sort_order),
+                        is_subscribed: source.is_subscribed,
+                        copy_source_mailbox_id: Some(source.id),
+                    },
+                    AuditEntryInput {
+                        actor: principal.email.clone(),
+                        action: "ews-copy-folder".to_string(),
+                        subject: source_id.to_string(),
+                    },
+                )
+                .await?;
             Ok(folders_operation_success_response(
                 "CopyFolder",
-                copied.join(""),
+                mailbox_folder_xml(&mailbox),
             ))
         }
         .await;
@@ -667,42 +607,36 @@ where
 
     async fn move_folder(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
         let result = async {
-            if !requested_public_folder_ids(request).is_empty() {
-                bail!("MoveFolder for public folders is unsupported until canonical public-folder reparenting exists.");
-            }
-            let target_parent_id = requested_mailbox_folder_ids_in(request, "ToFolderId")
-                .into_iter()
-                .next();
-            let mailbox_ids = requested_mailbox_folder_ids_in(request, "FolderIds");
-            if mailbox_ids.is_empty() {
-                bail!("MoveFolder requires at least one mailbox FolderId.");
-            }
+            let (mailbox_id, target_parent_id) =
+                requested_single_mailbox_folder_transfer(request, "MoveFolder")?;
             let mailboxes = self.store.fetch_jmap_mailboxes(principal.account_id).await?;
-            let mut moved = Vec::new();
-            for mailbox_id in mailbox_ids {
-                let mailbox = mailbox_by_id(&mailboxes, mailbox_id)?;
-                ensure_custom_mailbox(mailbox)?;
-                let updated = self
-                    .store
-                    .update_jmap_mailbox(
-                        JmapMailboxUpdateInput {
-                            account_id: principal.account_id,
-                            mailbox_id,
-                            name: None,
-                            parent_id: Some(target_parent_id),
-                            sort_order: None,
-                            is_subscribed: None,
-                        },
-                        AuditEntryInput {
-                            actor: principal.email.clone(),
-                            action: "ews-move-folder".to_string(),
-                            subject: mailbox_id.to_string(),
-                        },
-                    )
-                    .await?;
-                moved.push(mailbox_folder_xml(&updated));
+            let mailbox = mailbox_by_id(&mailboxes, mailbox_id)?;
+            ensure_custom_mailbox(mailbox)?;
+            if let Some(target_parent_id) = target_parent_id {
+                ensure_custom_mailbox(mailbox_by_id(&mailboxes, target_parent_id)?)?;
             }
-            Ok(folders_operation_success_response("MoveFolder", moved.join("")))
+            let updated = self
+                .store
+                .update_jmap_mailbox(
+                    JmapMailboxUpdateInput {
+                        account_id: principal.account_id,
+                        mailbox_id,
+                        name: None,
+                        parent_id: Some(target_parent_id),
+                        sort_order: None,
+                        is_subscribed: None,
+                    },
+                    AuditEntryInput {
+                        actor: principal.email.clone(),
+                        action: "ews-move-folder".to_string(),
+                        subject: mailbox_id.to_string(),
+                    },
+                )
+                .await?;
+            Ok(folders_operation_success_response(
+                "MoveFolder",
+                mailbox_folder_xml(&updated),
+            ))
         }
         .await;
 
@@ -796,72 +730,6 @@ where
         }))
     }
 
-    async fn copy_mailbox_folder_tree(
-        &self,
-        principal: &AccountPrincipal,
-        source_id: Uuid,
-        target_parent_id: Option<Uuid>,
-    ) -> Result<JmapMailbox> {
-        let mailboxes = self
-            .store
-            .fetch_jmap_mailboxes(principal.account_id)
-            .await?;
-        ensure_custom_mailbox(mailbox_by_id(&mailboxes, source_id)?)?;
-        let mut stack = vec![(source_id, target_parent_id)];
-        let mut root = None;
-        while let Some((current_id, parent_id)) = stack.pop() {
-            let current = mailbox_by_id(&mailboxes, current_id)?.clone();
-            ensure_custom_mailbox(&current)?;
-            let copied = self
-                .store
-                .create_jmap_mailbox(
-                    JmapMailboxCreateInput {
-                        account_id: principal.account_id,
-                        name: current.name.clone(),
-                        parent_id,
-                        sort_order: Some(current.sort_order),
-                        is_subscribed: current.is_subscribed,
-                        copy_source_mailbox_id: Some(current.id),
-                    },
-                    AuditEntryInput {
-                        actor: principal.email.clone(),
-                        action: "ews-copy-folder".to_string(),
-                        subject: current_id.to_string(),
-                    },
-                )
-                .await?;
-            if current_id == source_id {
-                root = Some(copied.clone());
-            }
-            let message_ids = self
-                .store
-                .query_jmap_email_ids(principal.account_id, Some(current_id), None, 0, 10_000)
-                .await?
-                .ids;
-            for message_id in message_ids {
-                self.store
-                    .copy_jmap_email(
-                        principal.account_id,
-                        message_id,
-                        copied.id,
-                        AuditEntryInput {
-                            actor: principal.email.clone(),
-                            action: "ews-copy-folder-message".to_string(),
-                            subject: message_id.to_string(),
-                        },
-                    )
-                    .await?;
-            }
-            for child in mailboxes
-                .iter()
-                .filter(|mailbox| mailbox.parent_id == Some(current_id))
-            {
-                stack.push((child.id, Some(copied.id)));
-            }
-        }
-        root.ok_or_else(|| anyhow!("mailbox folder not found"))
-    }
-
     async fn empty_mailbox_folder(
         &self,
         principal: &AccountPrincipal,
@@ -900,76 +768,6 @@ where
                 },
             )
             .await
-    }
-
-    async fn copy_public_folder_tree(
-        &self,
-        principal: &AccountPrincipal,
-        source_id: Uuid,
-        target_parent_id: Uuid,
-    ) -> Result<PublicFolder> {
-        let mut stack = vec![(source_id, target_parent_id)];
-        let mut root = None;
-        while let Some((current_id, parent_id)) = stack.pop() {
-            let current = self
-                .store
-                .fetch_public_folder(principal.account_id, current_id)
-                .await?;
-            let copied = self
-                .store
-                .create_public_folder_child(
-                    CreatePublicFolderInput {
-                        account_id: principal.account_id,
-                        parent_folder_id: parent_id,
-                        display_name: current.display_name.clone(),
-                        folder_class: current.folder_class.clone(),
-                        sort_order: current.sort_order,
-                    },
-                    AuditEntryInput {
-                        actor: principal.email.clone(),
-                        action: "ews-copy-public-folder".to_string(),
-                        subject: current_id.to_string(),
-                    },
-                )
-                .await?;
-            if current_id == source_id {
-                root = Some(copied.clone());
-            }
-            let items = self
-                .store
-                .fetch_public_folder_items(principal.account_id, current_id)
-                .await?;
-            for item in items {
-                self.store
-                    .upsert_public_folder_item(
-                        UpsertPublicFolderItemInput {
-                            id: None,
-                            account_id: principal.account_id,
-                            public_folder_id: copied.id,
-                            item_kind: item.item_kind,
-                            message_class: item.message_class,
-                            subject: item.subject,
-                            body_text: item.body_text,
-                            body_html_sanitized: item.body_html_sanitized,
-                            source_payload_json: item.source_payload_json,
-                        },
-                        AuditEntryInput {
-                            actor: principal.email.clone(),
-                            action: "ews-copy-public-folder-item".to_string(),
-                            subject: item.id.to_string(),
-                        },
-                    )
-                    .await?;
-            }
-            for child in self
-                .store
-                .fetch_public_folder_children(principal.account_id, current_id)
-                .await?
-            {
-                stack.push((child.id, copied.id));
-            }
-        }
-        root.ok_or_else(|| anyhow!("public folder not found"))
     }
 
     async fn empty_public_folder(
@@ -1078,4 +876,43 @@ where
             )
         }))
     }
+}
+
+fn requested_single_mailbox_folder_transfer(
+    request: &str,
+    operation: &str,
+) -> Result<(Uuid, Option<Uuid>)> {
+    let targets = element_contents(request, "ToFolderId");
+    let sources = element_contents(request, "FolderIds");
+    if targets.len() != 1 || sources.len() != 1 {
+        bail!("{operation} requires exactly one ToFolderId and one FolderIds collection");
+    }
+    let target_ids = requested_folder_ids(targets[0]);
+    let source_ids = requested_folder_ids(sources[0]);
+    if target_ids.len() > 1 || source_ids.len() != 1 {
+        bail!("{operation} supports exactly one mailbox source folder");
+    }
+    if !attribute_values_for_tag(targets[0], "DistinguishedFolderId", "Id").is_empty()
+        || !attribute_values_for_tag(sources[0], "DistinguishedFolderId", "Id").is_empty()
+    {
+        bail!("{operation} supports canonical mailbox FolderId values only");
+    }
+    let source_id = source_ids[0]
+        .strip_prefix("mailbox:")
+        .ok_or_else(|| {
+            anyhow!("{operation} public folders are unsupported until canonical public-folder reparenting exists")
+        })
+        .and_then(|id| Uuid::parse_str(id).map_err(Into::into))?;
+    let target_parent_id = match target_ids.as_slice() {
+        [] => None,
+        [id] => Some(
+            id.strip_prefix("mailbox:")
+                .ok_or_else(|| {
+                    anyhow!("{operation} public folders are unsupported until canonical public-folder reparenting exists")
+                })
+                .and_then(|id| Uuid::parse_str(id).map_err(Into::into))?,
+        ),
+        _ => unreachable!("validated target count"),
+    };
+    Ok((source_id, target_parent_id))
 }

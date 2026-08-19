@@ -12433,6 +12433,61 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(mailbox) })
     }
 
+    fn create_jmap_mailbox_path<'a>(
+        &'a self,
+        account_id: Uuid,
+        mut parent_id: Option<Uuid>,
+        segments: &'a [String],
+        audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, Vec<JmapMailbox>> {
+        Box::pin(async move {
+            let mailboxes = self.mailboxes.lock().unwrap().clone();
+            for segment in segments {
+                if segment.trim().is_empty() {
+                    bail!("mailbox path segment is required");
+                }
+                if let Some(mailbox) = mailboxes.iter().find(|mailbox| {
+                    mailbox.parent_id == parent_id && mailbox.name.eq_ignore_ascii_case(segment)
+                }) {
+                    parent_id = Some(mailbox.id);
+                }
+            }
+            let mut created = Vec::new();
+            for segment in segments {
+                if let Some(mailbox) = self
+                    .mailboxes
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find(|mailbox| {
+                        mailbox.parent_id == parent_id && mailbox.name.eq_ignore_ascii_case(segment)
+                    })
+                    .cloned()
+                {
+                    parent_id = Some(mailbox.id);
+                    created.push(mailbox);
+                    continue;
+                }
+                let mailbox = self
+                    .create_jmap_mailbox(
+                        JmapMailboxCreateInput {
+                            account_id,
+                            name: segment.clone(),
+                            parent_id,
+                            sort_order: None,
+                            is_subscribed: true,
+                            copy_source_mailbox_id: None,
+                        },
+                        audit.clone(),
+                    )
+                    .await?;
+                parent_id = Some(mailbox.id);
+                created.push(mailbox);
+            }
+            Ok(created)
+        })
+    }
+
     fn update_jmap_mailbox<'a>(
         &'a self,
         input: JmapMailboxUpdateInput,

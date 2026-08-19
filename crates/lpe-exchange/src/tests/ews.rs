@@ -366,13 +366,42 @@ async fn create_folder_path_creates_nested_mailboxes_and_sync_reports_changes() 
 }
 
 #[tokio::test]
+async fn create_folder_path_rejects_an_empty_segment_without_creating_mailboxes() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let created_mailboxes = store.created_mailboxes.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope><s:Body><m:CreateFolderPath>
+              <m:ParentFolderId><t:DistinguishedFolderId Id="msgfolderroot"/></m:ParentFolderId>
+              <m:RelativeFolderPath>
+                <t:Folder><t:DisplayName>Projects</t:DisplayName></t:Folder>
+                <t:Folder><t:DisplayName> </t:DisplayName></t:Folder>
+              </m:RelativeFolderPath>
+            </m:CreateFolderPath></s:Body></s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateFolderPathResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(created_mailboxes.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn copy_move_and_update_folder_use_canonical_mailbox_changes() {
     let source_id = "11111111-1111-1111-1111-111111111111";
     let target_id = "22222222-2222-2222-2222-222222222222";
     let child_id = "33333333-3333-3333-3333-333333333333";
-    let message_id = "99999999-9999-9999-9999-999999999999";
-    let mut child = FakeStore::mailbox(child_id, "custom", "Child");
-    child.parent_id = Some(Uuid::parse_str(source_id).unwrap());
+    let child = FakeStore::mailbox(child_id, "custom", "Child");
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![
@@ -380,12 +409,6 @@ async fn copy_move_and_update_folder_use_canonical_mailbox_changes() {
             FakeStore::mailbox(target_id, "custom", "Target"),
             child,
         ])),
-        emails: Arc::new(Mutex::new(vec![FakeStore::email(
-            message_id,
-            source_id,
-            "custom",
-            "Folder payload",
-        )])),
         ..Default::default()
     };
     let service = ExchangeService::new(store.clone());
@@ -403,11 +426,8 @@ async fn copy_move_and_update_folder_use_canonical_mailbox_changes() {
     let body = response_text(response).await;
     assert!(body.contains("<m:CopyFolderResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert_eq!(store.created_mailboxes.lock().unwrap().len(), 2);
-    let copied_emails = store.copied_emails.lock().unwrap().clone();
-    assert_eq!(copied_emails.len(), 1);
-    assert_eq!(copied_emails[0].0, Uuid::parse_str(message_id).unwrap());
-    assert_ne!(copied_emails[0].1, Uuid::parse_str(source_id).unwrap());
+    assert_eq!(store.created_mailboxes.lock().unwrap().len(), 1);
+    assert!(store.copied_emails.lock().unwrap().is_empty());
 
     let response = service
         .handle(
@@ -461,6 +481,76 @@ async fn copy_move_and_update_folder_use_canonical_mailbox_changes() {
         .unwrap()
         .changed_mailbox_ids
         .contains(&Uuid::parse_str(source_id).unwrap()));
+}
+
+#[tokio::test]
+async fn move_folder_rejects_a_batch_without_mutating_any_source() {
+    let first_id = "11111111-1111-1111-1111-111111111111";
+    let second_id = "22222222-2222-2222-2222-222222222222";
+    let target_id = "33333333-3333-3333-3333-333333333333";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(first_id, "custom", "First"),
+            FakeStore::mailbox(second_id, "custom", "Second"),
+            FakeStore::mailbox(target_id, "custom", "Target"),
+        ])),
+        ..Default::default()
+    };
+    let updated_mailboxes = store.updated_mailboxes.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:MoveFolder><m:ToFolderId><t:FolderId Id="mailbox:{target_id}"/></m:ToFolderId><m:FolderIds><t:FolderId Id="mailbox:{first_id}"/><t:FolderId Id="mailbox:{second_id}"/></m:FolderIds></m:MoveFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:MoveFolderResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(updated_mailboxes.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn copy_folder_rejects_mixed_public_and_mailbox_sources_without_mutation() {
+    let mailbox_id = "11111111-1111-1111-1111-111111111111";
+    let public_folder_id = "aaaaaaaa-1111-1111-1111-111111111111";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            mailbox_id, "custom", "Private",
+        )])),
+        public_folders: Arc::new(Mutex::new(vec![FakeStore::public_folder(
+            public_folder_id,
+            None,
+            "Shared",
+        )])),
+        ..Default::default()
+    };
+    let created_mailboxes = store.created_mailboxes.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:CopyFolder><m:ToFolderId><t:FolderId Id="public-folder:{public_folder_id}"/></m:ToFolderId><m:FolderIds><t:FolderId Id="mailbox:{mailbox_id}"/><t:FolderId Id="public-folder:{public_folder_id}"/></m:FolderIds></m:CopyFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CopyFolderResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(created_mailboxes.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -8990,6 +9080,65 @@ async fn apply_conversation_action_keeps_future_message_rules_parseable() {
     assert!(body.contains("ResponseClass=\"Error\""));
     assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
     assert!(body.contains("Persistent future-message conversation actions are not supported"));
+    assert!(moved_emails.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn apply_conversation_action_rejects_persistent_batch_without_mutation() {
+    let inbox_id = "44444444-4444-4444-4444-444444444444";
+    let archive_id = "55555555-5555-5555-5555-555555555555";
+    let thread_id = Uuid::parse_str("aaaaaaaa-1111-1111-1111-111111111111").unwrap();
+    let mut email = FakeStore::email(
+        "11111111-1111-1111-1111-111111111111",
+        inbox_id,
+        "inbox",
+        "Quarterly planning",
+    );
+    email.thread_id = thread_id;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(inbox_id, "inbox", "Inbox"),
+            FakeStore::mailbox(archive_id, "archive", "Archive"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let moved_emails = store.moved_emails.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:ApplyConversationAction>
+                  <m:ConversationActions>
+                    <t:ConversationAction>
+                      <t:Action>Move</t:Action>
+                      <t:ConversationId Id="conversation:aaaaaaaa-1111-1111-1111-111111111111"/>
+                      <t:DestinationFolderId><t:FolderId Id="mailbox:55555555-5555-5555-5555-555555555555"/></t:DestinationFolderId>
+                    </t:ConversationAction>
+                    <t:ConversationAction>
+                      <t:Action>AlwaysMove</t:Action>
+                      <t:ConversationId Id="conversation:aaaaaaaa-1111-1111-1111-111111111111"/>
+                      <t:DestinationFolderId><t:FolderId Id="mailbox:55555555-5555-5555-5555-555555555555"/></t:DestinationFolderId>
+                    </t:ConversationAction>
+                  </m:ConversationActions>
+                </m:ApplyConversationAction>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ApplyConversationActionResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
     assert!(moved_emails.lock().unwrap().is_empty());
 }
 

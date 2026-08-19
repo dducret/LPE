@@ -281,7 +281,7 @@ fn parse_folder_ids_target(request: &str, operation: &str) -> Result<FolderOpera
     parse_single_folder_target(folder_ids[0], operation)
 }
 
-fn parse_create_folder_parent(request: &str) -> Result<CreateFolderParent> {
+pub(in crate::service) fn parse_create_folder_parent(request: &str) -> Result<CreateFolderParent> {
     let parents = element_contents(request, "ParentFolderId");
     if parents.len() != 1 {
         bail!("CreateFolder requires exactly one ParentFolderId");

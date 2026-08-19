@@ -72,6 +72,31 @@ where
             if actions.is_empty() {
                 bail!("ApplyConversationAction requires at least one ConversationAction.");
             }
+            if actions
+                .iter()
+                .any(|action| action.action.starts_with("Always"))
+            {
+                return Ok(operation_error_response(
+                    "ApplyConversationAction",
+                    "ErrorInvalidOperation",
+                    "Persistent future-message conversation actions are not supported without first-class canonical thread lifecycle state.",
+                ));
+            }
+            if actions.len() != 1 {
+                return Ok(operation_error_response(
+                    "ApplyConversationAction",
+                    "ErrorInvalidOperation",
+                    "ApplyConversationAction supports exactly one one-shot conversation action until canonical multi-action transactions exist.",
+                ));
+            }
+            let action = actions.into_iter().next().expect("non-empty actions");
+            if !matches!(action.action.as_str(), "Move" | "Delete" | "SetReadState") {
+                return Ok(operation_error_response(
+                    "ApplyConversationAction",
+                    "ErrorInvalidOperation",
+                    &format!("unsupported conversation action {}", action.action),
+                ));
+            }
             let all_ids = self
                 .store
                 .fetch_all_jmap_email_ids(principal.account_id)
@@ -84,100 +109,88 @@ where
                 .store
                 .fetch_jmap_mailboxes(principal.account_id)
                 .await?;
+            let conversation_id = action
+                .conversation_id
+                .ok_or_else(|| anyhow!("ConversationAction is missing ConversationId."))?;
+            let message_ids = emails
+                .iter()
+                .filter(|email| email.thread_id == conversation_id)
+                .map(|email| email.id)
+                .collect::<Vec<_>>();
+            if message_ids.is_empty() {
+                return Ok(operation_error_response(
+                    "ApplyConversationAction",
+                    "ErrorItemNotFound",
+                    "conversation not found",
+                ));
+            }
+            let target_mailbox_id = (action.action == "Move")
+                .then(|| {
+                    action.target_mailbox_id.ok_or_else(|| {
+                        anyhow!("Move conversation action requires DestinationFolderId.")
+                    })
+                })
+                .transpose()?;
+            if target_mailbox_id
+                .is_some_and(|target| !mailboxes.iter().any(|mailbox| mailbox.id == target))
+            {
+                return Ok(operation_error_response(
+                    "ApplyConversationAction",
+                    "ErrorFolderNotFound",
+                    "destination folder not found",
+                ));
+            }
 
-            for action in actions {
-                let conversation_id = action
-                    .conversation_id
-                    .ok_or_else(|| anyhow!("ConversationAction is missing ConversationId."))?;
-                let message_ids = emails
-                    .iter()
-                    .filter(|email| email.thread_id == conversation_id)
-                    .map(|email| email.id)
-                    .collect::<Vec<_>>();
-                if message_ids.is_empty() {
-                    return Ok(operation_error_response(
-                        "ApplyConversationAction",
-                        "ErrorItemNotFound",
-                        "conversation not found",
-                    ));
+            match action.action.as_str() {
+                "Move" => {
+                    let target_mailbox_id = target_mailbox_id.expect("validated target");
+                    self.store
+                        .move_jmap_emails(
+                            principal.account_id,
+                            &message_ids,
+                            target_mailbox_id,
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "ews-conversation-move".to_string(),
+                                subject: format!("{conversation_id}->{target_mailbox_id}"),
+                            },
+                        )
+                        .await?;
                 }
-                match action.action.as_str() {
-                    "Move" => {
-                        let target_mailbox_id = action.target_mailbox_id.ok_or_else(|| {
-                            anyhow!("Move conversation action requires DestinationFolderId.")
-                        })?;
-                        if !mailboxes.iter().any(|mailbox| mailbox.id == target_mailbox_id) {
-                            return Ok(operation_error_response(
-                                "ApplyConversationAction",
-                                "ErrorFolderNotFound",
-                                "destination folder not found",
-                            ));
-                        }
-                        for message_id in message_ids {
-                            self.store
-                                .move_jmap_email(
-                                    principal.account_id,
-                                    message_id,
-                                    target_mailbox_id,
-                                    AuditEntryInput {
-                                        actor: principal.email.clone(),
-                                        action: "ews-conversation-move".to_string(),
-                                        subject: format!(
-                                            "{conversation_id}:{message_id}->{target_mailbox_id}"
-                                        ),
-                                    },
-                                )
-                                .await?;
-                        }
-                    }
-                    "Delete" => {
-                        for message_id in message_ids {
-                            self.store
-                                .delete_jmap_email(
-                                    principal.account_id,
-                                    message_id,
-                                    AuditEntryInput {
-                                        actor: principal.email.clone(),
-                                        action: "ews-conversation-delete".to_string(),
-                                        subject: format!("{conversation_id}:{message_id}"),
-                                    },
-                                )
-                                .await?;
-                        }
-                    }
-                    "SetReadState" => {
-                        let unread = !action.read.unwrap_or(true);
-                        for message_id in message_ids {
-                            self.store
-                                .update_jmap_email_flags(
-                                    principal.account_id,
-                                    message_id,
-                                    Some(unread),
-                                    None,
-                                    AuditEntryInput {
-                                        actor: principal.email.clone(),
-                                        action: "ews-conversation-read-state".to_string(),
-                                        subject: format!("{conversation_id}:{message_id}"),
-                                    },
-                                )
-                                .await?;
-                        }
-                    }
-                    value if value.starts_with("Always") => {
-                        return Ok(operation_error_response(
-                            "ApplyConversationAction",
-                            "ErrorInvalidOperation",
-                            "Persistent future-message conversation actions are not supported without first-class canonical thread lifecycle state.",
-                        ));
-                    }
-                    other => {
-                        return Ok(operation_error_response(
-                            "ApplyConversationAction",
-                            "ErrorInvalidOperation",
-                            &format!("unsupported conversation action {other}"),
-                        ));
+                "Delete" => {
+                    for message_id in message_ids {
+                        self.store
+                            .delete_jmap_email(
+                                principal.account_id,
+                                message_id,
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "ews-conversation-delete".to_string(),
+                                    subject: format!("{conversation_id}:{message_id}"),
+                                },
+                            )
+                            .await?;
                     }
                 }
+                "SetReadState" => {
+                    let unread = !action.read.unwrap_or(true);
+                    for message_id in message_ids {
+                        self.store
+                            .update_jmap_email_flags(
+                                principal.account_id,
+                                message_id,
+                                Some(unread),
+                                None,
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "ews-conversation-read-state".to_string(),
+                                    subject: format!("{conversation_id}:{message_id}"),
+                                },
+                            )
+                            .await?;
+                    }
+                }
+                _ => unreachable!("validated conversation action"),
             }
 
             Ok(simple_operation_success_response("ApplyConversationAction"))

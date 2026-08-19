@@ -623,11 +623,15 @@ where
                     "ArchiveItem currently supports only canonical message item ids.",
                 ));
             }
+            if message_ids.len() > 100 {
+                return Ok(operation_error_response(
+                    "ArchiveItem",
+                    "ErrorInvalidOperation",
+                    "ArchiveItem supports at most 100 canonical message item ids.",
+                ));
+            }
 
-            let mailboxes = self
-                .store
-                .ensure_jmap_system_mailboxes(principal.account_id)
-                .await?;
+            let mailboxes = self.store.fetch_jmap_mailboxes(principal.account_id).await?;
             let Some(archive_mailbox_id) = mailboxes
                 .iter()
                 .find(|mailbox| mailbox.role == "archive")
@@ -651,23 +655,39 @@ where
                     "message not found",
                 ));
             }
+            if existing.iter().any(|message| {
+                message
+                    .mailbox_ids
+                    .iter()
+                    .any(|mailbox_id| *mailbox_id == archive_mailbox_id)
+            }) {
+                return Ok(operation_error_response(
+                    "ArchiveItem",
+                    "ErrorInvalidOperation",
+                    "ArchiveItem source messages must not already belong to the canonical Archive mailbox.",
+                ));
+            }
+
+            self.store
+                .move_jmap_emails(
+                    principal.account_id,
+                    &message_ids,
+                    archive_mailbox_id,
+                    AuditEntryInput {
+                        actor: principal.email.clone(),
+                        action: "ews-archive-message".to_string(),
+                        subject: format!("{} messages -> {archive_mailbox_id}", message_ids.len()),
+                    },
+                )
+                .await?;
 
             let mut items = String::new();
-            for message_id in message_ids {
-                let moved = self
-                    .store
-                    .move_jmap_email(
-                        principal.account_id,
-                        message_id,
-                        archive_mailbox_id,
-                        AuditEntryInput {
-                            actor: principal.email.clone(),
-                            action: "ews-archive-message".to_string(),
-                            subject: format!("{message_id}->{archive_mailbox_id}"),
-                        },
-                    )
-                    .await?;
-                items.push_str(&message_item_xml(&moved));
+            for message in self
+                .store
+                .fetch_jmap_emails(principal.account_id, &message_ids)
+                .await?
+            {
+                items.push_str(&message_item_xml(&message));
             }
 
             Ok(archive_item_success_response(items))

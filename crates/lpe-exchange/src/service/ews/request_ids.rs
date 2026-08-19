@@ -258,16 +258,17 @@ pub(in crate::service) fn requested_collection_id_in<'a>(
         })
 }
 
-pub(in crate::service) fn requested_folder_path_segments(request: &str) -> Vec<String> {
-    element_content(request, "RelativeFolderPath")
-        .map(|path| {
-            element_contents(path, "DisplayName")
-                .into_iter()
-                .map(xml_text)
-                .filter(|value| !value.is_empty())
-                .collect()
-        })
-        .unwrap_or_default()
+pub(in crate::service) fn requested_folder_path_segments(request: &str) -> Result<Vec<String>> {
+    let path = element_content(request, "RelativeFolderPath")
+        .ok_or_else(|| anyhow!("CreateFolderPath requires one RelativeFolderPath"))?;
+    let segments = element_contents(path, "DisplayName")
+        .into_iter()
+        .map(xml_text)
+        .collect::<Vec<_>>();
+    if segments.is_empty() || segments.iter().any(|segment| segment.is_empty()) {
+        bail!("CreateFolderPath requires nonempty folder DisplayName segments");
+    }
+    Ok(segments)
 }
 
 pub(in crate::service) fn requested_public_folder_ids(request: &str) -> Vec<Uuid> {
@@ -276,15 +277,6 @@ pub(in crate::service) fn requested_public_folder_ids(request: &str) -> Vec<Uuid
         .filter_map(|value| value.strip_prefix("public-folder:"))
         .filter_map(|value| Uuid::parse_str(value).ok())
         .collect()
-}
-
-pub(in crate::service) fn requested_public_folder_ids_in(
-    request: &str,
-    wrapper: &str,
-) -> Vec<Uuid> {
-    element_content(request, wrapper)
-        .map(requested_public_folder_ids)
-        .unwrap_or_default()
 }
 
 pub(in crate::service) fn requested_mailbox_folder_ids(request: &str) -> Vec<Uuid> {
@@ -311,12 +303,6 @@ pub(in crate::service) fn requested_mailbox_role(request: &str) -> Option<&'stat
     requested_distinguished_folder_id(request).and_then(ews_distinguished_mailbox_role)
 }
 
-pub(in crate::service) fn requested_mailbox_role_in(
-    request: &str,
-    wrapper: &str,
-) -> Option<&'static str> {
-    element_content(request, wrapper).and_then(requested_mailbox_role)
-}
 
 pub(in crate::service) fn requested_distinguished_folder_id(request: &str) -> Option<&str> {
     attribute_values_for_tag(request, "DistinguishedFolderId", "Id")

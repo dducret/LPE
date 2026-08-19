@@ -1209,6 +1209,14 @@ pub trait ExchangeStore: AccountAuthStore {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, JmapMailbox>;
 
+    fn create_jmap_mailbox_path<'a>(
+        &'a self,
+        account_id: Uuid,
+        parent_id: Option<Uuid>,
+        segments: &'a [String],
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Vec<JmapMailbox>>;
+
     fn update_jmap_mailbox<'a>(
         &'a self,
         input: JmapMailboxUpdateInput,

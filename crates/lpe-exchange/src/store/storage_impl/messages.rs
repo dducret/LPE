@@ -8,6 +8,19 @@ macro_rules! store_impl_messages {
         Box::pin(async move { self.create_jmap_mailbox(input, audit).await })
     }
 
+    fn create_jmap_mailbox_path<'a>(
+        &'a self,
+        account_id: Uuid,
+        parent_id: Option<Uuid>,
+        segments: &'a [String],
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Vec<JmapMailbox>> {
+        Box::pin(async move {
+            self.create_jmap_mailbox_path(account_id, parent_id, segments, audit)
+                .await
+        })
+    }
+
     fn update_jmap_mailbox<'a>(
         &'a self,
         input: JmapMailboxUpdateInput,

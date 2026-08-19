@@ -637,6 +637,119 @@ impl Storage {
             .ok_or_else(|| anyhow!("mailbox creation failed"))
     }
 
+    /// Creates or reuses a custom mailbox path in one canonical transaction.
+    pub async fn create_jmap_mailbox_path(
+        &self,
+        account_id: Uuid,
+        parent_id: Option<Uuid>,
+        segments: &[String],
+        audit: AuditEntryInput,
+    ) -> Result<Vec<JmapMailbox>> {
+        if segments.is_empty() {
+            bail!("mailbox path requires at least one segment");
+        }
+        let segments = segments
+            .iter()
+            .map(|segment| Ok(MailboxDisplayName::new(segment)?.into_string()))
+            .collect::<Result<Vec<_>>>()?;
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        self.ensure_account_exists(&mut tx, &tenant_id, account_id)
+            .await?;
+        if let Some(parent_id) = parent_id {
+            let role = sqlx::query_scalar::<_, String>(
+                "SELECT role FROM mailboxes WHERE tenant_id = $1 AND account_id = $2 AND id = $3 FOR UPDATE",
+            )
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(parent_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| anyhow!("mailbox path parent not found"))?;
+            if is_system_mailbox_role(&role) {
+                bail!("mailbox path parent must be custom");
+            }
+        }
+
+        let mut current_parent_id = parent_id;
+        let mut created_ids = Vec::with_capacity(segments.len());
+        let mut changes = Vec::new();
+        for segment in &segments {
+            if let Some(mailbox_id) = Self::find_mailbox_by_name_in_tx(
+                &mut tx,
+                &tenant_id,
+                account_id,
+                current_parent_id,
+                segment,
+            )
+            .await?
+            {
+                let role = sqlx::query_scalar::<_, String>(
+                    "SELECT role FROM mailboxes WHERE tenant_id = $1 AND account_id = $2 AND id = $3 FOR UPDATE",
+                )
+                .bind(&tenant_id)
+                .bind(account_id)
+                .bind(mailbox_id)
+                .fetch_one(&mut *tx)
+                .await?;
+                if is_system_mailbox_role(&role) {
+                    bail!("mailbox path cannot traverse a system mailbox");
+                }
+                current_parent_id = Some(mailbox_id);
+                created_ids.push(mailbox_id);
+                continue;
+            }
+            if MailboxNamePolicy::system_role_for_display_name(segment).is_some() {
+                bail!("mailbox path cannot create a system mailbox");
+            }
+            let (mailbox_id, modseq) = self
+                .insert_imap_custom_mailbox_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    account_id,
+                    current_parent_id,
+                    segment,
+                )
+                .await?;
+            changes.push((mailbox_id, segment.clone(), current_parent_id, modseq));
+            current_parent_id = Some(mailbox_id);
+            created_ids.push(mailbox_id);
+        }
+        if !changes.is_empty() {
+            let principals =
+                Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
+            for (mailbox_id, name, parent_id, modseq) in changes {
+                Self::insert_mail_change_log_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    Some(account_id),
+                    Some(mailbox_id),
+                    "mailbox",
+                    mailbox_id,
+                    "created",
+                    modseq,
+                    &principals,
+                    serde_json::json!({"name": name, "parentId": parent_id}),
+                )
+                .await?;
+            }
+            self.insert_audit(&mut tx, &tenant_id, audit).await?;
+            Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
+        }
+        tx.commit().await?;
+        let mailboxes = self.fetch_jmap_mailboxes(account_id).await?;
+        created_ids
+            .into_iter()
+            .map(|mailbox_id| {
+                mailboxes
+                    .iter()
+                    .find(|mailbox| mailbox.id == mailbox_id)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("mailbox path creation failed"))
+            })
+            .collect()
+    }
+
     pub async fn create_managed_retention_folder(
         &self,
         input: ManagedRetentionFolderCreateInput,
