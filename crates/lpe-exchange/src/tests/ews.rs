@@ -4181,6 +4181,56 @@ async fn get_sharing_folder_returns_accessible_same_tenant_calendar_grant() {
 }
 
 #[tokio::test]
+async fn get_sharing_folder_rejects_shared_folder_id_selector_without_projection() {
+    let alice = FakeStore::account();
+    let bob = AuthenticatedAccount {
+        tenant_id: alice.tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "bob@example.test".to_string(),
+        display_name: "Bob".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let mut shared_calendar =
+        FakeStore::collection("shared-calendar-bob", "calendar", "Bob Calendar");
+    shared_calendar.owner_account_id = bob.account_id;
+    shared_calendar.owner_email = bob.email.clone();
+    shared_calendar.owner_display_name = bob.display_name.clone();
+    shared_calendar.is_owned = false;
+    let service = ExchangeService::new(FakeStore {
+        session: Some(alice),
+        directory_accounts: Arc::new(Mutex::new(vec![bob])),
+        calendar_collections: Arc::new(Mutex::new(vec![shared_calendar])),
+        ..Default::default()
+    });
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:GetSharingFolder>
+                  <m:SharingFolderRequest>
+                    <t:DataType>Calendar</t:DataType>
+                    <t:SharedFolderId>exchange-only-shared-folder</t:SharedFolderId>
+                    <t:SharedFolderOwner><t:Mailbox><t:EmailAddress>bob@example.test</t:EmailAddress></t:Mailbox></t:SharedFolderOwner>
+                  </m:SharingFolderRequest>
+                </m:GetSharingFolder>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetSharingFolderResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(!body.contains("shared-calendar-bob"));
+    assert!(!body.contains("bob@example.test"));
+}
+
+#[tokio::test]
 async fn get_sharing_folder_rejects_ungranted_same_tenant_calendar() {
     let alice = FakeStore::account();
     let bob = AuthenticatedAccount {
@@ -5464,6 +5514,79 @@ async fn user_configuration_enforces_scope_name_payload_and_mutation_boundaries(
             .contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
     }
     assert_eq!(store.ews_user_configurations.lock().unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn user_configuration_rejects_unreadable_public_scope_and_late_invalid_update() {
+    let public_folder_id = "44444444-4444-4444-4444-444444444446";
+    let non_owner = AuthenticatedAccount {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "delegate@example.test".to_string(),
+        display_name: "Public Delegate".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let mut public_folder = FakeStore::public_folder(public_folder_id, None, "Public Root");
+    public_folder.rights = PublicFolderRights {
+        may_read: false,
+        may_write: false,
+        may_delete: false,
+        may_share: false,
+    };
+    let store = FakeStore {
+        session: Some(non_owner),
+        public_folders: Arc::new(Mutex::new(vec![public_folder])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let denied = format!(
+        r#"<s:Envelope><s:Body><m:CreateUserConfiguration><m:UserConfiguration><t:UserConfigurationName Name="Public.Configuration"><t:FolderId Id="public-folder:{public_folder_id}"/></t:UserConfigurationName></m:UserConfiguration></m:CreateUserConfiguration></s:Body></s:Envelope>"#
+    );
+    let response = service
+        .handle(&bearer_headers(), denied.as_bytes())
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateUserConfigurationResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorAccessDenied</m:ResponseCode>"));
+    assert!(store.ews_user_configurations.lock().unwrap().is_empty());
+    assert!(store
+        .ews_user_configuration_audits
+        .lock()
+        .unwrap()
+        .is_empty());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:CreateUserConfiguration><m:UserConfiguration><t:UserConfigurationName Name="Safe.Configuration"/><t:Dictionary><t:DictionaryEntry><t:DictionaryKey><t:Type>String</t:Type><t:Value>view</t:Value></t:DictionaryKey><t:DictionaryValue><t:Type>String</t:Type><t:Value>initial</t:Value></t:DictionaryValue></t:DictionaryEntry></t:Dictionary></m:UserConfiguration></m:CreateUserConfiguration></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    assert!(response_text(response)
+        .await
+        .contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:UpdateUserConfiguration><m:UserConfiguration><t:UserConfigurationName Name="Safe.Configuration"/><t:Dictionary><t:DictionaryEntry><t:DictionaryKey><t:Type>String</t:Type><t:Value>view</t:Value></t:DictionaryKey><t:DictionaryValue><t:Type>String</t:Type><t:Value>changed</t:Value></t:DictionaryValue></t:DictionaryEntry></t:Dictionary><t:BinaryData>not-base64!</t:BinaryData></m:UserConfiguration></m:UpdateUserConfiguration></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    assert!(response_text(response)
+        .await
+        .contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    let configurations = store.ews_user_configurations.lock().unwrap();
+    assert_eq!(configurations.len(), 1);
+    assert_eq!(
+        configurations[0].dictionary_json["view"].as_str(),
+        Some("initial")
+    );
+    assert_eq!(configurations[0].modseq, 1);
+    drop(configurations);
+    assert_eq!(store.ews_user_configuration_audits.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -10892,6 +11015,43 @@ async fn find_item_lists_custom_mailbox_messages() {
     assert!(body.contains("<t:Message>"));
     assert!(body.contains("message:99999999-9999-9999-9999-999999999999"));
     assert!(body.contains("<t:Subject>RCA folder item</t:Subject>"));
+}
+
+#[tokio::test]
+async fn find_item_rejects_items_lost_after_query_without_leaking_counts_or_bcc() {
+    let mailbox_id = "44444444-4444-4444-4444-444444444444";
+    let message_id = "99999999-9999-9999-9999-999999999999";
+    let mut email = FakeStore::email(message_id, mailbox_id, "custom", "Revoked item");
+    email.bcc.push(JmapEmailAddress {
+        address: "protected@example.test".to_string(),
+        display_name: Some("Protected recipient".to_string()),
+    });
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            mailbox_id, "custom", "RCA Sync",
+        )])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        inaccessible_jmap_email_ids: Arc::new(Mutex::new(vec![
+            Uuid::parse_str(message_id).unwrap()
+        ])),
+        ..Default::default()
+    });
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:FindItem><m:ParentFolderIds><t:FolderId Id="mailbox:44444444-4444-4444-4444-444444444444"/></m:ParentFolderIds></m:FindItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:FindItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorFolderNotFound</m:ResponseCode>"));
+    assert!(!body.contains("TotalItemsInView=\"1\""));
+    assert!(!body.contains("Revoked item"));
+    assert!(!body.contains("protected@example.test"));
 }
 
 #[tokio::test]

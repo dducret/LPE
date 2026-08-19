@@ -71,6 +71,7 @@ where
         request: &str,
     ) -> Result<String> {
         let result = async {
+            validate_get_sharing_folder_shape(request)?;
             let input = parse_sharing_request(request)?;
             let owner = self
                 .resolve_same_tenant_account(principal, &input.owner_email)
@@ -401,6 +402,22 @@ pub(in crate::service) fn parse_sharing_request(request: &str) -> Result<Sharing
         kind,
         rights,
     })
+}
+
+// [MS-OXWSMSHR] §3.1.4.3: LPE accepts one bounded DataType selector. It has no
+// canonical equivalent of the Exchange local SharedFolderId selector.
+fn validate_get_sharing_folder_shape(request: &str) -> Result<()> {
+    let data_types = element_contents(request, "DataType");
+    let [data_type] = data_types.as_slice() else {
+        bail!("GetSharingFolder requires exactly one supported DataType selector");
+    };
+    if requested_sharing_kind(data_type).is_none() {
+        bail!("GetSharingFolder supports only Calendar or Contacts DataType selectors");
+    }
+    if !element_contents(request, "SharedFolderId").is_empty() {
+        bail!("GetSharingFolder does not support Exchange SharedFolderId selectors");
+    }
+    Ok(())
 }
 
 fn parse_sharing_metadata_request(request: &str) -> Result<SharingMetadataRequest> {

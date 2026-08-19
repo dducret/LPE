@@ -28,6 +28,16 @@ where
                 ))
             }
         };
+        if let Err(error) = self
+            .validate_ews_user_configuration_scope(principal, &key)
+            .await
+        {
+            return Ok(operation_error_response(
+                "GetUserConfiguration",
+                "ErrorAccessDenied",
+                &error.to_string(),
+            ));
+        }
         match self
             .store
             .fetch_ews_user_configuration(principal.account_id, &key)
@@ -64,6 +74,16 @@ where
                 ))
             }
         };
+        if let Err(error) = self
+            .validate_ews_user_configuration_scope(principal, &input.key)
+            .await
+        {
+            return Ok(operation_error_response(
+                "CreateUserConfiguration",
+                "ErrorAccessDenied",
+                &error.to_string(),
+            ));
+        }
         match self
             .store
             .create_ews_user_configuration(
@@ -100,6 +120,16 @@ where
                 ))
             }
         };
+        if let Err(error) = self
+            .validate_ews_user_configuration_scope(principal, &input.key)
+            .await
+        {
+            return Ok(operation_error_response(
+                "UpdateUserConfiguration",
+                "ErrorAccessDenied",
+                &error.to_string(),
+            ));
+        }
         match self
             .store
             .update_ews_user_configuration(
@@ -141,6 +171,16 @@ where
                 ))
             }
         };
+        if let Err(error) = self
+            .validate_ews_user_configuration_scope(principal, &key)
+            .await
+        {
+            return Ok(operation_error_response(
+                "DeleteUserConfiguration",
+                "ErrorAccessDenied",
+                &error.to_string(),
+            ));
+        }
         match self
             .store
             .delete_ews_user_configuration(
@@ -165,6 +205,50 @@ where
                 ews_error_code_or(&error, "ErrorInvalidOperation"),
                 &error.to_string(),
             )),
+        }
+    }
+
+    async fn validate_ews_user_configuration_scope(
+        &self,
+        principal: &AccountPrincipal,
+        key: &EwsUserConfigurationKey,
+    ) -> Result<()> {
+        // [MS-OXWSUSRCFG] §§3.1.4.1-.4: validate a scoped configuration target
+        // before reading or mutating the canonical account configuration row.
+        match key.scope_kind.as_str() {
+            "account" => Ok(()),
+            "mailbox" => {
+                let mailbox_id = key
+                    .mailbox_id
+                    .ok_or_else(|| anyhow!("mailbox scope is not accessible"))?;
+                if self
+                    .store
+                    .fetch_jmap_mailboxes(principal.account_id)
+                    .await?
+                    .iter()
+                    .any(|mailbox| mailbox.id == mailbox_id)
+                {
+                    Ok(())
+                } else {
+                    bail!("mailbox scope is not accessible")
+                }
+            }
+            "public_folder" => {
+                let folder_id = key
+                    .public_folder_id
+                    .ok_or_else(|| anyhow!("public folder scope is not accessible"))?;
+                let folder = self
+                    .store
+                    .fetch_public_folder(principal.account_id, folder_id)
+                    .await
+                    .map_err(|_| anyhow!("public folder scope is not accessible"))?;
+                if folder.rights.may_read {
+                    Ok(())
+                } else {
+                    bail!("public folder read access is not granted")
+                }
+            }
+            _ => bail!("user configuration scope is not supported"),
         }
     }
 }

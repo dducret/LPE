@@ -319,14 +319,20 @@ where
                     .store
                     .fetch_jmap_emails(principal.account_id, &query.ids)
                     .await?;
-                let returned = emails
-                    .iter()
-                    .filter(|email| {
+                // [MS-OXWSSRCH] §3.1.4.2: fail closed rather than render a partial page
+                // or its count if canonical visibility changed after the ID query.
+                if emails.len() != query.ids.len()
+                    || emails.iter().any(|email| {
                         email
                             .mailbox_states
                             .iter()
-                            .any(|state| state.mailbox_id == mailbox_id)
+                            .all(|state| state.mailbox_id != mailbox_id)
                     })
+                {
+                    return Ok(find_item_folder_not_found_response());
+                }
+                let returned = emails
+                    .iter()
                     .map(|email| message_summary_xml_for_mailbox(email, mailbox_id))
                     .collect();
                 Ok(find_item_page_response(
