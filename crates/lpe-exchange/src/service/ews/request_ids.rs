@@ -217,19 +217,6 @@ fn matching_element_content<'a>(
     None
 }
 
-pub(in crate::service) fn requested_transfer_item_ids(request: &str) -> Vec<String> {
-    let mut ids = requested_item_ids(request);
-    ids.extend(
-        element_contents(request, "Item")
-            .into_iter()
-            .filter_map(|item| {
-                element_text(item, "ItemId").or_else(|| element_text(item, "SourceItemId"))
-            })
-            .filter(|value| !value.trim().is_empty()),
-    );
-    ids
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::service) struct RequestedTransferUpload {
     pub parent_folder_id: String,

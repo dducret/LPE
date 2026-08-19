@@ -1,6 +1,6 @@
 use super::super::*;
 use anyhow::Context;
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::engine::general_purpose::STANDARD as BASE64;
 use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest};
 use sha2::{Digest, Sha256};
 

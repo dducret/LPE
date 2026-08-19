@@ -329,7 +329,8 @@ where
         request: &str,
     ) -> Result<String> {
         let result = async {
-            if element_content(request, "AcceptSharingInvitation").is_some() {
+            if !element_contents(request, "AcceptSharingInvitation").is_empty() {
+                super::sharing::validate_accept_sharing_invitation_shape(request)?;
                 return self.accept_sharing_invitation(principal, request).await;
             }
             validate_create_item_shape(request)?;

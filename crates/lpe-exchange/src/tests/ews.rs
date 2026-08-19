@@ -3801,6 +3801,115 @@ async fn accept_sharing_invitation_creates_same_tenant_calendar_grant() {
 }
 
 #[tokio::test]
+async fn accept_sharing_invitation_updates_one_canonical_grant_and_rejects_mixed_items() {
+    let alice = FakeStore::account();
+    let bob = AuthenticatedAccount {
+        tenant_id: alice.tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "bob@example.test".to_string(),
+        display_name: "Bob".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let grants = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(alice),
+        directory_accounts: Arc::new(Mutex::new(vec![bob])),
+        ews_sharing_grants: grants.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let invitation = |permission| {
+        format!(
+            r#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body><m:CreateItem><m:Items><t:AcceptSharingInvitation>
+                <t:SharingInvitationData><t:DataType>Calendar</t:DataType>
+                  <t:SharedFolderOwner><t:Mailbox><t:EmailAddress>bob@example.test</t:EmailAddress></t:Mailbox></t:SharedFolderOwner>
+                  <t:PermissionLevel>{permission}</t:PermissionLevel>
+                </t:SharingInvitationData>
+              </t:AcceptSharingInvitation></m:Items></m:CreateItem></s:Body>
+            </s:Envelope>
+            "#,
+        )
+    };
+
+    for permission in ["Reviewer", "Editor"] {
+        let response = service
+            .handle(&bearer_headers(), invitation(permission).as_bytes())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response_text(response)
+            .await
+            .contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    }
+    {
+        let grants = grants.lock().unwrap();
+        assert_eq!(grants.len(), 1);
+        assert!(grants[0].rights.may_write);
+    }
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body><m:CreateItem><m:Items>
+                <t:AcceptSharingInvitation><t:SharingInvitationData><t:DataType>Calendar</t:DataType><t:SharedFolderOwner><t:Mailbox><t:EmailAddress>bob@example.test</t:EmailAddress></t:Mailbox></t:SharedFolderOwner></t:SharingInvitationData></t:AcceptSharingInvitation>
+                <t:Message><t:Subject>must not be created</t:Subject></t:Message>
+              </m:Items></m:CreateItem></s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    let grants = grants.lock().unwrap();
+    assert_eq!(grants.len(), 1);
+    assert!(grants[0].rights.may_write);
+}
+
+#[tokio::test]
+async fn get_sharing_metadata_rejects_shared_collection_without_leaking_owner_data() {
+    let alice = FakeStore::account();
+    let mut shared_calendar =
+        FakeStore::collection("shared-calendar-bob", "calendar", "Bob Calendar");
+    shared_calendar.owner_account_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    shared_calendar.owner_email = "bob@example.test".to_string();
+    shared_calendar.owner_display_name = "Bob".to_string();
+    shared_calendar.is_owned = false;
+    let store = FakeStore {
+        session: Some(alice),
+        calendar_collections: Arc::new(Mutex::new(vec![shared_calendar])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body><m:GetSharingMetadata>
+                <m:IdOfFolderToShare><t:FolderId Id="shared-calendar-bob"/></m:IdOfFolderToShare>
+              </m:GetSharingMetadata></s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetSharingMetadataResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(!body.contains("bob@example.test"));
+    assert!(!body.to_ascii_lowercase().contains("token"));
+}
+
+#[tokio::test]
 async fn accept_sharing_invitation_rejects_cross_tenant_owner_without_grant() {
     let alice = FakeStore::account();
     let bob = AuthenticatedAccount {

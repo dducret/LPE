@@ -187,6 +187,37 @@ pub(in crate::service) struct SharingRequest {
     pub(in crate::service) rights: CollaborationRights,
 }
 
+// [MS-OXWSCORE] section 3.1.4.2: validate the complete bounded response
+// object collection before the canonical grant upsert begins.
+pub(in crate::service) fn validate_accept_sharing_invitation_shape(request: &str) -> Result<()> {
+    let item_collections = element_contents(request, "Items");
+    let [items] = item_collections.as_slice() else {
+        bail!("CreateItem requires exactly one Items collection");
+    };
+    let item_count = ["Message", "Contact", "CalendarItem", "Task", "AcceptSharingInvitation"]
+        .into_iter()
+        .map(|name| element_contents(items, name).len())
+        .sum::<usize>();
+    if item_count != 1 || element_contents(items, "AcceptSharingInvitation").len() != 1 {
+        bail!("CreateItem supports exactly one AcceptSharingInvitation item");
+    }
+    let invitation_data = element_contents(items, "SharingInvitationData");
+    let [invitation_data] = invitation_data.as_slice() else {
+        bail!("AcceptSharingInvitation requires exactly one SharingInvitationData payload");
+    };
+    let owners = element_contents(invitation_data, "SharedFolderOwner");
+    let [owner] = owners.as_slice() else {
+        bail!("AcceptSharingInvitation requires exactly one same-tenant sharing owner");
+    };
+    if parse_mailbox(owner).is_none()
+        || element_contents(invitation_data, "DataType").len() != 1
+        || element_contents(invitation_data, "PermissionLevel").len() > 1
+    {
+        bail!("AcceptSharingInvitation has an invalid canonical sharing payload");
+    }
+    Ok(())
+}
+
 pub(in crate::service) fn get_sharing_metadata_response(
     principal: &AccountPrincipal,
     contact_collections: &[CollaborationCollection],
