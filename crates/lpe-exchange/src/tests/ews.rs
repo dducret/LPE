@@ -3693,7 +3693,7 @@ async fn get_sharing_metadata_returns_owned_calendar_metadata_without_exchange_t
             "default", "contacts", "Contacts",
         )])),
         calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
-            "calendar-default",
+            "default",
             "calendar",
             "Calendar",
         )])),
@@ -3723,7 +3723,7 @@ async fn get_sharing_metadata_returns_owned_calendar_metadata_without_exchange_t
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(body.contains("<t:DataType>Calendar</t:DataType>"));
     assert!(
-        body.contains("<t:FolderId Id=\"calendar-default\" ChangeKey=\"ck-calendar-default\"/>")
+        body.contains("<t:FolderId Id=\"default\" ChangeKey=\"ck-default\"/>")
     );
     assert!(body.contains("<t:OwnerSmtpAddress>alice@example.test</t:OwnerSmtpAddress>"));
     assert!(!body.contains("<t:DataType>Contacts</t:DataType>"));
@@ -3810,10 +3810,17 @@ async fn accept_sharing_invitation_updates_one_canonical_grant_and_rejects_mixed
         display_name: "Bob".to_string(),
         expires_at: "2099-01-01T00:00:00Z".to_string(),
     };
+    let charlie = AuthenticatedAccount {
+        tenant_id: alice.tenant_id,
+        account_id: Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap(),
+        email: "charlie@example.test".to_string(),
+        display_name: "Charlie".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
     let grants = Arc::new(Mutex::new(Vec::new()));
     let store = FakeStore {
         session: Some(alice),
-        directory_accounts: Arc::new(Mutex::new(vec![bob])),
+        directory_accounts: Arc::new(Mutex::new(vec![bob.clone(), charlie])),
         ews_sharing_grants: grants.clone(),
         ..Default::default()
     };
@@ -3847,6 +3854,29 @@ async fn accept_sharing_invitation_updates_one_canonical_grant_and_rejects_mixed
         let grants = grants.lock().unwrap();
         assert_eq!(grants.len(), 1);
         assert!(grants[0].rights.may_write);
+    }
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body><m:CreateItem>
+                <t:SharedFolderOwner><t:Mailbox><t:EmailAddress>charlie@example.test</t:EmailAddress></t:Mailbox></t:SharedFolderOwner>
+                <m:Items><t:AcceptSharingInvitation><t:SharingInvitationData><t:DataType>Calendar</t:DataType><t:SharedFolderOwner><t:Mailbox><t:EmailAddress>bob@example.test</t:EmailAddress></t:Mailbox></t:SharedFolderOwner><t:PermissionLevel>Editor</t:PermissionLevel></t:SharingInvitationData></t:AcceptSharingInvitation></m:Items>
+              </m:CreateItem></s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    assert!(response_text(response)
+        .await
+        .contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    {
+        let grants = grants.lock().unwrap();
+        assert_eq!(grants.len(), 1);
+        assert_eq!(grants[0].owner_account_id, bob.account_id);
     }
 
     let response = service
@@ -4067,6 +4097,51 @@ async fn get_sharing_folder_rejects_ungranted_same_tenant_calendar() {
     assert!(body.contains("ResponseClass=\"Error\""));
     assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
     assert!(body.contains("not accessible"));
+}
+
+#[tokio::test]
+async fn get_sharing_folder_stops_projecting_a_revoked_canonical_grant() {
+    let alice = FakeStore::account();
+    let bob = AuthenticatedAccount {
+        tenant_id: alice.tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "bob@example.test".to_string(),
+        display_name: "Bob".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let mut shared_calendar =
+        FakeStore::collection("shared-calendar-bob", "calendar", "Bob Calendar");
+    shared_calendar.owner_account_id = bob.account_id;
+    shared_calendar.owner_email = bob.email.clone();
+    shared_calendar.owner_display_name = bob.display_name.clone();
+    shared_calendar.is_owned = false;
+    let collections = Arc::new(Mutex::new(vec![shared_calendar]));
+    let service = ExchangeService::new(FakeStore {
+        session: Some(alice),
+        directory_accounts: Arc::new(Mutex::new(vec![bob])),
+        calendar_collections: collections.clone(),
+        ..Default::default()
+    });
+    let request = br#"
+        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+          <s:Body><m:GetSharingFolder><m:SharingFolderRequest>
+            <t:DataType>Calendar</t:DataType>
+            <t:SharedFolderOwner><t:Mailbox><t:EmailAddress>bob@example.test</t:EmailAddress></t:Mailbox></t:SharedFolderOwner>
+          </m:SharingFolderRequest></m:GetSharingFolder></s:Body>
+        </s:Envelope>
+        "#;
+
+    let response = service.handle(&bearer_headers(), request).await.unwrap();
+    assert!(response_text(response)
+        .await
+        .contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+
+    collections.lock().unwrap().clear();
+    let response = service.handle(&bearer_headers(), request).await.unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(!body.contains("shared-calendar-bob"));
 }
 
 #[tokio::test]

@@ -10,32 +10,59 @@ where
         principal: &AccountPrincipal,
         request: &str,
     ) -> Result<String> {
-        let requested_kind = requested_sharing_kind(request);
-        let contacts =
-            if requested_kind.is_none_or(|kind| kind == CollaborationResourceKind::Contacts) {
-                self.store
-                    .fetch_accessible_contact_collections(principal.account_id)
-                    .await?
-                    .into_iter()
-                    .filter(|collection| collection.is_owned)
-                    .collect::<Vec<_>>()
-            } else {
-                Vec::new()
+        let result = async {
+            let input = parse_sharing_metadata_request(request)?;
+            let mut collections = Vec::new();
+            if input
+                .kind
+                .is_none_or(|kind| kind == CollaborationResourceKind::Contacts)
+            {
+                collections.extend(
+                    self.store
+                        .fetch_accessible_contact_collections(principal.account_id)
+                        .await?
+                        .into_iter()
+                        .filter(|collection| collection.is_owned),
+                );
+            }
+            if input
+                .kind
+                .is_none_or(|kind| kind == CollaborationResourceKind::Calendar)
+            {
+                collections.extend(
+                    self.store
+                        .fetch_accessible_calendar_collections(principal.account_id)
+                        .await?
+                        .into_iter()
+                        .filter(|collection| collection.is_owned),
+                );
+            }
+            let matching = collections
+                .into_iter()
+                .filter(|collection| collection.id == input.collection_id)
+                .collect::<Vec<_>>();
+            let [collection] = matching.as_slice() else {
+                bail!("GetSharingMetadata requires one collection owned by the authenticated account");
             };
-        let calendars =
-            if requested_kind.is_none_or(|kind| kind == CollaborationResourceKind::Calendar) {
-                self.store
-                    .fetch_accessible_calendar_collections(principal.account_id)
-                    .await?
-                    .into_iter()
-                    .filter(|collection| collection.is_owned)
-                    .collect::<Vec<_>>()
-            } else {
-                Vec::new()
-            };
-        Ok(get_sharing_metadata_response(
-            principal, &contacts, &calendars,
-        ))
+            let contacts = (collection.kind == "contacts")
+                .then(|| collection.clone())
+                .into_iter()
+                .collect::<Vec<_>>();
+            let calendars = (collection.kind == "calendar")
+                .then(|| collection.clone())
+                .into_iter()
+                .collect::<Vec<_>>();
+            Ok(get_sharing_metadata_response(principal, &contacts, &calendars))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "GetSharingMetadata",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )
+        }))
     }
 
     pub(in crate::service) async fn get_sharing_folder(
@@ -106,7 +133,11 @@ where
         principal: &AccountPrincipal,
         request: &str,
     ) -> Result<String> {
-        let input = parse_sharing_request(request)?;
+        let invitation = element_content(request, "AcceptSharingInvitation")
+            .ok_or_else(|| anyhow!("AcceptSharingInvitation payload is missing"))?;
+        let invitation_data = element_content(invitation, "SharingInvitationData")
+            .ok_or_else(|| anyhow!("AcceptSharingInvitation payload is missing"))?;
+        let input = parse_sharing_request(invitation_data)?;
         let owner = self
             .resolve_same_tenant_account(principal, &input.owner_email)
             .await?;
@@ -185,6 +216,11 @@ pub(in crate::service) struct SharingRequest {
     pub(in crate::service) owner_email: String,
     pub(in crate::service) kind: CollaborationResourceKind,
     pub(in crate::service) rights: CollaborationRights,
+}
+
+struct SharingMetadataRequest {
+    collection_id: String,
+    kind: Option<CollaborationResourceKind>,
 }
 
 // [MS-OXWSCORE] section 3.1.4.2: validate the complete bounded response
@@ -364,6 +400,29 @@ pub(in crate::service) fn parse_sharing_request(request: &str) -> Result<Sharing
         owner_email,
         kind,
         rights,
+    })
+}
+
+fn parse_sharing_metadata_request(request: &str) -> Result<SharingMetadataRequest> {
+    let folders = element_contents(request, "IdOfFolderToShare");
+    let [folder] = folders.as_slice() else {
+        bail!("GetSharingMetadata requires exactly one IdOfFolderToShare");
+    };
+    let ids = attribute_values_for_tag(folder, "FolderId", "Id")
+        .into_iter()
+        .chain(attribute_values_for_tag(folder, "DistinguishedFolderId", "Id"))
+        .collect::<Vec<_>>();
+    let [id] = ids.as_slice() else {
+        bail!("GetSharingMetadata requires exactly one canonical contact or calendar folder id");
+    };
+    let kind = requested_sharing_kind(folder);
+    let collection_id = match *id {
+        "contacts" | "calendar" => DEFAULT_COLLECTION_ID.to_string(),
+        other => other.to_string(),
+    };
+    Ok(SharingMetadataRequest {
+        collection_id,
+        kind,
     })
 }
 
