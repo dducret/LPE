@@ -7071,6 +7071,46 @@ async fn get_service_configuration_reports_bounded_mail_tips_and_parseable_gaps(
 }
 
 #[tokio::test]
+async fn get_service_configuration_returns_a_parseable_gap_for_each_unknown_request() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope><s:Body>
+              <m:GetServiceConfiguration>
+                <m:RequestedConfiguration>
+                  <t:ConfigurationName>OrganizationRelationshipSettings</t:ConfigurationName>
+                  <t:ConfigurationName>MailboxProtectionRules</t:ConfigurationName>
+                </m:RequestedConfiguration>
+              </m:GetServiceConfiguration>
+            </s:Body></s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert_eq!(body.matches("ResponseClass=\"Error\"").count(), 2);
+    assert_eq!(
+        body.matches("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>")
+            .count(),
+        2
+    );
+    assert!(body.contains(
+        "<m:ConfigurationName>OrganizationRelationshipSettings</m:ConfigurationName>"
+    ));
+    assert!(body.contains("<m:ConfigurationName>MailboxProtectionRules</m:ConfigurationName>"));
+    assert!(!body.contains("<m:ConfigurationName>Unknown</m:ConfigurationName>"));
+}
+
+#[tokio::test]
 async fn get_service_configuration_defaults_to_supported_mail_tips_config() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
