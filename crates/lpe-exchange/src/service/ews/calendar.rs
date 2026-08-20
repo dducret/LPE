@@ -110,13 +110,17 @@ pub(in crate::service) fn parse_create_event_input(
     principal: &AccountPrincipal,
     request: &str,
 ) -> Result<UpsertClientEventInput> {
+    // [MS-OXWSMTGS] §3.1.4.2: validate the bounded CalendarItem time range
+    // before the canonical calendar create path is called.
     let event = element_content(request, "CalendarItem")
         .ok_or_else(|| anyhow!("CreateItem is missing CalendarItem"))?;
     let start = element_text(event, "Start").unwrap_or_default();
     let end = element_text(event, "End").unwrap_or_default();
     let (date, time) = ews_datetime_parts(&start)
         .ok_or_else(|| anyhow!("CalendarItem is missing a valid Start value"))?;
-    let duration_minutes = ews_duration_minutes(&start, &end).unwrap_or(60);
+    let duration_minutes = ews_duration_minutes(&start, &end)
+        .filter(|duration| *duration > 0)
+        .ok_or_else(|| anyhow!("CalendarItem End must be later than Start"))?;
     let body_tag = open_tag_text(event, "Body").unwrap_or_default();
     let body_type = attribute_value(body_tag, "BodyType").unwrap_or("Text");
     let body_value = element_text(event, "Body").unwrap_or_default();
@@ -167,20 +171,26 @@ pub(in crate::service) fn parse_update_event_input(
     existing: &AccessibleEvent,
     request: &str,
 ) -> Result<UpsertClientEventInput> {
+    // [MS-OXWSMTGS] §3.1.4.8: validate each supplied endpoint before the
+    // canonical update path; a Start-only update keeps its existing duration.
     let event = element_content(request, "CalendarItem").unwrap_or(request);
     let start = element_text(event, "Start");
     let end = element_text(event, "End");
-    let (date, time) = start
-        .as_deref()
-        .and_then(ews_datetime_parts)
-        .unwrap_or_else(|| (existing.date.clone(), existing.time.clone()));
-    let duration_minutes = match (start.as_deref(), end.as_deref()) {
-        (Some(start), Some(end)) => {
-            ews_duration_minutes(start, end).unwrap_or(existing.duration_minutes)
+    let (date, time) = match start.as_deref() {
+        Some(value) => {
+            ews_datetime_parts(value).ok_or_else(|| anyhow!("CalendarItem Start is invalid"))?
         }
-        (Some(start), None) => {
-            ews_duration_minutes(start, &format!("{}T{}:00Z", existing.date, existing.time))
-                .unwrap_or(existing.duration_minutes)
+        None => (existing.date.clone(), existing.time.clone()),
+    };
+    let duration_minutes = match (start.as_deref(), end.as_deref()) {
+        (Some(start), Some(end)) => ews_duration_minutes(start, end)
+            .filter(|duration| *duration > 0)
+            .ok_or_else(|| anyhow!("CalendarItem End must be later than Start"))?,
+        (Some(_), None) => existing.duration_minutes,
+        (None, Some(end)) => {
+            ews_duration_minutes(&format!("{}T{}:00Z", existing.date, existing.time), end)
+                .filter(|duration| *duration > 0)
+                .ok_or_else(|| anyhow!("CalendarItem End must be later than Start"))?
         }
         _ => existing.duration_minutes,
     };
@@ -637,12 +647,13 @@ fn requested_time_zone(request: &str) -> Result<Option<String>> {
 
 fn ews_datetime_parts(value: &str) -> Option<(String, String)> {
     let trimmed = value.trim();
-    if trimmed.len() < 16 {
+    if trimmed.len() < 16 || trimmed.get(10..11) != Some("T") {
         return None;
     }
     let date = trimmed.get(0..10)?;
     let time = trimmed.get(11..16)?;
-    Some((date.to_string(), time.to_string()))
+    (ews_date_parts(date).is_some() && time_minutes(time).is_some())
+        .then(|| (date.to_string(), time.to_string()))
 }
 
 fn ews_duration_minutes(start: &str, end: &str) -> Option<i32> {

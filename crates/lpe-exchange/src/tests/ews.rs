@@ -8803,6 +8803,8 @@ async fn message_tracking_reports_do_not_cross_tenant_boundaries() {
 
 #[tokio::test]
 async fn ediscovery_configuration_and_searchable_mailboxes_project_canonical_compliance_state() {
+    // [MS-OXWSEDISC] §§3.1.4.1, 3.1.4.3: only canonical compliance authority
+    // may project tenant-scoped discovery state.
     let alice = FakeStore::account();
     let bob = AuthenticatedAccount {
         tenant_id: alice.tenant_id,
@@ -8820,6 +8822,7 @@ async fn ediscovery_configuration_and_searchable_mailboxes_project_canonical_com
     };
     let store = FakeStore {
         session: Some(alice),
+        ews_compliance_authorized: true,
         directory_accounts: Arc::new(Mutex::new(vec![bob, foreign])),
         ews_discovery_search_configs: Arc::new(Mutex::new(vec![EwsDiscoverySearchConfig {
             id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
@@ -8870,6 +8873,8 @@ async fn ediscovery_configuration_and_searchable_mailboxes_project_canonical_com
 
 #[tokio::test]
 async fn search_mailboxes_records_canonical_discovery_search_results_without_bcc() {
+    // [MS-OXWSEDISC] §3.1.4.4: authorized search results are canonical and
+    // never project Bcc recipients.
     let mut email = FakeStore::email(
         "11111111-1111-1111-1111-111111111111",
         "44444444-4444-4444-4444-444444444444",
@@ -8885,6 +8890,7 @@ async fn search_mailboxes_records_canonical_discovery_search_results_without_bcc
     let results = Arc::new(Mutex::new(Vec::new()));
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        ews_compliance_authorized: true,
         emails: Arc::new(Mutex::new(vec![email])),
         ews_discovery_search_results: results.clone(),
         ..Default::default()
@@ -8928,6 +8934,8 @@ async fn search_mailboxes_records_canonical_discovery_search_results_without_bcc
 
 #[tokio::test]
 async fn hold_operations_use_canonical_compliance_hold_state() {
+    // [MS-OXWSEDISC] §§3.1.4.2, 3.1.4.5: holds are read and written only
+    // through the canonical compliance authority.
     let alice = FakeStore::account();
     let bob = AuthenticatedAccount {
         tenant_id: alice.tenant_id,
@@ -8939,6 +8947,7 @@ async fn hold_operations_use_canonical_compliance_hold_state() {
     let holds = Arc::new(Mutex::new(Vec::new()));
     let store = FakeStore {
         session: Some(alice),
+        ews_compliance_authorized: true,
         directory_accounts: Arc::new(Mutex::new(vec![bob])),
         ews_holds: holds.clone(),
         ..Default::default()
@@ -8996,10 +9005,12 @@ async fn hold_operations_use_canonical_compliance_hold_state() {
 
 #[tokio::test]
 async fn non_indexable_reports_project_canonical_search_diagnostics() {
+    // [MS-OXWSGNI] §§3.1.4.1-.2: authorized diagnostics remain tenant-scoped.
     let alice = FakeStore::account();
     let foreign_account_id = Uuid::parse_str("ffffffff-ffff-ffff-ffff-ffffffffffff").unwrap();
     let store = FakeStore {
         session: Some(alice.clone()),
+        ews_compliance_authorized: true,
         ews_non_indexable_reports: Arc::new(Mutex::new(vec![
             EwsNonIndexableReport {
                 id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
@@ -9055,6 +9066,53 @@ async fn non_indexable_reports_project_canonical_search_diagnostics() {
     assert!(body.contains("<m:GetNonIndexableItemStatisticsResponse>"));
     assert!(body.contains("<t:Mailbox>alice@example.test</t:Mailbox>"));
     assert!(body.contains("<t:ItemCount>1</t:ItemCount>"));
+}
+
+#[tokio::test]
+async fn ediscovery_operations_require_canonical_compliance_authority() {
+    // [MS-OXWSEDISC] §§3.1.4.1-.5 and [MS-OXWSGNI] §§3.1.4.1-.2: ordinary
+    // mailbox principals must not read or mutate tenant compliance state.
+    let results = Arc::new(Mutex::new(Vec::new()));
+    let holds = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ews_discovery_search_results: results.clone(),
+        ews_holds: holds.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    for (operation, body) in [
+        (
+            "GetDiscoverySearchConfiguration",
+            "<m:GetDiscoverySearchConfiguration />",
+        ),
+        ("GetSearchableMailboxes", "<m:GetSearchableMailboxes />"),
+        ("SearchMailboxes", "<m:SearchMailboxes />"),
+        ("GetHoldOnMailboxes", "<m:GetHoldOnMailboxes />"),
+        ("SetHoldOnMailboxes", "<m:SetHoldOnMailboxes />"),
+        (
+            "GetNonIndexableItemDetails",
+            "<m:GetNonIndexableItemDetails />",
+        ),
+        (
+            "GetNonIndexableItemStatistics",
+            "<m:GetNonIndexableItemStatistics />",
+        ),
+    ] {
+        let request = format!(
+            "<s:Envelope><s:Body>{body}</s:Body></s:Envelope>",
+        );
+        let response = service.handle(&bearer_headers(), request.as_bytes()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{operation}");
+        let response_body = response_text(response).await;
+        assert!(
+            response_body.contains("<m:ResponseCode>ErrorAccessDenied</m:ResponseCode>"),
+            "{operation}: {response_body}"
+        );
+    }
+    assert!(results.lock().unwrap().is_empty());
+    assert!(holds.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -10572,6 +10630,110 @@ async fn update_contact_unmapped_field_still_advances_sync_folder_items() {
     assert!(body.contains("<t:Update><t:Contact>"));
     assert!(body.contains("<t:DisplayName>RCA Contact</t:DisplayName>"));
     assert!(!body.contains(&format!("<m:SyncState>{old_sync_state}</m:SyncState>")));
+}
+
+#[tokio::test]
+async fn calendar_item_times_are_validated_before_canonical_mutation() {
+    // [MS-OXWSMTGS] §§3.1.4.2, 3.1.4.8: invalid CreateItem/UpdateItem time
+    // ranges must fail before the canonical calendar event is written.
+    let event_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
+    let collection = FakeStore::collection("default", "calendar", "Calendar");
+    let events = Arc::new(Mutex::new(vec![AccessibleEvent {
+        id: event_id,
+        collection_id: collection.id.clone(),
+        owner_account_id: collection.owner_account_id,
+        owner_email: collection.owner_email.clone(),
+        owner_display_name: collection.owner_display_name.clone(),
+        rights: collection.rights.clone(),
+        uid: "calendar-time-validation".to_string(),
+        date: "2026-05-04".to_string(),
+        time: "09:00".to_string(),
+        time_zone: "UTC".to_string(),
+        duration_minutes: 120,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
+        title: "Calendar range".to_string(),
+        location: String::new(),
+        organizer_json: "{}".to_string(),
+        attendees: String::new(),
+        attendees_json: String::new(),
+        notes: String::new(),
+        body_html: String::new(),
+    }]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        calendar_collections: Arc::new(Mutex::new(vec![collection])),
+        events: events.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:CreateItem><m:Items><t:CalendarItem><t:Start>2026-02-30T09:00:00Z</t:Start><t:End>2026-02-30T10:00:00Z</t:End></t:CalendarItem></m:Items></m:CreateItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("CalendarItem is missing a valid Start value"));
+    assert_eq!(events.lock().unwrap().len(), 1);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>calendar:default:0</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    let change_key = test_item_change_key(&body, &format!("event:{event_id}"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:UpdateItem><m:ItemChanges><t:ItemChange><t:ItemId Id="event:{event_id}" ChangeKey="{change_key}"/><t:Updates><t:SetItemField><t:FieldURI FieldURI="calendar:Start"/><t:CalendarItem><t:Start>2026-05-04T08:00:00Z</t:Start></t:CalendarItem></t:SetItemField></t:Updates></t:ItemChange></m:ItemChanges></m:UpdateItem></s:Body></s:Envelope>"#,
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert_eq!(events.lock().unwrap()[0].time, "08:00");
+    assert_eq!(events.lock().unwrap()[0].duration_minutes, 120);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>calendar:default:0</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    let change_key = test_item_change_key(&body, &format!("event:{event_id}"));
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:UpdateItem><m:ItemChanges><t:ItemChange><t:ItemId Id="event:{event_id}" ChangeKey="{change_key}"/><t:Updates><t:SetItemField><t:FieldURI FieldURI="calendar:End"/><t:CalendarItem><t:End>2026-05-04T07:00:00Z</t:End></t:CalendarItem></t:SetItemField></t:Updates></t:ItemChange></m:ItemChanges></m:UpdateItem></s:Body></s:Envelope>"#,
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("CalendarItem End must be later than Start"));
+    let event = events.lock().unwrap();
+    assert_eq!(event[0].time, "08:00");
+    assert_eq!(event[0].duration_minutes, 120);
 }
 
 #[tokio::test]

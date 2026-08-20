@@ -393,6 +393,13 @@ pub trait ExchangeStore: AccountAuthStore {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, JmapMailbox>;
 
+    fn has_compliance_authority<'a>(
+        &'a self,
+        _principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, bool> {
+        Box::pin(async { Ok(false) })
+    }
+
     fn fetch_ews_searchable_mailboxes<'a>(
         &'a self,
         principal: &'a AccountPrincipal,

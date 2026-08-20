@@ -61,6 +61,12 @@
   - must not be indexed in user search
   - must not be exposed to user-facing AI pipelines
   - must not be reinjected into visible projections
+- EWS eDiscovery and non-indexable diagnostics require canonical compliance
+  authorization. Mailbox authentication alone receives `ErrorAccessDenied`
+  before a discovery search, legal hold, diagnostic report, or audit row is
+  read or changed; no EWS-local compliance role or Exchange-local discovery
+  store is created. [MS-OXWSEDISC] §§3.1.4.1-3.1.4.5; [MS-OXWSGNI]
+  §§3.1.4.1-3.1.4.2.
 - Deletion must preserve required audit events.
 - Attachment text extraction runs asynchronously.
 - Indexed attachment formats are limited to `PDF`, `DOCX`, and `ODT`.

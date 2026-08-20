@@ -27,6 +27,10 @@ Mailbox authentication supports local password login, optional mailbox `OIDC`, o
   - must be auditable
 - Protocol impact:
   - `JMAP`, `DAV`, `ActiveSync`, `EWS`, `IMAP`, and MAPI over HTTP must resolve to the canonical account
+  - EWS mailbox authentication alone does not authorize tenant compliance data:
+    eDiscovery and non-indexable operations fail closed until canonical
+    compliance authority is propagated ([MS-OXWSEDISC] §§3.1.4.1-3.1.4.5;
+    [MS-OXWSGNI] §§3.1.4.1-3.1.4.2)
   - MAPI over HTTP verifies a password or app password when EMSMDB `Connect` or NSPI `Bind` establishes or reconnects a Session Context and records one successful-login audit at that boundary
   - later MAPI requests reuse only an endpoint/account-bound, unexpired session whose credential proof and current active credential verifier still match; they do not repeat Argon2 verification or successful-login audit writes
   - MAPI session state stores process-keyed digests rather than plaintext credentials or password hashes; rejected or changed credentials remain audited failures

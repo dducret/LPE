@@ -4325,6 +4325,7 @@ struct FakeStore {
     ews_retention_policy_tags: Arc<Mutex<Vec<FakeRetentionPolicyTag>>>,
     disabled_ews_retention_policy_tag_ids: Arc<Mutex<Vec<Uuid>>>,
     ews_sharing_grants: Arc<Mutex<Vec<CollaborationGrant>>>,
+    ews_compliance_authorized: bool,
     ews_discovery_search_configs: Arc<Mutex<Vec<EwsDiscoverySearchConfig>>>,
     ews_discovery_search_results: Arc<Mutex<Vec<EwsDiscoverySearchResult>>>,
     ews_message_tracking_reports: Arc<Mutex<Vec<FakeMessageTrackingReport>>>,
@@ -6022,6 +6023,14 @@ impl ExchangeStore for FakeStore {
         mailboxes.sort_by(|a, b| a.email.cmp(&b.email));
         mailboxes.dedup_by(|a, b| a.account_id == b.account_id);
         Box::pin(async move { Ok(mailboxes) })
+    }
+
+    fn has_compliance_authority<'a>(
+        &'a self,
+        _principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, bool> {
+        let authorized = self.ews_compliance_authorized;
+        Box::pin(async move { Ok(authorized) })
     }
 
     fn fetch_ews_discovery_search_configurations<'a>(

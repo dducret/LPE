@@ -9,6 +9,9 @@ where
         &self,
         principal: &AccountPrincipal,
     ) -> Result<String> {
+        if !self.store.has_compliance_authority(principal).await? {
+            return Ok(compliance_access_denied("GetDiscoverySearchConfiguration"));
+        }
         let searches = self
             .store
             .fetch_ews_discovery_search_configurations(principal)
@@ -20,6 +23,9 @@ where
         &self,
         principal: &AccountPrincipal,
     ) -> Result<String> {
+        if !self.store.has_compliance_authority(principal).await? {
+            return Ok(compliance_access_denied("GetSearchableMailboxes"));
+        }
         let mailboxes = self.store.fetch_ews_searchable_mailboxes(principal).await?;
         Ok(get_searchable_mailboxes_response(&mailboxes))
     }
@@ -29,6 +35,9 @@ where
         principal: &AccountPrincipal,
         request: &str,
     ) -> Result<String> {
+        if !self.store.has_compliance_authority(principal).await? {
+            return Ok(compliance_access_denied("SearchMailboxes"));
+        }
         let query_text = discovery_query_text(request);
         let mailbox_emails = requested_mailbox_emails(request);
         let result = self
@@ -43,6 +52,9 @@ where
         principal: &AccountPrincipal,
         request: &str,
     ) -> Result<String> {
+        if !self.store.has_compliance_authority(principal).await? {
+            return Ok(compliance_access_denied("GetHoldOnMailboxes"));
+        }
         let mailbox_emails = requested_mailbox_emails(request);
         let holds = self
             .store
@@ -56,6 +68,9 @@ where
         principal: &AccountPrincipal,
         request: &str,
     ) -> Result<String> {
+        if !self.store.has_compliance_authority(principal).await? {
+            return Ok(compliance_access_denied("SetHoldOnMailboxes"));
+        }
         let mailbox_emails = requested_mailbox_emails(request);
         let hold_name = element_text(request, "HoldId")
             .or_else(|| element_text(request, "HoldName"))
@@ -91,6 +106,9 @@ where
         &self,
         principal: &AccountPrincipal,
     ) -> Result<String> {
+        if !self.store.has_compliance_authority(principal).await? {
+            return Ok(compliance_access_denied("GetNonIndexableItemDetails"));
+        }
         let reports = self
             .store
             .fetch_ews_non_indexable_reports(principal)
@@ -102,12 +120,27 @@ where
         &self,
         principal: &AccountPrincipal,
     ) -> Result<String> {
+        if !self.store.has_compliance_authority(principal).await? {
+            return Ok(compliance_access_denied("GetNonIndexableItemStatistics"));
+        }
         let reports = self
             .store
             .fetch_ews_non_indexable_reports(principal)
             .await?;
         Ok(get_non_indexable_item_statistics_response(&reports))
     }
+}
+
+// [MS-OXWSEDISC] §§3.1.4.1-.5 and [MS-OXWSGNI] §§3.1.4.1-.2 define the
+// eDiscovery and non-indexable SOAP operations. Mailbox authentication does
+// not carry canonical tenant compliance authority, so exposing tenant-scoped
+// storage here would create an EWS-local authorization model and leak data.
+fn compliance_access_denied(operation: &str) -> String {
+    operation_error_response(
+        operation,
+        "ErrorAccessDenied",
+        "EWS eDiscovery requires canonical compliance authorization, which is not available through mailbox authentication.",
+    )
 }
 
 pub(in crate::service) fn get_discovery_search_configuration_response(
