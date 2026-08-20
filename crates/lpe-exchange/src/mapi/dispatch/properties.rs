@@ -1463,6 +1463,7 @@ where
                 let (message_class, subject) = associated_config_class_and_subject(&properties);
                 let properties =
                     normalized_associated_config_content_properties(&message_class, &properties);
+                validate_roaming_dictionary(&properties)?;
                 store
                     .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
                         id: Some(existing.canonical_id),

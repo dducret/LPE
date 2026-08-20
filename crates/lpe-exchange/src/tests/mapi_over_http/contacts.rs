@@ -1260,6 +1260,66 @@ async fn mapi_over_http_set_properties_rejects_unsupported_canonical_contact_pro
 }
 
 #[tokio::test]
+async fn mapi_over_http_contact_rejects_personal_distribution_list_without_canonical_membership_write(
+) {
+    let contact_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbc").unwrap();
+    let contacts = Arc::new(Mutex::new(vec![FakeStore::contact(
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbc",
+        "RCA Contact",
+        "rca@example.test",
+    )]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        contacts: contacts.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
+
+    let mut property_values = Vec::new();
+    // [MS-OXOCNTC] sections 2.2.2.2.1-2.2.2.2.4 define PDL membership
+    // properties. LPE has no canonical PDL model, so never infer a group from
+    // IPM.DistList or its opaque member stream.
+    append_mapi_utf16_property(
+        &mut property_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.DistList",
+    );
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(15));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(15),
+        test_mapi_uuid_id(&contact_id),
+    );
+    append_rop_set_properties(&mut rops, 2, 1, &property_values);
+    append_rop_get_properties_specific(&mut rops, 2, &[PID_TAG_DISPLAY_NAME_W]);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    // [MS-OXCPRPT] section 3.2.5.4 keeps the failed SetProperties parseable;
+    // the following read proves the bad value did not mutate the handle.
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x0A, 0x02, 0x02, 0x01, 0x04, 0x80]
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("RCA Contact")));
+    assert_eq!(contacts.lock().unwrap()[0].name, "RCA Contact");
+}
+
+#[tokio::test]
 async fn mapi_over_http_delete_contact_virtual_folder_is_noop_acknowledged() {
     let mut rops = Vec::new();
     append_rop_open_folder(

@@ -738,6 +738,12 @@ pub(in crate::mapi) fn parse_execute_request(body: &[u8]) -> Result<ExecuteReque
     let max_rop_out = cursor.read_u32()?;
     let auxiliary_buffer_size = cursor.read_u32()? as usize;
     let _auxiliary_buffer = cursor.read_bytes(auxiliary_buffer_size)?;
+    // [MS-OXCMAPIHTTP] section 2.2.4.2.1 defines the complete Execute request
+    // body with length-delimited RopBuffer and AuxiliaryBuffer fields. Do not
+    // execute a valid prefix while silently accepting trailing request bytes.
+    if cursor.remaining() != 0 {
+        return Err(anyhow!("unexpected trailing Execute request bytes"));
+    }
     Ok(ExecuteRequest {
         flags,
         rop_buffer,

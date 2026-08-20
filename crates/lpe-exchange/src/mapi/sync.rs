@@ -1133,6 +1133,16 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                     ),
                 ));
             }
+            if matches!(
+                RopId::from_u8(rop_id),
+                Some(RopId::FastTransferSourceCopyTo | RopId::FastTransferSourceCopyProperties)
+            ) {
+                // [MS-OXCFXICS] sections 2.2.4.2, 2.2.4.3.6, and 2.2.4.4
+                // require folderContent for Folder CopyTo/CopyProperties.
+                // LPE has no bounded folderContent serializer yet; reject
+                // rather than emit the legacy diagnostic manifest.
+                return None;
+            }
             let folder = folder_row_for_id(*folder_id, mailboxes)
                 .cloned()
                 .into_iter()

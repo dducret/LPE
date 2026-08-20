@@ -983,6 +983,39 @@ async fn mapi_over_http_malformed_execute_body_is_invalid_body_with_session_cook
 }
 
 #[tokio::test]
+async fn mapi_over_http_rejects_execute_trailing_bytes_without_canonical_mutation() {
+    let emails = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: emails.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut body = execute_body(&rop_buffer(&[], &[]));
+    body.push(0xFF);
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &body)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    // [MS-OXCMAPIHTTP] section 2.2.4.2.1 defines a complete length-delimited
+    // Execute body; section 2.2.3.3.3 maps malformed bodies to code 12.
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "12");
+    assert!(emails.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn mapi_over_http_transport_echoes_request_id_and_client_info() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

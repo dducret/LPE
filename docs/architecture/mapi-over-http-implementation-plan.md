@@ -2296,6 +2296,27 @@ canonical `from` identity.
   non-empty uploaded state, non-regressing download checkpoints, and no
   checkpoint advancement from upload/import collectors.
 
+The P0 MAPI backlog evidence remains a single bounded acceptance set; it does
+not authorize endpoint publication. The following golden tests are the local
+minimum for G013, G043-G051, and G116-G118:
+
+| Required flow | Golden-test evidence | Microsoft basis |
+| --- | --- | --- |
+| Connect, Execute, reconnect, Disconnect, and idle Ping | `mapi_over_http_microsoft_oxcmapihttp_connect_execute_reconnect_disconnect_sequence`; `mapi_over_http_microsoft_oxcmapihttp_ping_refreshes_idle_session_context` | [MS-OXCMAPIHTTP] sections 2.2.3.3.1, 2.2.4, and 4.1-4.5 |
+| Private logon, hierarchy/contents delta sync, and special folders | `mapi_over_http_execute_returns_private_mailbox_logon`; `mapi_over_http_hierarchy_sync_client_state_resumes_after_completed_download`; `mapi_over_http_inbox_additional_ren_entry_ids_versions_and_replays_hierarchy_in_postgresql` | [MS-OXCROPS] section 2.2; [MS-OXCFXICS] section 2.2.4; [MS-OXOSFLD] sections 2.2.3-2.2.4 |
+| Canonical submission and `Sent` visibility | `mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end`; `mapi_over_http_microsoft_oxcmsg_save_message_keep_open_read_write_imports_canonical_email` | [MS-OXCROPS] section 2.2; [MS-OXCFXICS] section 2.2.4 |
+| Permissions and notifications, including rejected input without mutation | `mapi_over_http_shared_calendar_without_share_right_rejects_modify_permissions`; `mapi_over_http_notification_wait_reports_content_event_after_registered_save` | [MS-OXCROPS] section 2.2 |
+| Typed properties, FastTransfer/ICS, and FAI configuration | `mapi_over_http_microsoft_oxcdata_property_row_example_streams_oversized_body`; `mapi_over_http_microsoft_oxcfxics_4_5_content_sync_stream_shape`; `mapi_over_http_microsoft_oxocfg_configuration_examples_round_trip_fai` | [MS-OXCDATA] section 2.8; [MS-OXCFXICS] section 2.2.4; [MS-OXOCFG] sections 4.1-4.4 |
+
+`RopFastTransferSourceCopyTo` and `RopFastTransferSourceCopyProperties` on a
+Folder remain an explicit fail-closed boundary: LPE returns a parseable ROP
+error rather than emitting the obsolete diagnostic manifest because it does not
+yet implement the required `folderContent` grammar. The retained boundary is
+covered by `fast_transfer_copy_to_and_copy_properties_reject_folder_objects`;
+the minimal future work is a complete [MS-OXCFXICS] sections 2.2.4.2, 2.2.4.3.6,
+and 2.2.4.4 serializer with `Level`, property-list, and transmittable-property
+semantics, not a partial root marker.
+
 ### RCA Gate
 
 - The public deployment uses the same host, TLS certificate, account, tenant,

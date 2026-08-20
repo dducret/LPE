@@ -17,6 +17,8 @@ Access date for all entries: 2026-05-21.
 | [MS-OXCMAPIHTTP]: MAPI Extensions for HTTP | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmapihttp/d502edcf-0b22-42f2-8500-019f00d60245 | MAPI over HTTP carries MAPI payloads over HTTP between Outlook and Exchange servers. | The specification defines protocol flow, not an application storage model. |
 | [MS-OXCDATA]: Overview | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcdata/cb617407-ceba-4c1b-9346-a9eb989f3ccf | MAPI data structures cover properties, folder and message identifiers, ROPs, and queries. | Identifier formats vary by protocol context, so canonical storage must not equal wire encoding. |
 | [MS-OXCPRPT]: Getting Property IDs for Named Properties | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcprpt/33c1b19f-0664-4b53-a968-2ee0d674f72b | Property operations use a 32-bit tag made from a 16-bit property ID and 16-bit type; named properties are mapped with `RopGetPropertyIdsFromNames` and use IDs with the high bit set. The `PS_MAPI` property set is special: its LID is returned directly as the property ID instead of allocating a mailbox mapping. | Persistence scope for a non-Exchange implementation is an engineering decision; LPE must make mapping stable per mailbox/domain where Outlook caches require it. |
+| [MS-OXOMSG] / [MS-OXOFLAG]: E-Mail and Informational Flagging Object Properties | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxomsg/ and https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxoflag/ | Mail, recipient, category, reminder, and follow-up fields are Message-object projections. `PidTagFollowupIcon` uses colors 1 through 6; LPE retains zero only as the cleared canonical value. | Flagging must update canonical mail state, not a MAPI-only task or Outbox/Sent copy. |
+| [MS-OXOCAL] / [MS-OXCNTC] / [MS-OXOTASK]: Appointment, Contact, and Task Object Properties | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxocal/, https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxocntc/, and https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxotask/ | Outlook object properties map only to existing canonical events, contacts, tasks, and reminders. Personal distribution-list member blobs are not canonical contacts or directory-group membership. | Unsupported object data remains absent or receives the existing parseable property ROP error. |
 | [MS-OXPROPS]: Commonly Used Property Sets | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxprops/cc9d955b-1492-47de-9dce-5bdea80a3323 | Common named property sets include mail, contact, calendar, task, note, journal, attachment, sync, sharing, and public string sets. | The master list is broad; LPE should implement object families by product scope, not claim every property has business semantics. |
 | [MS-OXCMSG]: Per Message Object | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmsg/040f3b96-2288-4813-9edf-a0e8c9e9199d | Message objects maintain per-message state such as read state, recipients, attachments, and related properties. | MAPI message state is richer than IMAP mail state; IMAP must remain a projection. |
 | MAPI Service Provider Objects | https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/mapi-service-provider-objects | Provider object families include provider, logon, message store, folder, message, attachment, table, address book, messaging user, distribution list, status, and utility data/property/table objects. | Outlook provider documentation describes COM provider architecture; LPE maps these concepts to server-side HTTP/ROP state by engineering inference. |
@@ -66,6 +68,40 @@ Full support for the requested Microsoft object families is complete only when:
    not depend on protocol-local state.
 7. Microsoft RCA and Outlook 2016 / 2019 cached-mode labs pass before public
    MAPI autodiscover is enabled.
+
+## Current Bounded Property Execution
+
+`RopGetPropertyIdsFromNames` and `RopGetNamesFromPropertyIds` use durable,
+account-scoped named-property mappings and preserve the same mapping across
+profile bootstrap, cached sync, compose, and reconnect. This is the bounded
+mailbox mapping required by [MS-OXCPRPT] section 3.1.4.1; it does not turn an
+unmapped or opaque property into canonical behavior.
+
+Mail follow-up state is a canonical mail projection: flag status, icon,
+request, dates, reminder state, categories, and read state reach the same
+mailbox-message record consumed by JMAP, IMAP, EWS, MAPI tables, and ICS.
+`PidTagFollowupIcon` accepts only `1..=6`, with `0` retained solely for LPE's
+cleared/uncolored state. The input is validated before an ICS import can write
+the accompanying subject or body, following [MS-OXOFLAG] sections 2.2.1.2 and
+3.1.4.1.3 and [MS-OXOMSG] section 2.2.1.70. No protocol-local Sent or Outbox
+state is created.
+
+Calendar, Contact, Task, Note, Journal, Reminder, and Post properties expose
+only their typed canonical fields and explicitly tested compatibility values.
+In particular, an `IPM.DistList` Contact is rejected before staging: the PDL
+member, checksum, and stream representations in [MS-OXCNTC] sections
+2.2.2.2.1 through 2.2.2.2.4 cannot become directory-group or contact-membership
+truth. Calendar and task values follow their bounded canonical projections in
+[MS-OXOCAL] section 2.2 and [MS-OXOTASK] section 2.2; unsupported shapes retain
+parseable property errors.
+
+Note, Journal, and public-folder Post mutations still require one follow-up
+atomic-commit change before this plan can claim full property-write parity:
+their effective typed and custom values must be handle-local after
+`RopSetProperties` and commit together with identity, replay, and audit state
+only at `RopSaveChangesMessage`. This is required by [MS-OXCPRPT] section
+3.2.5.4 and [MS-OXCMSG] section 2.2.3.3. Until that transaction is implemented,
+do not widen those property sets or treat opaque values as active behavior.
 
 ## Ordered Execution
 

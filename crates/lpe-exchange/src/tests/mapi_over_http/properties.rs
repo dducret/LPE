@@ -3580,6 +3580,9 @@ async fn mapi_over_http_microsoft_message_properties_commit_on_save_changes() {
     let mut property_values = Vec::new();
     append_mapi_i32_property(&mut property_values, 0x0E07_0003, 1);
     append_mapi_i32_property(&mut property_values, 0x1090_0003, 2);
+    // [MS-OXOFLAG] sections 2.2.1.2 and 3.1.4.1.3: six is the canonical
+    // follow-up icon for an Outlook time/recipient flag.
+    append_mapi_i32_property(&mut property_values, 0x1095_0003, 6);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -3597,7 +3600,7 @@ async fn mapi_over_http_microsoft_message_properties_commit_on_save_changes() {
         0x0A, 0x00, 0x02, // RopSetProperties on opened message
     ]);
     rops.extend_from_slice(&((property_values.len() + 2) as u16).to_le_bytes());
-    rops.extend_from_slice(&2u16.to_le_bytes());
+    rops.extend_from_slice(&3u16.to_le_bytes());
     rops.extend_from_slice(&property_values);
 
     let request = execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX]));
@@ -3643,6 +3646,7 @@ async fn mapi_over_http_microsoft_message_properties_commit_on_save_changes() {
     let updated = emails.lock().unwrap()[0].clone();
     assert!(!updated.unread);
     assert!(updated.flagged);
+    assert_eq!(updated.followup_icon, 6);
 }
 
 #[tokio::test]

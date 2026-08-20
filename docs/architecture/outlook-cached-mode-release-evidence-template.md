@@ -53,6 +53,20 @@ reproduce the result.
 Record every row independently. Missing evidence is a release-quality risk and
 must not be silently reported as a pass. It does not toggle MAPI publication.
 
+### Core MAPI Acceptance Ledger
+
+Record the same deployment revision and disposable mailbox for each row. These
+are release-evidence checks, not a reason to publish RPC/HTTP or change
+Autodiscover flags.
+
+| Required flow | Local golden test / harness evidence | Microsoft RCA result | Outlook 2016 result | Outlook 2019 result | Evidence reference |
+| --- | --- | --- | --- | --- | --- |
+| Connect, private logon, Execute, reconnect, Disconnect, idle Ping | `mapi_over_http_microsoft_oxcmapihttp_connect_execute_reconnect_disconnect_sequence`; `mapi_over_http_microsoft_oxcmapihttp_ping_refreshes_idle_session_context` ([MS-OXCMAPIHTTP] sections 2.2.3.3.1 and 2.2.4) | `<pass/fail/not run>` | `<pass/fail/not run>` | `<pass/fail/not run>` | `<artifact>` |
+| Cached hierarchy and contents synchronization after reopen | `mapi_over_http_hierarchy_sync_client_state_resumes_after_completed_download`; `mapi_over_http_microsoft_oxcfxics_4_5_content_sync_stream_shape` ([MS-OXCFXICS] section 2.2.4) | `<pass/fail/not run>` | `<pass/fail/not run>` | `<pass/fail/not run>` | `<artifact>` |
+| Special folders, views, and configuration FAI | `mapi_over_http_inbox_additional_ren_entry_ids_versions_and_replays_hierarchy_in_postgresql`; `mapi_over_http_microsoft_oxocfg_configuration_examples_round_trip_fai` ([MS-OXOSFLD] sections 2.2.3-2.2.4; [MS-OXOCFG] sections 4.1-4.4) | `<pass/fail/not run>` | `<pass/fail/not run>` | `<pass/fail/not run>` | `<artifact>` |
+| Canonical submission and authoritative `Sent` | `mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end` ([MS-OXCROPS] section 2.2) | `<pass/fail/not run>` | `<pass/fail/not run>` | `<pass/fail/not run>` | `<artifact>` |
+| Permissions, notifications, and unsupported/malformed no-write paths | `mapi_over_http_shared_calendar_without_share_right_rejects_modify_permissions`; `mapi_over_http_notification_wait_reports_content_event_after_registered_save` ([MS-OXCROPS] section 2.2) | `<pass/fail/not run>` | `<pass/fail/not run>` | `<pass/fail/not run>` | `<artifact>` |
+
 ### Autodiscover Response
 
 Record the sanitized responses returned to the test account.

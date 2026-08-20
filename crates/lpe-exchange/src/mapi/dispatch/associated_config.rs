@@ -225,6 +225,7 @@ where
         .as_ref()
         .map(|_| associated_config_uuid(properties));
     let normalized = normalized_associated_config_persisted_properties(&message_class, properties);
+    validate_roaming_dictionary(&normalized)?;
     // [MS-OXCPRPT] section 3.2.5.4, [MS-OXCMSG] section 3.2.5.3, and
     // [MS-OXOCFG] sections 2.2.2.1 and 2.2.5.1: a successful Save commits
     // the client's configuration-property values. In particular, an explicit
@@ -457,6 +458,14 @@ pub(super) async fn append_existing_associated_config_save_response<S: ExchangeS
     let (message_class, subject) = associated_config_class_and_subject(&staged_properties);
     let properties =
         normalized_associated_config_content_properties(&message_class, &staged_properties);
+    if validate_roaming_dictionary(&properties).is_err() {
+        responses.extend_from_slice(&rop_error_response(
+            0x0C,
+            request.response_handle_index(),
+            0x8004_010F,
+        ));
+        return;
+    }
     let Some(current) =
         associated_config_message_for_mutation(snapshot, folder_id, config_id, None)
     else {
@@ -600,6 +609,36 @@ pub(super) fn normalized_associated_config_content_properties(
     // existing FAI is mutated.
     remove_associated_config_server_owned_properties(&mut normalized);
     normalized
+}
+
+pub(super) fn validate_roaming_dictionary(properties: &HashMap<u32, MapiValue>) -> Result<()> {
+    let Some(MapiValue::Binary(dictionary)) = properties.get(&PID_TAG_ROAMING_DICTIONARY) else {
+        return Ok(());
+    };
+    if dictionary.is_empty() {
+        return Ok(());
+    }
+    let Some(roaming_datatypes) = properties.get(&PID_TAG_ROAMING_DATATYPES) else {
+        // Outlook's ContactPrefs configuration FAI omits this property in the
+        // captured save sequence. Preserve that bounded compatibility shape;
+        // an explicit value still has to declare the dictionary below.
+        return Ok(());
+    };
+    let has_dictionary_datatype = match roaming_datatypes {
+        MapiValue::I32(value) => (*value as u32) & 0x0000_0004 != 0,
+        MapiValue::U32(value) => *value & 0x0000_0004 != 0,
+        _ => false,
+    };
+    if has_dictionary_datatype {
+        return Ok(());
+    }
+    // [MS-OXOCFG] section 2.2.5.1: when RoamingDatatypes is supplied with a
+    // nonempty RoamingDictionary, it must include bit 0x00000004. Reject
+    // before any FAI content/identity write so malformed configuration cannot
+    // become canonical state.
+    Err(anyhow!(
+        "PidTagRoamingDictionary requires PidTagRoamingDatatypes bit 0x00000004"
+    ))
 }
 
 pub(super) fn associated_config_uuid(properties: &HashMap<u32, MapiValue>) -> Uuid {

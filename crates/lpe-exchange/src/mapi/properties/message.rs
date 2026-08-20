@@ -889,6 +889,10 @@ where
         }
     }
 
+    // [MS-OXOFLAG] sections 2.2.1.2 and 3.1.4.1.3 bound the follow-up icon
+    // before any canonical mutation. ICS imports reach this path directly, so
+    // a malformed flag cannot commit a valid subject or body prefix.
+    let update = message_followup_update_from_mapi_values(followup_values)?;
     if subject.is_some() || body_text.is_some() {
         store
             .update_jmap_email_content(
@@ -904,7 +908,6 @@ where
             )
             .await?;
     }
-    let update = message_followup_update_from_mapi_values(followup_values)?;
     if message_followup_update_is_empty(&update) {
         return Ok(());
     }
@@ -950,12 +953,16 @@ pub(in crate::mapi) fn message_followup_update_from_mapi_values(
                 update.followup_flag_status = Some(status.to_string());
             }
             PID_TAG_FOLLOWUP_ICON => {
-                update.followup_icon = Some(
-                    value
-                        .as_i64()
-                        .and_then(|value| i32::try_from(value).ok())
-                        .ok_or_else(|| anyhow!("invalid PidTagFollowupIcon value"))?,
-                );
+                let icon = value
+                    .as_i64()
+                    .and_then(|value| i32::try_from(value).ok())
+                    .ok_or_else(|| anyhow!("invalid PidTagFollowupIcon value"))?;
+                // [MS-OXOFLAG] section 2.2.1.2 defines colors 1 through 6.
+                // LPE also keeps 0 as its canonical cleared/uncolored value.
+                if !(0..=6).contains(&icon) {
+                    return Err(anyhow!("invalid PidTagFollowupIcon value"));
+                }
+                update.followup_icon = Some(icon);
             }
             PID_TAG_TODO_ITEM_FLAGS => {
                 update.todo_item_flags = Some(

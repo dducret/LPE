@@ -2396,6 +2396,35 @@ fn fast_transfer_copy_folder_rejects_message_objects() {
 }
 
 #[test]
+fn fast_transfer_copy_to_and_copy_properties_reject_folder_objects() {
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let object = MapiObject::Folder {
+        folder_id: INBOX_FOLDER_ID,
+        properties: HashMap::new(),
+    };
+
+    for rop_id in [
+        RopId::FastTransferSourceCopyTo.as_u8(),
+        RopId::FastTransferSourceCopyProperties.as_u8(),
+    ] {
+        // [MS-OXCFXICS] sections 2.2.4.2, 2.2.4.3.6, and 2.2.4.4 require a
+        // folderContent root, which LPE does not yet serialize.
+        assert!(fast_transfer_manifest_for_object(
+            rop_id,
+            0x09,
+            0,
+            &[],
+            &object,
+            &sync_principal(account_id),
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        )
+        .is_none());
+    }
+}
+
+#[test]
 fn fast_transfer_manifest_rejects_unbacked_common_views_shortcut() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let shortcut_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);

@@ -10821,6 +10821,76 @@ async fn mapi_over_http_sync_import_message_change_updates_canonical_flags() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_sync_import_rejects_invalid_followup_icon_without_partial_message_write() {
+    let message_id = "41414141-4141-4141-4141-414141414142";
+    let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let email = FakeStore::email(
+        message_id,
+        "55555555-5555-5555-5555-555555555555",
+        "inbox",
+        "Original import subject",
+    );
+    let emails = Arc::new(Mutex::new(vec![email]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: emails.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
+
+    let mut property_values = Vec::new();
+    append_mapi_binary_property(
+        &mut property_values,
+        PID_TAG_SOURCE_KEY,
+        &mapi_mailstore::source_key_for_store_id(test_mapi_message_id(message_id)),
+    );
+    append_mapi_utf16_property(
+        &mut property_values,
+        PID_TAG_SUBJECT_W,
+        "Rejected import subject",
+    );
+    append_mapi_i32_property(&mut property_values, 0x1095_0003, 7);
+
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01]; // RopOpenFolder.
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector.
+        0x72, 0x00, 0x02, 0x03, // RopSynchronizationImportMessageChange.
+        0x00,
+    ]);
+    rops.extend_from_slice(&3u16.to_le_bytes());
+    rops.extend_from_slice(&property_values);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &rops,
+                &[logon_handle, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    // [MS-OXOFLAG] section 2.2.1.2 permits only colors 1 through 6; zero is
+    // LPE's cleared projection. The malformed icon keeps the ROP parseable.
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x72, 0x03, 0x02, 0x01, 0x04, 0x80]
+    ));
+    let unchanged = emails.lock().unwrap()[0].clone();
+    assert_eq!(unchanged.subject, "Original import subject");
+    assert_eq!(unchanged.followup_icon, 0);
+}
+
+#[tokio::test]
 async fn mapi_over_http_microsoft_oxcfxics_4_6_fail_on_conflict_uses_predecessor_change_list() {
     let mailbox_id = "55555555-5555-5555-5555-555555555555";
     let message_id = "49494949-4949-4949-8949-494949494950";
@@ -13119,6 +13189,64 @@ async fn mapi_over_http_microsoft_oxocfg_configuration_examples_round_trip_fai()
         &category_open_response_rops,
         b"renameOnFirstUse"
     ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_roaming_dictionary_rejects_invalid_explicit_datatype_before_fai_save() {
+    let account = FakeStore::account();
+    let associated_configs = Arc::new(Mutex::new(Vec::new()));
+    let mapi_identities = Arc::new(Mutex::new(HashMap::new()));
+    let store = FakeStore {
+        session: Some(account),
+        associated_configs: associated_configs.clone(),
+        mapi_identities: mapi_identities.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
+    let identity_count_before = mapi_identities.lock().unwrap().len();
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut property_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Configuration.Calendar",
+    );
+    append_mapi_utf16_property(
+        &mut property_values,
+        PID_TAG_SUBJECT_W,
+        "invalid dictionary",
+    );
+    append_mapi_i32_property(&mut property_values, 0x7C06_0003, 0);
+    append_mapi_binary_property(&mut property_values, 0x7C07_0102, b"<dictionary/>");
+    let mut rops = Vec::new();
+    append_rop_create_associated_message(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    );
+    append_rop_set_properties(&mut rops, 1, 4, &property_values);
+    append_rop_save_changes_message(&mut rops, 1, 1);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    // [MS-OXOCFG] section 2.2.5.1 requires the dictionary datatype bit;
+    // [MS-OXCROPS] section 2.2.6.3 keeps the failed Save parseable.
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x0C, 0x01, 0x0F, 0x01, 0x04, 0x80]
+    ));
+    assert!(associated_configs.lock().unwrap().is_empty());
+    assert_eq!(mapi_identities.lock().unwrap().len(), identity_count_before);
 }
 
 #[tokio::test]

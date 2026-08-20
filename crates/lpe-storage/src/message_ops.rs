@@ -789,7 +789,12 @@ impl Storage {
                 bail!("invalid follow-up flag status");
             }
         }
-        if update.followup_icon.is_some_and(|value| value < 0)
+        // [MS-OXOFLAG] section 2.2.1.2 defines follow-up icon colors 1..=6;
+        // zero is LPE's cleared canonical projection. Keep this storage
+        // boundary aligned for every protocol that mutates canonical mail.
+        if update
+            .followup_icon
+            .is_some_and(|value| !(0..=6).contains(&value))
             || update.todo_item_flags.is_some_and(|value| value < 0)
         {
             bail!("invalid follow-up flag value");

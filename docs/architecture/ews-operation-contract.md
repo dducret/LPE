@@ -188,8 +188,8 @@ Current automated gate coverage:
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `FindPeople` | Partial | Same-tenant accounts, accessible contacts, and contact-book grants; no persona table | Stateless canonical address-book/contact projection API | Returns bounded visible account and contact personas with `persona:account:{uuid}` and `persona:contact:{uuid}` ids. No linked-contact aggregation, social sources, or Exchange persona state | P2 |
-| `GetPersona` | Partial | Same as `FindPeople` | Stateless canonical address-book/contact projection API | Resolves only visible `persona:account:{uuid}` and `persona:contact:{uuid}` ids; malformed, stale, inaccessible, linked-person, and group ids return a parseable item-not-found response | P2 |
+| `FindPeople` | Partial | Active tenant-GAL accounts, the authenticated account, accessible contacts, and contact-book grants; no persona table | Stateless canonical address-book/contact projection API | Returns at most 100 visible account personas as `persona:account:{uuid}` and accessible contact personas as `persona:contact:{uuid}`. Distribution lists and linked-person/linked-contact aggregation are not projected; there are no social sources or Exchange persona state | P2 |
+| `GetPersona` | Partial | Same as `FindPeople` | Stateless canonical address-book/contact projection API | Resolves only a currently visible `persona:account:{uuid}` or `persona:contact:{uuid}` id. Missing ids return a parseable invalid-operation error; malformed, stale, inaccessible, linked-person/linked-contact, and group ids return a parseable item-not-found response | P2 |
 
 ## Retention Policy Operation
 
