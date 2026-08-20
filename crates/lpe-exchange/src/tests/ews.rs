@@ -8673,6 +8673,7 @@ async fn message_tracking_reports_project_canonical_trace_state() {
                     event_source: "lpe".to_string(),
                     event_kind: "handed_off".to_string(),
                     recipient_address: None,
+                    recipient_is_protected: false,
                     timestamp: "2026-06-02T10:16:00Z".to_string(),
                     dsn_json: "{}".to_string(),
                 },
@@ -8680,8 +8681,19 @@ async fn message_tracking_reports_project_canonical_trace_state() {
                     event_source: "lpe-ct".to_string(),
                     event_kind: "relayed".to_string(),
                     recipient_address: Some("bob@example.test".to_string()),
+                    recipient_is_protected: false,
                     timestamp: "2026-06-02T10:17:00Z".to_string(),
                     dsn_json: "{\"status\":\"2.0.0\"}".to_string(),
+                },
+                // [MS-OXWSMTRK] section 3.1.4.2: preserve the CT event but
+                // never project canonical protected Bcc metadata to EWS.
+                EwsMessageTrackingEvent {
+                    event_source: "lpe-ct".to_string(),
+                    event_kind: "relayed_bcc".to_string(),
+                    recipient_address: Some("bcc@example.test".to_string()),
+                    recipient_is_protected: true,
+                    timestamp: "2026-06-02T10:18:00Z".to_string(),
+                    dsn_json: "{\"recipient\":\"bcc@example.test\"}".to_string(),
                 },
             ],
         )]))),
@@ -8730,6 +8742,7 @@ async fn message_tracking_reports_project_canonical_trace_state() {
     assert!(get_body.contains("<t:EventData>lpe</t:EventData>"));
     assert!(get_body.contains("<t:EventDescription>relayed</t:EventDescription>"));
     assert!(get_body.contains("<t:RecipientAddress>bob@example.test</t:RecipientAddress>"));
+    assert!(get_body.contains("<t:EventDescription>relayed_bcc</t:EventDescription>"));
     assert!(!get_body.contains("bcc@example.test"));
 }
 
@@ -9047,13 +9060,29 @@ async fn non_indexable_reports_project_canonical_search_diagnostics() {
 #[tokio::test]
 async fn bulk_transfer_operations_record_canonical_transfer_jobs() {
     let jobs = Arc::new(Mutex::new(Vec::new()));
+    let mailbox_id = "55555555-5555-5555-5555-555555555555";
+    let message_id = "11111111-1111-1111-1111-111111111111";
+    let emails = Arc::new(Mutex::new(vec![FakeStore::email(
+        message_id,
+        mailbox_id,
+        "inbox",
+        "Exported item",
+    )]));
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ews_transfer_jobs: jobs.clone(),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            mailbox_id,
+            "inbox",
+            "Inbox",
+        )])),
+        emails: emails.clone(),
         ..Default::default()
     };
-    let service = ExchangeService::new(store);
-    let message_id = "11111111-1111-1111-1111-111111111111";
+    let service = ExchangeService::new_with_validator(
+        store,
+        Validator::new(FakeDetector::rfc822(), 0.8),
+    );
 
     let response = service
         .handle(
@@ -9072,9 +9101,9 @@ async fn bulk_transfer_operations_record_canonical_transfer_jobs() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_text(response).await;
     assert!(body.contains("<m:ExportItemsResponse>"));
-    assert!(body.contains("<m:Direction>export</m:Direction>"));
-    assert!(body.contains("<m:TotalItems>1</m:TotalItems>"));
-    assert!(body.contains(message_id));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains(&format!("<m:ItemId Id=\"message:{message_id}\"/>")));
+    assert!(body.contains("<m:Data>"));
 
     let response = service
         .handle(
@@ -9083,7 +9112,10 @@ async fn bulk_transfer_operations_record_canonical_transfer_jobs() {
             <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
               <s:Body>
                 <m:UploadItems>
-                  <m:Items><t:Item><t:SourceItemId>message:22222222-2222-2222-2222-222222222222</t:SourceItemId></t:Item></m:Items>
+                  <m:Items><t:Item>
+                    <t:ParentFolderId><t:FolderId Id="mailbox:55555555-5555-5555-5555-555555555555"/></t:ParentFolderId>
+                    <t:Data>RnJvbTogaW1wb3J0QGV4YW1wbGUudGVzdA0KVG86IGFsaWNlQGV4YW1wbGUudGVzdA0KU3ViamVjdDogSW1wb3J0ZWQgaXRlbQ0KDQpJbXBvcnQgYm9keQ==</t:Data>
+                  </t:Item></m:Items>
                 </m:UploadItems>
               </s:Body>
             </s:Envelope>
@@ -9094,9 +9126,10 @@ async fn bulk_transfer_operations_record_canonical_transfer_jobs() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_text(response).await;
     assert!(body.contains("<m:UploadItemsResponse>"));
-    assert!(body.contains("<m:Direction>import</m:Direction>"));
-    assert!(body.contains("<m:TotalItems>1</m:TotalItems>"));
-    assert!(body.contains("message:22222222-2222-2222-2222-222222222222"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<m:ItemId Id=\"message:99999999-9999-9999-9999-999999999999\"/>"));
+    assert_eq!(emails.lock().unwrap().len(), 2);
+    assert_eq!(emails.lock().unwrap()[1].subject, "Imported item");
 
     let jobs = jobs.lock().unwrap();
     assert_eq!(jobs.len(), 2);
@@ -9133,7 +9166,7 @@ async fn bulk_transfer_rejects_arbitrary_packages_without_side_effects() {
     let body = response_text(response).await;
     assert!(body.contains("<m:UploadItemsResponse>"));
     assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
-    assert!(body.contains("arbitrary Exchange item packages are not imported"));
+    assert!(body.contains("UploadItems requires one ParentFolderId per item"));
     assert!(jobs.lock().unwrap().is_empty());
 
     let response = service
@@ -9147,7 +9180,7 @@ async fn bulk_transfer_rejects_arbitrary_packages_without_side_effects() {
     let body = response_text(response).await;
     assert!(body.contains("<m:ExportItemsResponse>"));
     assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
-    assert!(body.contains("ExportItems requires at least one canonical ItemId"));
+    assert!(body.contains("ExportItems requires between one and 100 canonical ItemId values"));
     assert!(jobs.lock().unwrap().is_empty());
 }
 

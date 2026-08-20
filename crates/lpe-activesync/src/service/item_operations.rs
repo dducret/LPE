@@ -118,23 +118,29 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .map(|node| node.text_value().trim().to_string())
             .filter(|value| !value.is_empty())
         {
-            let account_id = self
+            let collection = self
                 .resolve_collection(principal.account_id, &collection_id)
                 .await?
-                .map(|collection| collection.account_id)
                 .ok_or_else(|| anyhow!("collection not found"));
-            let Ok(account_id) = account_id else {
+            let Ok(collection) = collection else {
+                node.push(WbxmlNode::with_text(20, "Status", "6"));
+                return Ok(node);
+            };
+            let Some(mailbox_id) = collection.mailbox_id else {
                 node.push(WbxmlNode::with_text(20, "Status", "6"));
                 return Ok(node);
             };
             if let Some(email) = self
                 .store
-                .fetch_jmap_emails(account_id, &[message_id])
+                .fetch_jmap_emails(collection.account_id, &[message_id])
                 .await?
                 .into_iter()
-                .next()
+                // [MS-ASCMD] sections 2.2.1.10 and 2.2.3.67.1: an
+                // ItemOperations Fetch identifies the item location with
+                // CollectionId and ServerId; do not project another folder.
+                .find(|email| email.mailbox_ids.contains(&mailbox_id))
             {
-                resolved = Some((account_id, email));
+                resolved = Some((collection.account_id, email));
             }
         } else {
             for access in self.mailbox_accesses(principal).await? {

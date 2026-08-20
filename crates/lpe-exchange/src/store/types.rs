@@ -527,6 +527,7 @@ pub(crate) struct EwsMessageTrackingEvent {
     pub(crate) event_source: String,
     pub(crate) event_kind: String,
     pub(crate) recipient_address: Option<String>,
+    pub(crate) recipient_is_protected: bool,
     pub(crate) timestamp: String,
     pub(crate) dsn_json: String,
 }

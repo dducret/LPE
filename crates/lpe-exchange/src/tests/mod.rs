@@ -4547,6 +4547,19 @@ impl FakeDetector {
         }
     }
 
+    fn rfc822() -> Self {
+        Self {
+            detection: MagikaDetection {
+                label: "rfc822".to_string(),
+                mime_type: "message/rfc822".to_string(),
+                description: "RFC 822 message".to_string(),
+                group: "document".to_string(),
+                extensions: vec!["eml".to_string()],
+                score: Some(0.99),
+            },
+        }
+    }
+
     fn executable() -> Self {
         Self {
             detection: MagikaDetection {

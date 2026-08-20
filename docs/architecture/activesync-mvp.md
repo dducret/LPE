@@ -127,6 +127,9 @@
   - preserves the canonical message identifier as the destination server ID
 - `ItemOperations Fetch`:
   - fetches message application data by `CollectionId` and `ServerId`
+  - requires the canonical message to belong to the named accessible mail
+    collection; a mismatched or non-mail collection receives the existing
+    invalid-store status, rather than another collection's application data
   - fetches attachment bytes by `FileReference` from canonical attachment blobs
   - returns attachment content inline in WBXML; multipart response streaming is
     not implemented

@@ -75,6 +75,17 @@ pub(in crate::service) fn get_message_tracking_report_response(
         .events
         .iter()
         .map(|event| {
+            // [MS-OXWSMTRK] section 3.1.4.2 returns one response event per
+            // recipient trace. LPE keeps protected Bcc-derived CT evidence
+            // canonical but redacts its recipient and opaque diagnostics.
+            let (recipient, diagnostics) = if event.recipient_is_protected {
+                ("", "")
+            } else {
+                (
+                    event.recipient_address.as_deref().unwrap_or_default(),
+                    event.dsn_json.as_str(),
+                )
+            };
             format!(
                 concat!(
                     "<t:RecipientTrackingEvent>",
@@ -89,8 +100,8 @@ pub(in crate::service) fn get_message_tracking_report_response(
                 timestamp = escape_xml(&event.timestamp),
                 event_kind = escape_xml(&event.event_kind),
                 event_source = escape_xml(&event.event_source),
-                recipient = escape_xml(event.recipient_address.as_deref().unwrap_or_default()),
-                diagnostics = escape_xml(&event.dsn_json),
+                recipient = escape_xml(recipient),
+                diagnostics = escape_xml(diagnostics),
             )
         })
         .collect::<String>();

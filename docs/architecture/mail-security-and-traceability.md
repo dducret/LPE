@@ -8,6 +8,12 @@
 
 - Keep transport decisions in `LPE-CT`.
 - Keep canonical mailbox state in `LPE`.
+- Authenticated client SMTP terminates only at LPE-CT's TLS submission listener.
+  It supports the bounded `AUTH PLAIN LOGIN` surface ([MS-OXSMTP] sections
+  2.2.1 and 3.2.5.1; [MS-XLOGIN] section 2.2), calls the signed core
+  submission bridge, and returns success only after canonical `Sent` and the
+  outbound handoff record exist. Public port 25 neither advertises nor accepts
+  `AUTH`; the internal `LPE -> LPE-CT` relay is never a client endpoint.
 - Maintain separate scores for:
   - spam
   - malware
@@ -23,6 +29,16 @@
 - Return structured final status for delivery, defer, quarantine, bounce, and failure.
 - Produce `DSN` detail for bounce-capable failures.
 - Keep quarantine in `LPE-CT` custody until released, rejected, or deleted by policy.
+- For an accepted inbound delivery, the signed `LPE-CT -> LPE` bridge owns the
+  sole mailbox-safe perimeter projection: the `x-lpe-ct-trace-id` provenance
+  link. The bridge strips an Internet-supplied header of that reserved name
+  before handoff, and core appends the bridge trace id atomically with the
+  canonical mailbox message. This link supports trace correlation only; it is
+  not a score, phishing stamp, quarantine state, or client-mutable policy.
+  `PidTagContentFilterSpamConfidenceLevel` and `PidNamePhishingStamp` remain
+  absent from canonical messages ([MS-OXCSPAM] section 2.2.1.3;
+  [MS-OXPHISH] section 2.2.1.1). The canonical search and AI paths continue to
+  exclude protected Bcc metadata.
 
 ## Reference Table/List
 
@@ -40,6 +56,13 @@
 | SPF / DKIM / DMARC policy | `LPE-CT` |
 | DKIM signing | `LPE-CT` |
 | quarantine | `LPE-CT` |
+| LPE-CT trace provenance link | core `LPE`, sourced only by signed LPE-CT delivery |
 | canonical mailbox copy | `LPE` |
 | user search | `LPE` |
 | protected `Bcc` metadata | `LPE` |
+
+EWS Message Tracking is a bounded projection of canonical submission state and
+`LPE-CT` trace events. Per [MS-OXWSMTRK] section 3.1.4.2, LPE can project the
+event timeline without making `LPE-CT` mailbox state: when a trace event maps
+to a protected canonical recipient, its recipient field and opaque diagnostic
+payload are redacted before the EWS response.

@@ -4,8 +4,9 @@
 
 This template records Outlook 2016 and Outlook 2019 cached-mode `MAPI over HTTP`
 release evidence. It is an evidence capture artifact only and does not change
-runtime configuration. In 0.5.x, `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED`
-is reserved for legacy `EXPR`/RPC over HTTP and does not control MAPI over HTTP.
+runtime configuration. In 0.5.x, `LPE_AUTOCONFIG_MAPI_INTEROP_GATE_PASSED`
+is the MAPI/HTTP publication gate; `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED`
+remains reserved for legacy `EXPR`/RPC over HTTP.
 
 Create one completed copy per deployment class and test window. Do not merge
 Outlook 2016 and Outlook 2019 evidence; each client version needs its own real
@@ -31,7 +32,7 @@ reproduce the result.
 | Account | `<mailbox address>` |
 | Auth method | `<Basic, bearer, other>` |
 | TLS certificate | `<issuer, subject/SAN, expiry, validation status>` |
-| Endpoint flags | `LPE_AUTOCONFIG_EWS_ENABLED=<true/false>; LPE_AUTOCONFIG_MAPI_ENABLED=<true/false>; LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED=<true/false>` |
+| Endpoint flags | `LPE_AUTOCONFIG_EWS_ENABLED=<true/false>; LPE_AUTOCONFIG_MAPI_ENABLED=<true/false>; LPE_AUTOCONFIG_MAPI_INTEROP_GATE_PASSED=<true/false>; LPE_AUTOCONFIG_EXCH_INTEROP_GATE_PASSED=<true/false>; LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED=<true/false>` |
 
 ### Client Matrix
 
@@ -159,6 +160,6 @@ Complete this checklist separately for Outlook 2016 and Outlook 2019.
 | Microsoft RCA pass | Does not imply Outlook 2016 or Outlook 2019 cached-mode profile pass. |
 | Outlook 2016 pass | Does not imply Outlook 2019 pass. |
 | Outlook 2019 pass | Does not imply Outlook 2016 pass. |
-| MAPI publication | Controlled by `LPE_AUTOCONFIG_MAPI_ENABLED` and client capability negotiation. |
+| MAPI publication | Requires `LPE_AUTOCONFIG_MAPI_ENABLED`, `LPE_AUTOCONFIG_MAPI_INTEROP_GATE_PASSED`, and client capability negotiation; per [MS-OXDSCLI] sections 2.2.2.1 and 3.2.5.1, the header is not transport evidence. |
 | This template | Records release evidence only; it does not change endpoint flags. |
 | Legacy `EXPR` | Still requires its independent RPC proxy and interoperability gates. |

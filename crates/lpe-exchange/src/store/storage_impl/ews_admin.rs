@@ -441,7 +441,7 @@ macro_rules! store_impl_ews_admin {
 
             let event_rows = sqlx::query(
                 r#"
-                SELECT event_source, event_kind, recipient_address,
+                SELECT event_source, event_kind, recipient_address, recipient_is_protected,
                        to_char(event_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS event_at,
                        dsn_json::text AS dsn_json
                 FROM (
@@ -449,6 +449,7 @@ macro_rules! store_impl_ews_admin {
                         'lpe'::text AS event_source,
                         e.event_kind,
                         NULL::text AS recipient_address,
+                        FALSE AS recipient_is_protected,
                         e.received_at AS event_at,
                         e.dsn_json
                     FROM submission_events e
@@ -459,6 +460,19 @@ macro_rules! store_impl_ews_admin {
                         t.event_source,
                         t.event_kind,
                         t.recipient_address,
+                        CASE
+                            WHEN t.recipient_address IS NOT NULL
+                             AND EXISTS (
+                                SELECT 1
+                                FROM submission_recipients r
+                                WHERE r.tenant_id = $1
+                                  AND r.submission_queue_id = $2
+                                  AND r.protected_metadata = TRUE
+                                  AND lower(r.address) = lower(t.recipient_address)
+                             )
+                            THEN TRUE
+                            ELSE FALSE
+                        END AS recipient_is_protected,
                         t.occurred_at AS event_at,
                         t.dsn_json
                     FROM lpe_ct_transport_trace_events t
@@ -484,6 +498,7 @@ macro_rules! store_impl_ews_admin {
                         event_source: row.try_get("event_source")?,
                         event_kind: row.try_get("event_kind")?,
                         recipient_address: row.try_get("recipient_address")?,
+                        recipient_is_protected: row.try_get("recipient_is_protected")?,
                         timestamp: row.try_get("event_at")?,
                         dsn_json: row.try_get("dsn_json")?,
                     })

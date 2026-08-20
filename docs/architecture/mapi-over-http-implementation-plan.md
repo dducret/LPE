@@ -16,11 +16,13 @@ before it is advertised.
 ### Publication and Protocol Scope
 
 - MAPI over HTTP endpoints remain authenticated and opt-in. Autodiscover may
-  publish the MAPI endpoint only when `LPE_AUTOCONFIG_MAPI_ENABLED` is enabled
-  and the client capability negotiation succeeds. Recorded MAPI/HTTP evidence
-  is a release-quality requirement, while
-  `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` remains reserved for legacy
-  `EXPR`/RPC over HTTP publication and does not control MAPI/HTTP publication.
+  publish the MAPI endpoint only when `LPE_AUTOCONFIG_MAPI_ENABLED` and
+  `LPE_AUTOCONFIG_MAPI_INTEROP_GATE_PASSED` are enabled and the client
+  capability negotiation succeeds. [MS-OXDSCLI] sections 2.2.2.1 and 3.2.5.1
+  make the capability header negotiation, not MAPI usability evidence. The
+  MAPI gate records the exact public edge's local, Gate 1, Microsoft RCA, and
+  Outlook evidence; `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` remains
+  reserved for legacy `EXPR`/RPC over HTTP publication.
 - MAPI over HTTP startup and publication require both the exact
   `0.5.2-sql` schema label and every required physical MAPI table and
   column. A tagged but incomplete schema is a fatal storage-startup and
@@ -3076,7 +3078,13 @@ and real-Outlook evidence gates.
   Microsoft RCA evidence, and separate Outlook 2016 and Outlook 2019
   cached-mode evidence for the deployment class being advertised. The Gate 1
   harness does not substitute for the other evidence.
-- `LPE_AUTOCONFIG_MAPI_ENABLED` controls whether MAPI endpoints are advertised.
+- `LPE_AUTOCONFIG_MAPI_ENABLED` enables the MAPI surface, while
+  `LPE_AUTOCONFIG_MAPI_INTEROP_GATE_PASSED` controls MAPI/HTTP Autodiscover
+  publication after the complete evidence set is recorded.
+- `EXCH` publication separately requires
+  `LPE_AUTOCONFIG_EXCH_INTEROP_GATE_PASSED`; [MS-OXDSCLI] sections
+  2.2.4.1.1.2.6 and 2.2.4.1.1.2.46 do not make an `EXCH` provider block proof
+  that the transport is usable.
 - `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` remains the legacy
   `EXPR`/RPC over HTTP evidence flag; it does not control MAPI/HTTP publication.
 - RPC/HTTP `EXPR` publication requires separate Outlook Anywhere evidence and

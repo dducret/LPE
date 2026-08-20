@@ -847,7 +847,7 @@ async fn smtp_data_accepts_plaintext_for_local_domain_and_hands_to_core() {
     let dashboard_store = plaintext_inbound_store(core_base_url);
     let client = reqwest::Client::new();
     let mut reader = BufReader::new(
-            b"From: Sender <smtp-test@l-p-e.ch>\r\nMessage-ID: <codex-smtp-test-1777566333254@l-p-e.ch>\r\nSubject: Inbound\r\n\r\nBody\r\n.\r\n"
+            b"From: Sender <smtp-test@l-p-e.ch>\r\nX-LPE-CT-Trace-Id: stale-user-value\r\nMessage-ID: <codex-smtp-test-1777566333254@l-p-e.ch>\r\nSubject: Inbound\r\n\r\nBody\r\n.\r\n"
                 .as_slice(),
         );
     let mut writer = Vec::new();
@@ -908,6 +908,13 @@ async fn smtp_data_accepts_plaintext_for_local_domain_and_hands_to_core() {
         request.internet_message_id.as_deref(),
         Some("<codex-smtp-test-1777566333254@l-p-e.ch>")
     );
+    // [MS-OXCSPAM] section 2.2.1.3; [MS-OXPHISH] section 2.2.1.1: only
+    // LPE-CT's signed trace id may reach the core mailbox projection.
+    assert!(request.trace_id.starts_with("lpe-ct-in-"));
+    assert_ne!(request.trace_id, "stale-user-value");
+    assert!(!String::from_utf8(request.raw_message)
+        .unwrap()
+        .contains("stale-user-value"));
     std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
 }
 

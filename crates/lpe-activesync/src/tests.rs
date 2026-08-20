@@ -4994,6 +4994,59 @@ async fn item_operations_fetch_returns_attachment_bytes() {
 }
 
 #[tokio::test]
+async fn item_operations_fetch_rejects_server_id_outside_the_named_collection() {
+    let inbox = FakeStore::inbox_mailbox();
+    let archive = FakeStore::mailbox(
+        "99999999-9999-9999-9999-999999999999",
+        "archive",
+        "Archive",
+        20,
+        None,
+    );
+    let emails = Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+        "11111111-1111-1111-1111-111111111111",
+        inbox.id,
+        "inbox",
+        "Inbox-only message",
+    )]));
+    let service = ActiveSyncService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox, archive.clone()],
+        emails: emails.clone(),
+        ..Default::default()
+    });
+    let request = encode_wbxml(&{
+        let mut root = WbxmlNode::new(20, "ItemOperations");
+        let mut fetch = WbxmlNode::new(20, "Fetch");
+        fetch.push(WbxmlNode::with_text(0, "CollectionId", archive.id.to_string()));
+        fetch.push(WbxmlNode::with_text(
+            0,
+            "ServerId",
+            "11111111-1111-1111-1111-111111111111",
+        ));
+        root.push(fetch);
+        root
+    });
+
+    let response = service
+        .handle_request(
+            active_sync_query("ItemOperations", "dev-itemops-foreign-collection"),
+            &bearer_headers(),
+            &request,
+        )
+        .await
+        .unwrap();
+
+    let body = decode_response_body(response).await;
+    let fetch = body.child("Response").unwrap().child("Fetch").unwrap();
+    // [MS-ASCMD] sections 2.2.1.10 and 2.2.3.67.1: CollectionId and
+    // ServerId address one item location. Status 6 is an invalid store.
+    assert_eq!(status_value(fetch), "6");
+    assert!(fetch.child("Properties").is_none());
+    assert_eq!(emails.lock().unwrap()[0].subject, "Inbox-only message");
+}
+
+#[tokio::test]
 async fn search_queries_canonical_mail_projection() {
     let inbox = FakeStore::inbox_mailbox();
     let mut first = FakeStore::inbox_email(

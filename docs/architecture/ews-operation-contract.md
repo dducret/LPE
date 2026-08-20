@@ -173,7 +173,7 @@ Current automated gate coverage:
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
 | `FindMessageTrackingReport` | Partial | `submission_queue`, `submission_events`, `lpe_ct_transport_trace_events` | Canonical traceability API bridged to LPE-CT | Finds tracking reports without making LPE core own SMTP perimeter state | P3 |
-| `GetMessageTrackingReport` | Partial | `submission_events`, `lpe_ct_transport_trace_events` | Canonical traceability API bridged to LPE-CT | Shows delivery trace from canonical submission and LPE-CT relay state | P3 |
+| `GetMessageTrackingReport` | Partial | `submission_events`, `lpe_ct_transport_trace_events` | Canonical traceability API bridged to LPE-CT | Shows delivery trace from canonical submission and LPE-CT relay state while redacting protected Bcc-derived recipient fields and opaque diagnostics | P3 |
 
 ## Notification Operations
 

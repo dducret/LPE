@@ -186,11 +186,14 @@ struct PublishedEndpoints {
     imap_host: Option<String>,
     imap_port: Option<u16>,
     smtp_host: Option<String>,
+    smtp_authenticated_submission_enabled: bool,
     smtp_port: Option<u16>,
     smtp_socket_type: Option<String>,
     ews_enabled: bool,
     ews_url: String,
     mapi_enabled: bool,
+    mapi_interop_gate_passed: bool,
+    exch_interop_gate_passed: bool,
     outlook_interop_gate_passed: bool,
     mapi_http_requested: bool,
     legacy_exch_autodiscover_enabled: bool,
@@ -222,8 +225,14 @@ impl PublishedEndpoints {
             .as_ref()
             .map(|_| read_u16_env("LPE_AUTOCONFIG_IMAP_PORT", 993));
 
-        let smtp_host = env::var("LPE_AUTOCONFIG_SMTP_HOST")
-            .ok()
+        // [MS-OXSMTP] sections 2.2.1 and 3.2.5.1; [MS-XLOGIN] section 2.2:
+        // client SMTP metadata describes LPE-CT's authenticated submission
+        // service, never public ingress or LPE's internal relay.
+        let smtp_authenticated_submission_enabled =
+            env_flag("LPE_AUTOCONFIG_SMTP_SUBMISSION_ENABLED");
+        let smtp_host = smtp_authenticated_submission_enabled
+            .then(|| env::var("LPE_AUTOCONFIG_SMTP_HOST").ok())
+            .flatten()
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
         let smtp_port = smtp_host
@@ -241,6 +250,8 @@ impl PublishedEndpoints {
         let ews_url = env::var("LPE_AUTOCONFIG_EWS_URL")
             .unwrap_or_else(|_| format!("{public_scheme}://{public_host}/EWS/Exchange.asmx"));
         let mapi_enabled = env_flag("LPE_AUTOCONFIG_MAPI_ENABLED");
+        let mapi_interop_gate_passed = env_flag("LPE_AUTOCONFIG_MAPI_INTEROP_GATE_PASSED");
+        let exch_interop_gate_passed = env_flag("LPE_AUTOCONFIG_EXCH_INTEROP_GATE_PASSED");
         let outlook_interop_gate_passed = env_flag("LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED");
         let mapi_http_requested = headers
             .get("x-mapihttpcapability")
@@ -269,11 +280,14 @@ impl PublishedEndpoints {
             imap_host,
             imap_port,
             smtp_host,
+            smtp_authenticated_submission_enabled,
             smtp_port,
             smtp_socket_type,
             ews_enabled,
             ews_url,
             mapi_enabled,
+            mapi_interop_gate_passed,
+            exch_interop_gate_passed,
             outlook_interop_gate_passed,
             mapi_http_requested: mapi_http_requested.is_some(),
             legacy_exch_autodiscover_enabled,
@@ -294,7 +308,10 @@ impl PublishedEndpoints {
     }
 
     fn mapi_autodiscover_enabled(&self) -> bool {
-        self.mapi_enabled
+        // [MS-OXDSCLI] sections 2.2.2.1 and 3.2.5.1 make this client
+        // capability negotiation, not proof that the authenticated MAPI/HTTP
+        // transport passed LPE's separate publication evidence gate.
+        self.mapi_enabled && self.mapi_interop_gate_passed
     }
 
     fn mapi_http_autodiscover_selected(&self) -> bool {
@@ -302,7 +319,12 @@ impl PublishedEndpoints {
     }
 
     fn exch_autodiscover_enabled(&self) -> bool {
-        self.legacy_exch_autodiscover_enabled && self.exchange_autodiscover_enabled()
+        // [MS-OXDSCLI] sections 2.2.4.1.1.2.6 and 2.2.4.1.1.2.46 define an
+        // EXCH protocol block; LPE publishes it only after its own transport
+        // evidence gate, independently of MAPI/HTTP and EXPR/RPC gates.
+        self.legacy_exch_autodiscover_enabled
+            && self.exch_interop_gate_passed
+            && self.exchange_autodiscover_enabled()
     }
 
     fn expr_autodiscover_enabled(&self) -> bool {
@@ -988,6 +1010,7 @@ fn log_autodiscover_connection(
         method,
         uri,
         headers,
+        endpoints,
         email,
         response_kind,
         request_body,
@@ -1009,6 +1032,8 @@ fn log_autodiscover_connection(
             x_request_id = %x_request_id,
             x_mapi_http_capability = %x_mapi_http_capability,
             mapi_enabled = endpoints.mapi_enabled,
+            mapi_interop_gate_passed = endpoints.mapi_interop_gate_passed,
+            exch_interop_gate_passed = endpoints.exch_interop_gate_passed,
             outlook_interop_gate_passed = endpoints.outlook_interop_gate_passed,
             mapi_http_requested = endpoints.mapi_http_requested,
             mapi_autodiscover_enabled = endpoints.mapi_autodiscover_enabled(),
@@ -1038,6 +1063,8 @@ fn log_autodiscover_connection(
             x_request_id = %x_request_id,
             x_mapi_http_capability = %x_mapi_http_capability,
             mapi_enabled = endpoints.mapi_enabled,
+            mapi_interop_gate_passed = endpoints.mapi_interop_gate_passed,
+            exch_interop_gate_passed = endpoints.exch_interop_gate_passed,
             outlook_interop_gate_passed = endpoints.outlook_interop_gate_passed,
             mapi_http_requested = endpoints.mapi_http_requested,
             mapi_autodiscover_enabled = endpoints.mapi_autodiscover_enabled(),
@@ -1061,6 +1088,7 @@ fn trace_autodiscover_connection(
     method: &str,
     uri: &Uri,
     headers: &HeaderMap,
+    endpoints: &PublishedEndpoints,
     email: Option<&str>,
     response_kind: &str,
     request_body: Option<&[u8]>,
@@ -1107,6 +1135,18 @@ fn trace_autodiscover_connection(
             ("x_request_id", x_request_id.clone()),
             ("x_mapi_http_capability", x_mapi_http_capability.clone()),
             ("user_agent", user_agent.clone()),
+            (
+                "mapi_interop_gate_passed",
+                endpoints.mapi_interop_gate_passed.to_string(),
+            ),
+            (
+                "exch_interop_gate_passed",
+                endpoints.exch_interop_gate_passed.to_string(),
+            ),
+            (
+                "outlook_interop_gate_passed",
+                endpoints.outlook_interop_gate_passed.to_string(),
+            ),
         ],
         payload: request_body,
     });
@@ -1128,6 +1168,18 @@ fn trace_autodiscover_connection(
             ("x_request_id", x_request_id),
             ("x_mapi_http_capability", x_mapi_http_capability),
             ("user_agent", user_agent),
+            (
+                "mapi_interop_gate_passed",
+                endpoints.mapi_interop_gate_passed.to_string(),
+            ),
+            (
+                "exch_interop_gate_passed",
+                endpoints.exch_interop_gate_passed.to_string(),
+            ),
+            (
+                "outlook_interop_gate_passed",
+                endpoints.outlook_interop_gate_passed.to_string(),
+            ),
         ],
         payload: response_body.map(str::as_bytes),
     });

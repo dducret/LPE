@@ -34,6 +34,9 @@
   - `LPE-CT` must not require direct access to the core `LPE` PostgreSQL database
   - `5432` on `LPE-CT` is private to the sorting center when a local PostgreSQL service is used
   - core integration uses signed HTTP bridge calls
+  - an accepted inbound bridge request may carry only the LPE-CT trace id into
+    core mailbox metadata; spam, phishing, reputation, score, and quarantine
+    values remain perimeter-only technical data
 - Rebuild and retention:
   - technical stores may be rebuilt from policy, logs, or retained spool/quarantine state where possible
   - payload custody must be preserved until delivery, bounce, release, rejection, or configured deletion
@@ -59,6 +62,7 @@
 | quarantine metadata | `LPE-CT` technical store |
 | greylisting | `LPE-CT` technical store |
 | reputation | `LPE-CT` technical store |
+| trace provenance for delivered message | core `LPE` `x-lpe-ct-trace-id`, signed bridge only |
 | canonical delivery | core `LPE` PostgreSQL |
 | canonical mailbox search | core `LPE` PostgreSQL |
 

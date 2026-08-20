@@ -2,13 +2,13 @@
 
 ## Current State/Functionality Overview
 
-`LPE` publishes client autoconfiguration only for endpoints that are implemented and explicitly exposed. New 0.5.2 installations enable MAPI over HTTP for capable Outlook desktop clients; legacy Exchange provider blocks remain separately gated. This deployment policy is not a local-verification or Outlook-support claim: the exact deployed revision still requires a clean local `lpe-exchange` suite, the bounded public-host MAPI Gate 1 harness, Microsoft RCA, and real Outlook cached-mode evidence before any support claim is widened.
+`LPE` publishes client autoconfiguration only for endpoints that are implemented and explicitly exposed. New 0.5.2 installations keep MAPI/HTTP metadata withheld until its dedicated evidence gate is set; `EXCH` and legacy `EXPR` provider blocks remain separately gated. This deployment policy is not a local-verification or Outlook-support claim: the exact deployed revision still requires a clean local `lpe-exchange` suite, the bounded public-host MAPI Gate 1 harness, Microsoft RCA, and real Outlook cached-mode evidence before any support claim is widened.
 
 ## Implementation/Usage
 
-- Publish public autoconfiguration through `LPE-CT` HTTPS. The core `LPE` service may render the response behind the proxy, but public clients must not be directed to a core `LPE` listener.
+- Publish public autoconfiguration through `LPE-CT` HTTPS. The core `LPE` service may render the response behind the proxy, but public clients must not be directed to a core `LPE` listener ([MS-OXDISCO] sections 2.2.5 and 3.2.3.3).
 - Publish `IMAP` only when public IMAPS is exposed by `LPE-CT`; set `LPE_AUTOCONFIG_IMAP_HOST` to that public `LPE-CT` IMAPS hostname. Leaving it unset suppresses IMAP blocks in Thunderbird autoconfig and Outlook POX Autodiscover.
-- Publish `SMTP` submission only when a real authenticated client-submission listener is exposed by `LPE-CT`.
+- Publish `SMTP` submission only when `LPE_AUTOCONFIG_SMTP_HOST` names a real authenticated client-submission listener exposed by `LPE-CT` and `LPE_AUTOCONFIG_SMTP_SUBMISSION_ENABLED` is true. [MS-OXSMTP] sections 2.2.1 and 3.2.5.1 and [MS-XLOGIN] section 2.2 apply to that submission listener; public ingress stays without `AUTH`.
 - Never advertise the internal `LPE -> LPE-CT` relay as client `SMTP`.
 - Publish `ActiveSync` only for clients that support `Exchange ActiveSync`.
 - Do not advertise `ActiveSync` as the Outlook for Windows desktop Exchange route.
@@ -17,8 +17,8 @@
   ActiveSync/MobileSync probes, but it must not imply support for older
   ActiveSync protocol versions.
 - Publish `EWS` only when `LPE_AUTOCONFIG_EWS_ENABLED` is true.
-- Publish `mapiHttp` when `LPE_AUTOCONFIG_MAPI_ENABLED` is true and the client sends a supported positive `X-MapiHttpCapability` value. New 0.5.2 installations enable this setting. The capability header never enables a deployment-disabled endpoint, and legacy `EXCH` / `EXPR` metadata is suppressed only when `mapiHttp` metadata is actually emitted. Publication does not claim that the current checkout has passed local, public-host, Microsoft RCA, or real Outlook cached-mode validation.
-- Publish top-level `EXCH` only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` is true and an Exchange-style surface is enabled.
+- Publish `mapiHttp` only when `LPE_AUTOCONFIG_MAPI_ENABLED` and `LPE_AUTOCONFIG_MAPI_INTEROP_GATE_PASSED` are true and the client sends a supported positive `X-MapiHttpCapability` value. Under [MS-OXDSCLI] sections 2.2.2.1 and 3.2.5.1, that header is client capability negotiation; it is never evidence that MAPI/HTTP is usable. Set the MAPI gate only after the exact deployed edge has passed the local suite, public Gate 1 harness, Microsoft RCA, and separate Outlook 2016/2019 cached-mode checks.
+- Publish top-level `EXCH` only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` and `LPE_AUTOCONFIG_EXCH_INTEROP_GATE_PASSED` are true and an Exchange-style surface is enabled. This is an independent transport evidence gate for the [MS-OXDSCLI] sections 2.2.4.1.1.2.6 and 2.2.4.1.1.2.46 provider block.
 - Publish top-level `EXPR` only when `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_RPC_PROXY_ENABLED`, and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are true and `/rpc/rpcproxy.dll` is implemented and exposed.
 - Publish SOAP `GetUserSettings` only when `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` is true and an `EWS` or `MAPI` surface is enabled.
 - `/.well-known/jmap` redirects to the configured public JMAP session URL.
@@ -64,14 +64,17 @@
 | `LPE_PUBLIC_HOSTNAME` | inferred from `Host` or `X-Forwarded-Host` when unset |
 | `LPE_AUTOCONFIG_IMAP_HOST` | optional; enables published `IMAP` blocks and must name the public `LPE-CT` IMAPS endpoint, not the core `LPE` listener |
 | `LPE_AUTOCONFIG_IMAP_PORT` | `993` when `LPE_AUTOCONFIG_IMAP_HOST` is set |
-| `LPE_AUTOCONFIG_SMTP_HOST` | optional; enables the published `SMTP` block only for real authenticated client submission |
+| `LPE_AUTOCONFIG_SMTP_HOST` | optional public LPE-CT submission hostname; metadata remains suppressed unless the authenticated-submission gate is also true |
+| `LPE_AUTOCONFIG_SMTP_SUBMISSION_ENABLED` | explicit LPE-CT authenticated-submission publication gate; default false; set only after the TLS listener, `AUTH PLAIN LOGIN`, signed core handoff, and canonical `Sent` evidence pass |
 | `LPE_AUTOCONFIG_SMTP_PORT` | `465` |
 | `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE` | `SSL` |
 | `LPE_AUTOCONFIG_EWS_ENABLED` | true values: `true`, `1`, `yes`, `on` |
 | `LPE_AUTOCONFIG_EWS_URL` | `{public_scheme}://{public_host}/EWS/Exchange.asmx` |
-| `LPE_AUTOCONFIG_MAPI_ENABLED` | true values: `true`, `1`, `yes`, `on`; new 0.5.2 installations set `true` |
-| `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` | legacy `EXPR`/RPC over HTTP release gate; it does not control MAPI over HTTP publication |
+| `LPE_AUTOCONFIG_MAPI_ENABLED` | true values: `true`, `1`, `yes`, `on`; enables a MAPI/HTTP surface but does not publish metadata alone |
+| `LPE_AUTOCONFIG_MAPI_INTEROP_GATE_PASSED` | MAPI/HTTP publication evidence gate; default false; requires the exact deployment's local suite, public Gate 1, Microsoft RCA, and separate Outlook 2016/2019 evidence |
+| `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` | legacy `EXPR`/RPC over HTTP release gate; it does not control MAPI over HTTP or `EXCH` publication |
 | `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` | true values: `true`, `1`, `yes`, `on` |
+| `LPE_AUTOCONFIG_EXCH_INTEROP_GATE_PASSED` | `EXCH` provider publication evidence gate; default false and independent of MAPI/HTTP and EXPR/RPC evidence |
 | `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED` | true values: `true`, `1`, `yes`, `on` |
 | `LPE_AUTOCONFIG_RPC_PROXY_ENABLED` | true values: `true`, `1`, `yes`, `on` |
 | `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` | true values: `true`, `1`, `yes`, `on` |
@@ -85,7 +88,7 @@
 | --- | --- |
 | `Protocol=AutoDiscoverV1` | canonical POX URL |
 | `Protocol=EWS` | configured EWS URL only when `LPE_AUTOCONFIG_EWS_ENABLED` is true |
-| `Protocol=MapiHttp` | configured EMSMDB URL when `LPE_AUTOCONFIG_MAPI_ENABLED` is true |
+| `Protocol=MapiHttp` | configured EMSMDB URL only when the MAPI surface and MAPI/HTTP publication gate are true |
 | `Protocol=ActiveSync` / `MobileSync` | ActiveSync endpoint for mobile-client probes |
 
 Microsoft Autodiscover v2 JSON does not advertise `JMAP`. Use `/.well-known/jmap` for JMAP service discovery.
@@ -99,7 +102,7 @@ Microsoft Autodiscover v2 JSON does not advertise `JMAP`. Use `/.well-known/jmap
 
 ## Outlook Release Evidence Checklist
 
-Record these checks for the exact deployed revision and public host used for a 0.5.x release. The checklist no longer acts as a second MAPI runtime switch; `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` remains reserved for legacy `EXPR`/RPC over HTTP. Until every item is separately recorded, do not widen Outlook support, readiness, or cached-mode claims from the fact that MAPI/HTTP is published.
+Record these checks for the exact deployed revision and public host used for a 0.5.x release. Until every MAPI item is separately recorded, leave `LPE_AUTOCONFIG_MAPI_INTEROP_GATE_PASSED=false`; `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` remains reserved for legacy `EXPR`/RPC over HTTP and `LPE_AUTOCONFIG_EXCH_INTEROP_GATE_PASSED` has its own provider evidence. Until the applicable gate is set, do not widen Outlook support, readiness, or cached-mode claims from a capability header or from a reachable route.
 
 - Microsoft MAPI/HTTP and Autodiscover references have been checked for the release, including `MS-OXCMAPIHTTP` transport, `MS-OXDSCLI` `X-MapiHttpCapability` handling, and the MapiHttp response shape.
 - `cargo test -p lpe-admin-api` and `cargo test -p lpe-exchange` pass for the exact revision being deployed.

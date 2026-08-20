@@ -349,6 +349,45 @@ smtp_starttls_probe_if_possible() {
   fail "SMTP ingress on ${host}:${port} failed STARTTLS handshake"
 }
 
+probe_public_ingress_has_no_auth() {
+  local host="$1"
+  local port="$2"
+  local output_file
+
+  # [MS-OXSMTP] sections 2.2.1 and 3.2.5.1; [MS-XLOGIN] section 2.2:
+  # AUTH belongs only on the separately authenticated LPE-CT submission port.
+  output_file="$(mktemp)"
+  if ! timeout 15 bash -c '
+    exec 3<>"/dev/tcp/$1/$2"
+    IFS= read -r greeting <&3
+    printf "EHLO edge-auth-check.example.test\\r\\nAUTH PLAIN AGVkZ2UtdW5hdXRoQGV4YW1wbGUudGVzdABub3QtYS1jcmVkZW50aWFs\\r\\nQUIT\\r\\n" >&3
+    printf "%s\\n" "$greeting"
+    while IFS= read -r reply <&3; do
+      printf "%s\\n" "$reply"
+      [[ "$reply" == 221* ]] && break
+    done
+  ' _ "${host}" "${port}" >"${output_file}" 2>&1; then
+    echo "[DIAG] Public SMTP ingress AUTH probe failed:"
+    sed -n '1,80p' "${output_file}" || true
+    rm -f "${output_file}"
+    fail "Public SMTP ingress AUTH rejection probe did not complete"
+  fi
+  if grep -Eiq '^250[- ]AUTH[[:space:]]' "${output_file}"; then
+    echo "[DIAG] Public SMTP ingress advertised AUTH:"
+    sed -n '1,80p' "${output_file}" || true
+    rm -f "${output_file}"
+    fail "Public SMTP ingress must not advertise AUTH; use the LPE-CT submission listener instead"
+  fi
+  if ! grep -q '^502 AUTH not available on public SMTP ingress' "${output_file}"; then
+    echo "[DIAG] Public SMTP ingress did not reject AUTH with the bounded response:"
+    sed -n '1,80p' "${output_file}" || true
+    rm -f "${output_file}"
+    fail "Public SMTP ingress must reject AUTH instead of accepting client submission"
+  fi
+  rm -f "${output_file}"
+  pass "Public SMTP ingress does not advertise or accept AUTH"
+}
+
 probe_submission_auth_if_configured() {
   local test_email="${LPE_CT_SUBMISSION_TEST_EMAIL:-${LPE_CT_OUTLOOK_TEST_EMAIL:-${LPE_CT_IMAPS_TEST_EMAIL:-${LPE_IMAP_TEST_EMAIL:-${IMAP_TEST_EMAIL:-}}}}}"
   local test_password="${LPE_CT_SUBMISSION_TEST_PASSWORD:-${LPE_CT_OUTLOOK_TEST_PASSWORD:-${LPE_CT_IMAPS_TEST_PASSWORD:-${LPE_IMAP_TEST_PASSWORD:-${IMAP_TEST_PASSWORD:-}}}}}"
@@ -611,9 +650,11 @@ probe_client_publication() {
       || fail "Outlook Autodiscover IMAP profile does not enable SSL"
     [[ "$body" == *"<LoginName>${autodiscover_email}</LoginName>"* ]] \
       || fail "Outlook Autodiscover IMAP login name is not ${autodiscover_email}"
-    if [[ -n "${LPE_CT_SUBMISSION_BIND_ADDRESS:-}" ]]; then
+    if [[ "${LPE_CT_EXPECTED_AUTODISCOVER_SMTP_SUBMISSION:-false}" == "true" ]]; then
+      [[ -n "${LPE_CT_SUBMISSION_BIND_ADDRESS:-}" ]] \
+        || fail "SMTP Autodiscover is expected, but LPE_CT_SUBMISSION_BIND_ADDRESS is not configured"
       [[ "$body" == *"<Type>SMTP</Type>"* ]] \
-        || fail "Outlook Autodiscover does not publish SMTP even though LPE-CT submission is configured"
+        || fail "Outlook Autodiscover does not publish the expected authenticated LPE-CT submission service"
       [[ "$body" == *"<Server>${expected_smtp_host}</Server>"* ]] \
         || fail "Outlook Autodiscover SMTP server is not ${expected_smtp_host}"
       [[ "$body" == *"<Port>${expected_smtp_port}</Port>"* ]] \
@@ -625,7 +666,9 @@ probe_client_publication() {
       [[ "$body" == *"<SMTPLast>off</SMTPLast>"* ]] \
         || fail "Outlook Autodiscover SMTP profile does not disable SMTP-after-download"
     else
-      warn "Outlook Autodiscover SMTP profile was not required because LPE_CT_SUBMISSION_BIND_ADDRESS is not configured."
+      [[ "$body" != *"<Type>SMTP</Type>"* ]] \
+        || fail "Outlook Autodiscover publishes SMTP without LPE_CT_EXPECTED_AUTODISCOVER_SMTP_SUBMISSION=true and a real authenticated LPE-CT submission service"
+      pass "Outlook Autodiscover keeps SMTP unpublished without the authenticated submission expectation"
     fi
     if [[ "${LPE_CT_EXPECTED_OUTLOOK_EXCHANGE_AUTODISCOVER:-false}" != "true" ]]; then
       [[ "$body" != *"<Type>EXCH</Type>"* ]] \
@@ -663,7 +706,7 @@ probe_client_publication() {
         "${base_url}/autodiscover/autodiscover.xml")" \
         || fail "MAPI-capable Autodiscover POST is not reachable through LPE-CT HTTPS publication"
       [[ "$body" == *"<Protocol Type=\"mapiHttp\" Version=\"1\">"* ]] \
-        || fail "MAPI-capable Autodiscover POST did not publish mapiHttp version 1"
+        || fail "MAPI-capable Autodiscover POST did not publish mapiHttp version 1; enable it only after LPE_AUTOCONFIG_MAPI_INTEROP_GATE_PASSED records the MAPI Gate 1, Microsoft RCA, and Outlook evidence"
       [[ "$body" == *"<MailStore>"* && "$body" == *"/mapi/emsmdb/?MailboxId=${autodiscover_email}"* ]] \
         || fail "MAPI-capable Autodiscover POST did not publish the EMSMDB mailbox URL"
       [[ "$body" == *"<AddressBook>"* && "$body" == *"/mapi/nspi/?MailboxId=${autodiscover_email}"* ]] \
@@ -835,6 +878,7 @@ fi
 
 if scope_enabled "smtp"; then
   tcp_probe "SMTP ingress" "$HOST" "${SMTP_PORT:-25}"
+  probe_public_ingress_has_no_auth "$HOST" "${SMTP_PORT:-25}"
   if [[ -n "${LPE_CT_PUBLIC_TLS_CERT_PATH:-}" && -n "${LPE_CT_PUBLIC_TLS_KEY_PATH:-}" ]]; then
     smtp_starttls_probe_if_possible "$HOST" "${SMTP_PORT:-25}"
   else

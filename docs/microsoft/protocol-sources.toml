@@ -34,6 +34,9 @@ used_for = [
 ]
 sections = [
   "2.2.1 Commands",
+  "2.2.1.10 ItemOperations",
+  "2.2.3.67.1 Fetch (ItemOperations)",
+  "2.2.3.166.7 ServerId (ItemOperations)",
   "2.2.3.35 ConversationId",
   "2.2.3.36 ConversationMode",
   "2.2.3.156 RightsManagementInformation",
