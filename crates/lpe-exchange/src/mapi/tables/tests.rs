@@ -9045,7 +9045,7 @@ fn bcc_projections_only_expose_sent_items() {
 }
 
 #[test]
-fn mapi_snapshot_retains_protected_bcc_only_for_owner_drafts_and_sent() {
+fn mapi_snapshot_retains_protected_bcc_only_for_owner_sent() {
     let mailbox_id = Uuid::from_u128(0x8181_0004);
     let mut email = test_table_email(
         Uuid::from_u128(0x7171_0004),
@@ -9061,29 +9061,27 @@ fn mapi_snapshot_retains_protected_bcc_only_for_owner_drafts_and_sent() {
         crate::mapi::identity::mapi_store_id(0x7171_0004),
     );
 
-    for role in ["drafts", "sent"] {
-        email.mailbox_role = role.to_string();
-        let snapshot = MapiMailStoreSnapshot::new(
-            Vec::new(),
-            vec![email.clone()],
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-        );
-        let projected = snapshot.emails();
-        assert_eq!(projected.len(), 1);
-        assert_eq!(projected[0].bcc[0].address, "owner-hidden@example.test");
-        assert!(message_recipients(&projected[0])
-            .iter()
-            .any(|recipient| recipient.recipient_type == 0x03));
-    }
+    email.mailbox_role = "sent".to_string();
+    let snapshot = MapiMailStoreSnapshot::new(
+        Vec::new(),
+        vec![email.clone()],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    let projected = snapshot.emails();
+    assert_eq!(projected.len(), 1);
+    assert_eq!(projected[0].bcc[0].address, "owner-hidden@example.test");
+    assert!(message_recipients(&projected[0])
+        .iter()
+        .any(|recipient| recipient.recipient_type == 0x03));
 
-    for role in ["inbox", "shared"] {
+    for role in ["drafts", "inbox", "shared"] {
         email.mailbox_role = role.to_string();
         let snapshot = MapiMailStoreSnapshot::new(
             Vec::new(),

@@ -1272,17 +1272,6 @@ fn calendar_sync_object_projects_stable_identity_and_attachment_presence() {
             )
     }));
     assert!(sync.named_properties.iter().any(|(tag, value)| {
-        *tag == PID_TAG_LAST_MODIFICATION_TIME
-            && matches!(
-                value,
-                mapi_mailstore::SpecialMessagePropertyValue::I64(filetime)
-                    if *filetime
-                        == mapi_mailstore::filetime_from_rfc3339_utc(
-                            "2026-05-25T13:45:00Z"
-                        ) as i64
-            )
-    }));
-    assert!(sync.named_properties.iter().any(|(tag, value)| {
         *tag == PID_TAG_LOCAL_COMMIT_TIME
             && matches!(
                 value,
@@ -1308,6 +1297,8 @@ fn calendar_sync_object_projects_stable_identity_and_attachment_presence() {
         .named_properties
         .iter()
         .any(|(tag, _)| *tag == 0x3A0D_001F));
+    // [MS-OXCFXICS] section 3.1.5.3: the manifest owns the wire LMT property
+    // and emits this durable version value exactly once.
     assert_eq!(
         sync.last_modified_filetime,
         mapi_mailstore::filetime_from_rfc3339_utc("2026-05-25T13:45:00Z")

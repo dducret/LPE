@@ -372,15 +372,13 @@ mod tests {
     }
 
     #[test]
-    fn normal_message_diagnostics_hide_bcc_outside_drafts_and_sent() {
-        for role in ["drafts", "sent"] {
-            assert_eq!(
-                normal_message_debug_property_value(&test_email(role), PID_TAG_DISPLAY_BCC_W),
-                Some(MapiValue::String("Hidden recipient".to_string()))
-            );
-        }
+    fn normal_message_diagnostics_expose_bcc_only_for_owner_sent() {
+        assert_eq!(
+            normal_message_debug_property_value(&test_email("sent"), PID_TAG_DISPLAY_BCC_W),
+            Some(MapiValue::String("Hidden recipient".to_string()))
+        );
 
-        for role in ["inbox", "shared"] {
+        for role in ["drafts", "inbox", "shared"] {
             assert_eq!(
                 normal_message_debug_property_value(&test_email(role), PID_TAG_DISPLAY_BCC_W),
                 Some(MapiValue::String(String::new()))

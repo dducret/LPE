@@ -443,9 +443,9 @@ const REPORT_ROWS: &[ReportRow] = &[
         surface: "Named-property ID mapping",
         spec: "MS-OXCPRPT named-property property ID retrieval",
         source: "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcprpt/33c1b19f-0664-4b53-a968-2ee0d674f72b",
-        anchor: "`crates/lpe-exchange/src/mapi/session.rs::property_id_for_name`, `property_name_for_id`, `crates/lpe-exchange/src/mapi/dispatch/named_properties.rs`, `crates/lpe-exchange/src/tests/mapi_over_http/logon_profile.rs`",
-        implemented: "`RopGetPropertyIdsFromNames` and `RopGetNamesFromPropertyIds` are handled through session-scoped named-property maps, well-known named-property ids, normalized named-property names, and reserved-id guards for bounded Outlook MAPI behavior.",
-        gaps: "LPE does not claim full Exchange named-property database semantics, cross-session Exchange property-id allocation compatibility, or arbitrary provider-specific named-property persistence outside supported canonical object kinds.",
+        anchor: "`crates/lpe-exchange/src/mapi/session/named_properties.rs`, `crates/lpe-exchange/src/mapi/dispatch/named_properties.rs`, `crates/lpe-exchange/src/tests/mapi_over_http/properties.rs::mapi_over_http_named_property_mapping_survives_restart_style_session`",
+        implemented: "[MS-OXCPRPT] section 3.1.4.1 named-property definitions are normalized, guarded against reserved ids, and durably mapped per account. `RopGetPropertyIdsFromNames` and `RopGetNamesFromPropertyIds` load that mapping into a session cache, preserving IDs through reconnect without making opaque values canonical behavior.",
+        gaps: "LPE does not claim Exchange-wide named-property database semantics or arbitrary provider-specific behavior. Mappings remain account-isolated; only typed canonical fields and the bounded, parseable custom-property projections accepted by the owning object kind can persist.",
     },
     ReportRow {
         surface: "Client extension message objects",

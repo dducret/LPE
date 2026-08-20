@@ -74,8 +74,11 @@ Full support for the requested Microsoft object families is complete only when:
 `RopGetPropertyIdsFromNames` and `RopGetNamesFromPropertyIds` use durable,
 account-scoped named-property mappings and preserve the same mapping across
 profile bootstrap, cached sync, compose, and reconnect. This is the bounded
-mailbox mapping required by [MS-OXCPRPT] section 3.1.4.1; it does not turn an
-unmapped or opaque property into canonical behavior.
+mailbox mapping required by [MS-OXCPRPT] section 3.1.4.1; the
+`mapi_over_http_named_property_mapping_survives_restart_style_session` test
+verifies the reconnect boundary. It does not turn an unmapped or opaque
+property into canonical behavior, and no mapping is shared with another
+account.
 
 Mail follow-up state is a canonical mail projection: flag status, icon,
 request, dates, reminder state, categories, and read state reach the same
@@ -88,6 +91,11 @@ state is created.
 
 Calendar, Contact, Task, Note, Journal, Reminder, and Post properties expose
 only their typed canonical fields and explicitly tested compatibility values.
+Their canonical effects are visible through the applicable JMAP, IMAP, EWS,
+DAV, or MAPI projection; MAPI-only named values are neither search nor AI
+input. This preserves the MS-OXOMSG/MS-OXOFLAG mail boundary and the
+MS-OXOCAL/MS-OXCNTC/MS-OXOTASK section 2.2 object projections without adding
+Exchange-local mailbox, rule, delegation, Sent, or Outbox truth.
 In particular, an `IPM.DistList` Contact is rejected before staging: the PDL
 member, checksum, and stream representations in [MS-OXCNTC] sections
 2.2.2.2.1 through 2.2.2.2.4 cannot become directory-group or contact-membership
