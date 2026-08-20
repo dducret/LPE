@@ -13,6 +13,7 @@ mod diagnostics;
 mod dn_to_mid;
 mod property_values;
 mod query_rows;
+mod resolve_names;
 mod special_tables;
 
 #[cfg(test)]
@@ -46,6 +47,7 @@ use query_rows::{
     nspi_request_type_is_query_rows, parse_legacy_nspi_query_rows_request,
     parse_nspi_query_rows_request,
 };
+use resolve_names::parse_nspi_resolve_names_request;
 #[cfg(test)]
 use special_tables::NSPI_UNICODE_STRINGS_FLAG;
 use special_tables::{nspi_hierarchy_info_response, nspi_special_table_response};
@@ -255,8 +257,19 @@ pub(in crate::mapi) async fn resolve_names_response<S>(
 where
     S: ExchangeStore,
 {
+    let parsed_request = match parse_nspi_resolve_names_request(request) {
+        Some(parsed_request) => parsed_request,
+        None => {
+            return mapi_diagnostic_response(
+                "ResolveNames",
+                request_id,
+                5,
+                "invalid ResolveNames request",
+            );
+        }
+    };
     let columns = resolve_names_columns(request);
-    let requested_names = resolve_names_requested_values(request);
+    let requested_names = parsed_request.requested_names;
     let entries = match store.fetch_address_book_entries(principal).await {
         Ok(entries) => entries,
         Err(error) => {

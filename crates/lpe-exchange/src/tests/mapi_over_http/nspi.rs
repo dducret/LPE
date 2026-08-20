@@ -975,6 +975,30 @@ async fn mapi_over_http_resolve_names_honors_requested_rca_columns() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_resolve_names_rejects_trailing_input_without_directory_side_effects() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let mut request = resolve_names_request("alice@example.test", &[0x3003_001F]);
+    request.push(0x01);
+    let headers = nspi_bound_headers(&service, "ResolveNames").await;
+
+    // [MS-OXNSPI] section 3.1.4.1.16 requires the ordered ResolveNames request.
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "5");
+    let body = String::from_utf8(response_bytes(response).await).unwrap();
+    assert!(body.contains("invalid ResolveNames request"));
+    assert!(!body.contains("alice@example.test"));
+}
+
+#[tokio::test]
 async fn mapi_over_http_resolve_names_falls_back_to_authenticated_mailbox_for_rca() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -1243,6 +1267,57 @@ async fn mapi_over_http_nspi_bootstrap_sequence_sees_only_visible_contacts() {
     let body = response_bytes(response).await;
     assert_eq!(body[9], 0);
     assert!(!contains_bytes(&body, &utf16z("carol.hidden@example.test")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_nspi_and_ews_resolve_names_do_not_leak_private_contacts() {
+    let private_owner = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
+    let mut private_collection = FakeStore::collection("private", "contacts", "Private Contacts");
+    private_collection.owner_account_id = private_owner;
+    private_collection.rights.may_read = false;
+    let mut private_contact = FakeStore::contact(
+        "dddddddd-dddd-dddd-dddd-dddddddddddd",
+        "Carol Private",
+        "carol.private@example.test",
+    );
+    private_contact.collection_id = "private".to_string();
+    private_contact.owner_account_id = private_owner;
+    private_contact.rights.may_read = false;
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![private_collection])),
+        contacts: Arc::new(Mutex::new(vec![private_contact])),
+        ..Default::default()
+    });
+
+    // [MS-OXNSPI] section 3.1.4.1.16 and [MS-OXWSRSLNM] section 3.1.4.1:
+    // both compatibility surfaces use the same canonical readable-contact scope.
+    let ews_response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:ResolveNames><m:UnresolvedEntry>carol.private@example.test</m:UnresolvedEntry></m:ResolveNames></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let ews_body = response_text(ews_response).await;
+    assert!(ews_body.contains("<m:ResponseCode>ErrorNameResolutionNoResults</m:ResponseCode>"));
+    assert!(!ews_body.contains("carol.private@example.test"));
+
+    let request = resolve_names_request("carol.private@example.test", &[0x3003_001F]);
+    let headers = nspi_bound_headers(&service, "ResolveNames").await;
+    let nspi_response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(nspi_response.headers().get("x-responsecode").unwrap(), "0");
+    let nspi_body = response_bytes(nspi_response).await;
+    assert_eq!(u32::from_le_bytes(nspi_body[17..21].try_into().unwrap()), 0);
+    assert_eq!(nspi_body[21], 0);
+    assert!(!contains_bytes(
+        &nspi_body,
+        &utf16z("carol.private@example.test")
+    ));
 }
 
 #[tokio::test]

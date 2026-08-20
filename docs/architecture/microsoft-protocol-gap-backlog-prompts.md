@@ -102,7 +102,22 @@ Map a proven minimal behavior only to calendar grants, sender rights, delegate_p
 
 Apply the shared instructions. Address G014, G017-G018, G104, and G119: address-book referral, object projection, UI templates, EWS ResolveNames, and NSPI request/property gaps. Inspect NSPI/EWS name resolution and canonical accounts, contacts, groups, and visibility. Use MS-OXABREF, MS-OXOABK 2.2, MS-OXOABKT templates, MS-OXNSPI 3.1.4, and MS-OXPROPS.
 
-Acceptance: NSPI bootstrap, ResolveNames, request ordering/columns, referral/templates, tenant/hidden/ambiguous/missing cases, and property-shape tests pass; Outlook profile evidence confirms resolution; EWS/NSPI visibility agrees without private-contact leakage. Update NSPI and EWS/MAPI architecture for new fields.
+Implementation record (2026-08-20): bounded canonical projection, referral probes,
+special tables/template-info, and EWS/NSPI resolution coverage are implemented.
+`ResolveNames` now validates the complete ordered request before accessing or
+allocating address-book projection state and rejects malformed/trailing input
+parseably, while retaining the observed all-zero RCA bootstrap probe. EWS and
+NSPI share the canonical readable-contact scope; private contacts remain absent
+from both surfaces. This follows [MS-OXNSPI] section 3.1.4.1.16 and
+[MS-OXWSRSLNM] section 3.1.4.1. The full MS-OXOABKT template catalog and
+Exchange RFRI directory-routing behavior remain explicitly bounded.
+
+Acceptance: NSPI bootstrap, ResolveNames, request ordering/columns,
+referral/templates, tenant/hidden/ambiguous/missing cases, property-shape, and
+EWS/NSPI private-contact isolation tests pass. Fresh Outlook profile/RCA
+evidence still must confirm resolution before any wider publication claim.
+Keep `docs/architecture/nspi-support-matrix.md` and
+`docs/architecture/ews-mapi-mvp.md` aligned with any future field change.
 
 ## Coverage Checklist
 
@@ -123,4 +138,3 @@ Acceptance: NSPI bootstrap, ResolveNames, request ordering/columns, referral/tem
 | 13 | P0 G029 | implement-now |
 | 14 | P1 G067-G068 | needs-trace |
 | 15 | P0 G014, G017-G018, G104, G119 | implement-now |
-
