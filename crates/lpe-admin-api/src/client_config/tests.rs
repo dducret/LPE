@@ -585,6 +585,7 @@ fn outlook_autodiscover_web_external_uses_ms_oxdscli_protocol_shape() {
         ews_enabled: true,
         legacy_exch_autodiscover_enabled: true,
         exch_interop_gate_passed: true,
+        rpc_proxy_enabled: true,
         ..sample_config()
     };
     let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
@@ -731,7 +732,7 @@ fn outlook_autodiscover_can_publish_legacy_exch_without_expr() {
         legacy_exch_autodiscover_enabled: true,
         exch_interop_gate_passed: true,
         legacy_expr_autodiscover_enabled: false,
-        rpc_proxy_enabled: false,
+        rpc_proxy_enabled: true,
         ..sample_config()
     };
 
@@ -930,7 +931,8 @@ fn mapi_http_capability_header_does_not_publish_without_interop_gate() {
 #[test]
 fn legacy_exchange_autodiscover_publication_has_separate_provider_opt_ins() {
     // [MS-OXDSCLI] sections 2.2.4.1.1.2.6 and 2.2.4.1.1.2.46: EXCH and EXPR
-    // are distinct protocol blocks and therefore retain distinct LPE gates.
+    // are distinct protocol blocks. A MAPI capability header or MAPI/HTTP
+    // gate cannot substitute for their separately exposed RPC transport.
     let _guard = ENV_LOCK.lock().unwrap();
     std::env::set_var("LPE_AUTOCONFIG_MAPI_ENABLED", "true");
     std::env::set_var("LPE_AUTOCONFIG_MAPI_INTEROP_GATE_PASSED", "true");
@@ -961,12 +963,19 @@ fn legacy_exchange_autodiscover_publication_has_separate_provider_opt_ins() {
     let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
 
     assert!(config.exch_interop_gate_passed);
-    assert!(xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
+    assert!(!xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
     assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
     assert!(!xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
 
-    std::env::set_var("LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED", "true");
     std::env::set_var("LPE_AUTOCONFIG_RPC_PROXY_ENABLED", "true");
+    let config = PublishedEndpoints::from_headers(&headers, Some("alice@example.test"));
+    let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
+
+    assert!(config.rpc_proxy_enabled);
+    assert!(xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
+    assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
+
+    std::env::set_var("LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED", "true");
     std::env::set_var("LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED", "true");
     std::env::remove_var("LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED");
     let config = PublishedEndpoints::from_headers(&headers, Some("alice@example.test"));

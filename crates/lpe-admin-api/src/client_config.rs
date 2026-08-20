@@ -303,10 +303,6 @@ impl PublishedEndpoints {
         }
     }
 
-    fn exchange_autodiscover_enabled(&self) -> bool {
-        self.ews_enabled || self.mapi_autodiscover_enabled()
-    }
-
     fn mapi_autodiscover_enabled(&self) -> bool {
         // [MS-OXDSCLI] sections 2.2.2.1 and 3.2.5.1 make this client
         // capability negotiation, not proof that the authenticated MAPI/HTTP
@@ -320,22 +316,25 @@ impl PublishedEndpoints {
 
     fn exch_autodiscover_enabled(&self) -> bool {
         // [MS-OXDSCLI] sections 2.2.4.1.1.2.6 and 2.2.4.1.1.2.46 define an
-        // EXCH protocol block; LPE publishes it only after its own transport
-        // evidence gate, independently of MAPI/HTTP and EXPR/RPC gates.
+        // EXCH protocol block for RPC. EWS and MAPI/HTTP are separate
+        // transports, so neither can make EXCH metadata publishable.
         self.legacy_exch_autodiscover_enabled
+            && self.rpc_proxy_enabled
             && self.exch_interop_gate_passed
-            && self.exchange_autodiscover_enabled()
     }
 
     fn expr_autodiscover_enabled(&self) -> bool {
+        // [MS-OXDSCLI] sections 2.2.4.1.1.2.6 and 2.2.4.1.1.2.46: EXPR is
+        // the outside-firewall RPC/HTTP provider. Its transport and evidence
+        // gate remain independent of EWS and MAPI/HTTP publication.
         self.legacy_expr_autodiscover_enabled
             && self.rpc_proxy_enabled
             && self.outlook_interop_gate_passed
-            && self.exchange_autodiscover_enabled()
     }
 
     fn soap_exchange_autodiscover_enabled(&self) -> bool {
-        self.soap_exchange_autodiscover_enabled && self.exchange_autodiscover_enabled()
+        self.soap_exchange_autodiscover_enabled
+            && (self.ews_enabled || self.mapi_autodiscover_enabled())
     }
 }
 

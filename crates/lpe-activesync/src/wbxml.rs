@@ -121,7 +121,13 @@ pub(crate) fn decode_wbxml(bytes: &[u8]) -> Result<WbxmlNode> {
     }
 
     let mut current_page = 0u8;
-    parse_node(bytes, &mut cursor, &mut current_page)
+    // [MS-ASWBXML] §2.1.2.1: command payloads are a complete WBXML document;
+    // do not let an unterminated node or trailing token reach a command handler.
+    let root = parse_node(bytes, &mut cursor, &mut current_page)?;
+    if cursor != bytes.len() {
+        bail!("trailing WBXML data");
+    }
+    Ok(root)
 }
 
 fn parse_node(bytes: &[u8], cursor: &mut usize, current_page: &mut u8) -> Result<WbxmlNode> {
@@ -175,6 +181,7 @@ fn parse_node(bytes: &[u8], cursor: &mut usize, current_page: &mut u8) -> Result
     if has_content {
         let mut text = String::new();
         let mut opaque = Vec::new();
+        let mut closed = false;
         while *cursor < bytes.len() {
             match bytes[*cursor] {
                 0x00 => {
@@ -194,6 +201,7 @@ fn parse_node(bytes: &[u8], cursor: &mut usize, current_page: &mut u8) -> Result
                 }
                 0x01 => {
                     *cursor += 1;
+                    closed = true;
                     break;
                 }
                 0x03 => {
@@ -211,6 +219,9 @@ fn parse_node(bytes: &[u8], cursor: &mut usize, current_page: &mut u8) -> Result
                 }
                 _ => node.children.push(parse_node(bytes, cursor, current_page)?),
             }
+        }
+        if !closed {
+            bail!("unterminated WBXML content");
         }
         if !text.is_empty() {
             node.text = Some(text);
@@ -230,7 +241,10 @@ fn read_multibyte_int(bytes: &[u8], cursor: &mut usize) -> Result<u32> {
             .get(*cursor)
             .ok_or_else(|| anyhow!("unexpected end of WBXML payload"))?;
         *cursor += 1;
-        value = (value << 7) | (byte & 0x7F) as u32;
+        value = value
+            .checked_mul(128)
+            .and_then(|value| value.checked_add((byte & 0x7F) as u32))
+            .ok_or_else(|| anyhow!("WBXML multibyte integer is too large"))?;
         if byte & 0x80 == 0 {
             return Ok(value);
         }
@@ -252,6 +266,9 @@ fn read_inline_string(bytes: &[u8], cursor: &mut usize) -> Result<String> {
     let start = *cursor;
     while *cursor < bytes.len() && bytes[*cursor] != 0x00 {
         *cursor += 1;
+    }
+    if *cursor == bytes.len() {
+        bail!("unterminated WBXML inline string");
     }
     let value = String::from_utf8(bytes[start..*cursor].to_vec())?;
     *cursor += 1;
@@ -776,7 +793,7 @@ fn name_for(page: WbxmlCodePage, token: u8) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{name_for, token_for, WbxmlCodePage};
+    use super::{decode_wbxml, name_for, token_for, WbxmlCodePage};
 
     #[test]
     fn contacts_extension_tokens_match_ms_aswbxml_code_page_one() {
@@ -803,6 +820,20 @@ mod tests {
         ] {
             assert_eq!(token_for(WbxmlCodePage::Contacts, name), Some(token));
             assert_eq!(name_for(WbxmlCodePage::Contacts, token), Some(name));
+        }
+    }
+
+    #[test]
+    fn malformed_wbxml_documents_are_rejected_without_partial_decoding() {
+        // [MS-ASWBXML] §2.1.2.1: code-page WBXML command documents must have
+        // complete content boundaries and valid scalar encodings.
+        for payload in [
+            &[0x03, 0x01, 0x6A, 0x00, 0x45][..],
+            &[0x03, 0x01, 0x6A, 0x00, 0x45, 0x03, b'x'][..],
+            &[0x03, 0x01, 0x6A, 0x00, 0x05, 0x05][..],
+            &[0x03, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01][..],
+        ] {
+            assert!(decode_wbxml(payload).is_err());
         }
     }
 }

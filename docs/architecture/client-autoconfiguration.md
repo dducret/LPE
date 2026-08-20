@@ -18,7 +18,7 @@
   ActiveSync protocol versions.
 - Publish `EWS` only when `LPE_AUTOCONFIG_EWS_ENABLED` is true.
 - Publish `mapiHttp` only when `LPE_AUTOCONFIG_MAPI_ENABLED` and `LPE_AUTOCONFIG_MAPI_INTEROP_GATE_PASSED` are true and the client sends a supported positive `X-MapiHttpCapability` value. Under [MS-OXDSCLI] sections 2.2.2.1 and 3.2.5.1, that header is client capability negotiation; it is never evidence that MAPI/HTTP is usable. Set the MAPI gate only after the exact deployed edge has passed the local suite, public Gate 1 harness, Microsoft RCA, and separate Outlook 2016/2019 cached-mode checks.
-- Publish top-level `EXCH` only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` and `LPE_AUTOCONFIG_EXCH_INTEROP_GATE_PASSED` are true and an Exchange-style surface is enabled. This is an independent transport evidence gate for the [MS-OXDSCLI] sections 2.2.4.1.1.2.6 and 2.2.4.1.1.2.46 provider block.
+- Publish top-level `EXCH` only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_RPC_PROXY_ENABLED`, and `LPE_AUTOCONFIG_EXCH_INTEROP_GATE_PASSED` are true and the authenticated `/rpc/rpcproxy.dll` transport is implemented and exposed through `LPE-CT`. `EWS`, `MAPI/HTTP`, and `X-MapiHttpCapability` cannot substitute for that RPC transport. This is an independent transport evidence gate for the [MS-OXDSCLI] sections 2.2.4.1.1.2.6 and 2.2.4.1.1.2.46 provider block.
 - Publish top-level `EXPR` only when `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_RPC_PROXY_ENABLED`, and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are true and `/rpc/rpcproxy.dll` is implemented and exposed.
 - Publish SOAP `GetUserSettings` only when `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` is true and an `EWS` or `MAPI` surface is enabled.
 - `/.well-known/jmap` redirects to the configured public JMAP session URL.
@@ -74,9 +74,9 @@
 | `LPE_AUTOCONFIG_MAPI_INTEROP_GATE_PASSED` | MAPI/HTTP publication evidence gate; default false; requires the exact deployment's local suite, public Gate 1, Microsoft RCA, and separate Outlook 2016/2019 evidence |
 | `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` | legacy `EXPR`/RPC over HTTP release gate; it does not control MAPI over HTTP or `EXCH` publication |
 | `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` | true values: `true`, `1`, `yes`, `on` |
-| `LPE_AUTOCONFIG_EXCH_INTEROP_GATE_PASSED` | `EXCH` provider publication evidence gate; default false and independent of MAPI/HTTP and EXPR/RPC evidence |
+| `LPE_AUTOCONFIG_EXCH_INTEROP_GATE_PASSED` | `EXCH` provider publication evidence gate; default false; also requires the separately enabled/authenticated LPE-CT RPC proxy and is independent of MAPI/HTTP and EXPR evidence |
 | `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED` | true values: `true`, `1`, `yes`, `on` |
-| `LPE_AUTOCONFIG_RPC_PROXY_ENABLED` | true values: `true`, `1`, `yes`, `on` |
+| `LPE_AUTOCONFIG_RPC_PROXY_ENABLED` | true values: `true`, `1`, `yes`, `on`; declares the authenticated LPE-CT `/rpc/rpcproxy.dll` transport for separately gated `EXCH` and `EXPR` metadata, never for MAPI/HTTP |
 | `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` | true values: `true`, `1`, `yes`, `on` |
 | `LPE_AUTOCONFIG_MAPI_EMSMDB_URL` | `{public_scheme}://{public_host}/mapi/emsmdb/?MailboxId={email}` |
 | `LPE_AUTOCONFIG_MAPI_NSPI_URL` | `{public_scheme}://{public_host}/mapi/nspi/?MailboxId={email}` |

@@ -56,6 +56,7 @@
 - Autodiscovery must publish only implemented and exposed endpoints.
 - IMAP autodiscovery/autoconfiguration must publish the public `LPE-CT` IMAPS hostname only after the `LPE-CT` IMAPS proxy is configured and verified. It must not publish the private core `LPE` IMAP listener.
 - Autodiscovery/autoconfiguration must not publish client `SMTP` unless `LPE-CT` exposes real authenticated client submission; the internal `LPE -> LPE-CT` handoff is not client submission.
+- An edge route alone is not Autodiscover publication evidence. `mapiHttp` requires its MAPI/HTTP transport and MAPI gate; `EXCH` requires the authenticated `/rpc/rpcproxy.dll` route and EXCH gate; `EXPR` requires that same RPC/HTTP route and its separate Outlook Anywhere gate. A client `X-MapiHttpCapability` header only negotiates an already approved MAPI/HTTP response ([MS-OXDSCLI] §§2.2.2.1, 2.2.4.1.1.2.6, 2.2.4.1.1.2.46, and 3.2.5.1).
 
 ## Reference Table/List
 

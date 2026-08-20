@@ -11,6 +11,8 @@ The matrix defines the ActiveSync client scenarios required for the supported ad
 - Treat canonical `Sent` visibility after send as mandatory.
 - Treat canonical Outlook follow-up mail state as mailbox `Sync` behavior: flagged or completed messages include the ActiveSync `email:Flag` container with documented Email and Tasks child elements; client `Change` commands can set, complete, or clear the same canonical follow-up state.
 - Treat sync-key stability, retry behavior, and paged continuation as mandatory.
+- Treat malformed WBXML rejection before any SyncKey or canonical mutation as
+  mandatory ([MS-ASWBXML] §2.1.2.1; [MS-ASCMD] §2.2.1).
 - Treat attachment fetch consistency across send, sync, and fetch as mandatory.
 - Keep Outlook desktop ActiveSync testing separate from classic Outlook Exchange-account testing.
 - Do not use ActiveSync as the Outlook for Windows desktop Exchange-account gate; that belongs to the EWS/MAPI readiness path.

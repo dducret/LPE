@@ -24,6 +24,10 @@
     version set
   - supports both plain ASHTTP query parameters and base64-encoded ASHTTP query values for implemented commands
   - parses only the typed `WBXML` code pages and tokens required by the supported command set; unsupported code-page, token, command, and body-preference enum values are logged with their raw value and kept outside the typed enum surface, so they are ignored, rejected with the documented command status, or handled by the existing predictable request-error path instead of causing an untyped runtime failure
+  - rejects unterminated, overflowing, and trailing `WBXML` payload data before
+    command dispatch, so malformed mobile input cannot create a SyncKey or
+    reach canonical mailbox/contact/calendar mutation ([MS-ASWBXML] §2.1.2.1;
+    [MS-ASCMD] §2.2.1)
   - uses canonical mailbox, contact, and calendar data
   - stores durable protocol-local device/provisioning records with account id,
     device id, device type, pending and active policy key, provision status,

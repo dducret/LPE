@@ -2057,6 +2057,29 @@ fn malformed_base64_query_is_rejected_predictably() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
+#[tokio::test]
+async fn malformed_wbxml_is_rejected_before_sync_state_is_written() {
+    // [MS-ASWBXML] §2.1.2.1 and [MS-ASCMD] §2.2.1: invalid command WBXML
+    // must not create a device-scoped sync token or mutate canonical state.
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::inbox_mailbox()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+    let error = service
+        .handle_request(
+            active_sync_query("Sync", "dev-malformed-wbxml"),
+            &bearer_headers(),
+            &[0x03, 0x01, 0x6A, 0x00, 0x45],
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(error_response(error).status(), StatusCode::BAD_REQUEST);
+    assert!(store.sync_states.lock().unwrap().is_empty());
+}
+
 #[test]
 fn base64_query_rejects_unsupported_protocol_version() {
     let error = ParsedActiveSyncQuery::from_raw_query(Some(&base64_query_with_version(

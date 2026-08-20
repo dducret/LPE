@@ -630,6 +630,9 @@ probe_client_publication() {
   local expected_imap_port="${LPE_CT_EXPECTED_AUTODISCOVER_IMAP_PORT:-${LPE_AUTOCONFIG_IMAP_PORT:-${IMAPS_PORT:-993}}}"
   local expected_smtp_host="${LPE_CT_EXPECTED_AUTODISCOVER_SMTP_HOST:-${LPE_AUTOCONFIG_SMTP_HOST:-${expected_imap_host}}}"
   local expected_smtp_port="${LPE_CT_EXPECTED_AUTODISCOVER_SMTP_PORT:-${LPE_AUTOCONFIG_SMTP_PORT:-${SUBMISSION_PORT:-465}}}"
+  local expected_mapi_http="${LPE_CT_EXPECTED_AUTODISCOVER_MAPI_HTTP:-${LPE_CT_EXPECTED_OUTLOOK_EXCHANGE_AUTODISCOVER:-false}}"
+  local expected_exch="${LPE_CT_EXPECTED_AUTODISCOVER_EXCH:-false}"
+  local expected_expr="${LPE_CT_EXPECTED_AUTODISCOVER_EXPR:-false}"
   local body
   local headers_file
 
@@ -670,15 +673,23 @@ probe_client_publication() {
         || fail "Outlook Autodiscover publishes SMTP without LPE_CT_EXPECTED_AUTODISCOVER_SMTP_SUBMISSION=true and a real authenticated LPE-CT submission service"
       pass "Outlook Autodiscover keeps SMTP unpublished without the authenticated submission expectation"
     fi
-    if [[ "${LPE_CT_EXPECTED_OUTLOOK_EXCHANGE_AUTODISCOVER:-false}" != "true" ]]; then
+    if [[ "${expected_exch}" == "true" ]]; then
+      [[ "$body" == *"<Type>EXCH</Type>"* ]] \
+        || fail "Outlook Autodiscover does not publish EXCH despite its separate RPC transport and EXCH evidence gate"
+    else
       [[ "$body" != *"<Type>EXCH</Type>"* ]] \
-        || fail "Outlook Autodiscover publishes EXCH and may make Outlook choose the unfinished Exchange route instead of IMAP"
+        || fail "Outlook Autodiscover publishes EXCH without the separately enabled/authenticated RPC transport and EXCH evidence gate"
+    fi
+    if [[ "${expected_expr}" == "true" ]]; then
+      [[ "$body" == *"<Type>EXPR</Type>"* ]] \
+        || fail "Outlook Autodiscover does not publish EXPR despite its separate RPC/HTTP transport and Outlook Anywhere evidence gate"
+    else
       [[ "$body" != *"<Type>EXPR</Type>"* ]] \
-        || fail "Outlook Autodiscover publishes EXPR and may make Outlook choose the unfinished Exchange route instead of IMAP"
+        || fail "Outlook Autodiscover publishes EXPR without the separately enabled/authenticated RPC/HTTP transport and Outlook Anywhere evidence gate"
+    fi
+    if [[ "${expected_mapi_http}" != "true" && "${expected_exch}" != "true" && "${expected_expr}" != "true" ]]; then
       [[ "$body" != *"<Type>WEB</Type>"* ]] \
         || fail "Outlook Autodiscover publishes WEB and may make Outlook choose an Exchange-style route instead of IMAP"
-      [[ "$body" != *"mapiHttp"* ]] \
-        || fail "Outlook Autodiscover publishes mapiHttp in the default IMAP account setup path"
 
       body="$(curl --silent --show-error --insecure \
         --header "Host: ${host_header}" \
@@ -697,14 +708,16 @@ probe_client_publication() {
         [[ "${soap_body}" != *"<a:Name>MapiHttpEnabled</a:Name>"* ]] \
           || fail "Outlook SOAP Autodiscover publishes MAPI settings in the default IMAP setup path"
       fi
-    else
-      body="$(curl --silent --show-error --fail --insecure \
-        --header "Host: ${host_header}" \
-        --header 'Content-Type: application/xml' \
-        --header 'X-MapiHttpCapability: 1' \
-        --data "<?xml version=\"1.0\" encoding=\"utf-8\"?><Autodiscover><Request><EMailAddress>${autodiscover_email}</EMailAddress></Request></Autodiscover>" \
-        "${base_url}/autodiscover/autodiscover.xml")" \
-        || fail "MAPI-capable Autodiscover POST is not reachable through LPE-CT HTTPS publication"
+    fi
+
+    body="$(curl --silent --show-error --fail --insecure \
+      --header "Host: ${host_header}" \
+      --header 'Content-Type: application/xml' \
+      --header 'X-MapiHttpCapability: 1' \
+      --data "<?xml version=\"1.0\" encoding=\"utf-8\"?><Autodiscover><Request><EMailAddress>${autodiscover_email}</EMailAddress></Request></Autodiscover>" \
+      "${base_url}/autodiscover/autodiscover.xml")" \
+      || fail "MAPI-capable Autodiscover POST is not reachable through LPE-CT HTTPS publication"
+    if [[ "${expected_mapi_http}" == "true" ]]; then
       [[ "$body" == *"<Protocol Type=\"mapiHttp\" Version=\"1\">"* ]] \
         || fail "MAPI-capable Autodiscover POST did not publish mapiHttp version 1; enable it only after LPE_AUTOCONFIG_MAPI_INTEROP_GATE_PASSED records the MAPI Gate 1, Microsoft RCA, and Outlook evidence"
       [[ "$body" == *"<MailStore>"* && "$body" == *"/mapi/emsmdb/?MailboxId=${autodiscover_email}"* ]] \
@@ -713,6 +726,9 @@ probe_client_publication() {
         || fail "MAPI-capable Autodiscover POST did not publish the NSPI address-book URL"
       [[ "$body" != *"<Type>EXCH</Type>"* && "$body" != *"<Type>EXPR</Type>"* ]] \
         || fail "MAPI-capable Autodiscover POST must not publish legacy EXCH or EXPR metadata"
+    else
+      [[ "$body" != *"<Protocol Type=\"mapiHttp\" Version=\"1\">"* ]] \
+        || fail "X-MapiHttpCapability alone published mapiHttp without the separate MAPI transport and evidence gate"
     fi
   fi
   pass "Autodiscover POST publishes IMAP through LPE-CT"
