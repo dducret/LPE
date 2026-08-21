@@ -1407,6 +1407,8 @@ async fn exercise_inbound_calendar_meeting_response_path(
             "ATTENDEE;PARTSTAT=TENTATIVE;CN=Denis Ducret:mailto:denis.ducret@sdic.ch\r\n",
             "DTSTART;TZID=Greenwich Standard Time:20260824T063000\r\n",
             "DTEND;TZID=Greenwich Standard Time:20260824T073000\r\n",
+            "X-MS-OLK-ORIGINALSTART;TZID=Greenwich Standard Time:20260824T063000\r\n",
+            "X-MS-OLK-ORIGINALEND;TZID=Greenwich Standard Time:20260824T070000\r\n",
             "UID:{}\r\n",
             "END:VEVENT\r\n",
             "END:VCALENDAR\r\n",
@@ -1514,6 +1516,62 @@ async fn exercise_inbound_calendar_meeting_response_path(
             && reply.try_get::<Option<String>, _>("proposed_start")?.is_none()
             && reply.try_get::<Option<String>, _>("proposed_end")?.is_none(),
         "ordinary reply must clear the attendee's prior counter proposal"
+    );
+
+    let stale_trace_id = format!("runtime-stale-counter-{}", Uuid::new_v4());
+    let stale_counter = format!(
+        concat!(
+            "From: Denis Ducret <denis.ducret@sdic.ch>\r\n",
+            "To: {}\r\n",
+            "Subject: New Time Proposed: stale response\r\n",
+            "Content-Type: text/calendar; method=COUNTER; charset=UTF-8\r\n",
+            "\r\n",
+            "BEGIN:VCALENDAR\r\n",
+            "METHOD:COUNTER\r\n",
+            "BEGIN:VEVENT\r\n",
+            "ATTENDEE;PARTSTAT=DECLINED:mailto:denis.ducret@sdic.ch\r\n",
+            "DTSTART:20260824T123000Z\r\n",
+            "DTEND:20260824T130000Z\r\n",
+            "X-MS-OLK-ORIGINALSTART:20260824T080000Z\r\n",
+            "X-MS-OLK-ORIGINALEND:20260824T083000Z\r\n",
+            "UID:{}\r\n",
+            "END:VEVENT\r\n",
+            "END:VCALENDAR\r\n"
+        ),
+        fixture.account_email, uid
+    )
+    .into_bytes();
+    storage
+        .deliver_inbound_message(InboundDeliveryRequest {
+            trace_id: stale_trace_id,
+            peer: "192.0.2.10:25".to_string(),
+            helo: "mx.example.test".to_string(),
+            mail_from: "denis.ducret@sdic.ch".to_string(),
+            rcpt_to: vec![fixture.account_email.clone()],
+            subject: "New Time Proposed: stale response".to_string(),
+            body_text: String::new(),
+            internet_message_id: None,
+            raw_message: stale_counter,
+        })
+        .await
+        .context("deliver stale inbound COUNTER response")?;
+    let stale = sqlx::query(
+        r#"
+        SELECT
+            attendees_json #>> '{attendees,0,partstat}' AS partstat,
+            attendees_json #>> '{attendees,0,counter_proposal}' AS counter_proposal
+        FROM calendar_events
+        WHERE id = $1
+        "#,
+    )
+    .bind(event.id)
+    .fetch_one(pool)
+    .await
+    .context("load organizer event after stale counter")?;
+    anyhow::ensure!(
+        stale.try_get::<String, _>("partstat")? == "accepted"
+            && stale.try_get::<String, _>("counter_proposal")? == "false",
+        "a counter for an older scheduled interval must not update attendee state"
     );
     Ok(())
 }

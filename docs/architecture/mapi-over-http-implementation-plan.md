@@ -2615,12 +2615,20 @@ from canonical event state. Appointment-like `IPM.Schedule.Meeting.Request`
 payloads that contain only the bounded event property subset are canonicalized
 as `calendar_events`; bounded meeting responses update canonical attendee
 participation status on the existing event. Inbound iCalendar `REPLY` and
-`COUNTER` messages are accepted only when they have exactly one attendee whose
-address matches the envelope sender and whose UID resolves to an active event
-owned by the delivery recipient. A `COUNTER` keeps the scheduled event time
-unchanged while recording that attendee's proposed UTC start/end and projecting
-the Inbox item as `IPM.Schedule.Meeting.Resp.Tent` with
-`PidLidAppointmentCounterProposal`. The bounded import cancellation
+`COUNTER` messages are accepted only when they contain exactly one `VEVENT` and
+one attendee whose address matches the envelope sender and whose UID resolves
+to an active event owned by the delivery recipient. A `COUNTER` keeps the
+scheduled event time unchanged while recording that attendee's proposed UTC
+start/end and projecting the Inbox item as a Meeting Response with
+`PidLidAppointmentCounterProposal`.
+When a `COUNTER` supplies `X-MS-OLK-ORIGINALSTART` and
+`X-MS-OLK-ORIGINALEND`, both values must match the canonical scheduled interval
+before LPE updates attendee state; a stale response remains stored in Inbox but
+does not mutate the event. A counter with only one original-time field is
+rejected as ambiguous.
+The expected `COUNTER` status is `TENTATIVE`; LPE also preserves the observed
+Outlook `COUNTER` with `PARTSTAT=DECLINED` as a declined Meeting Response while
+retaining its proposal. The bounded import cancellation
 path deletes the existing canonical event. Cancellation submitted as a mutation
 on an already-open Event handle remains fail-closed at parent Save until
 deletion participates in the same staged atomic commit. Modified exceptions

@@ -3190,10 +3190,22 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
         uid: "mapi-goid:001122".to_string(),
         proposed_start: Some("2026-08-24T06:30:00Z".to_string()),
         proposed_end: Some("2026-08-24T07:30:00Z".to_string()),
+        original_start: Some("2026-08-24T06:30:00Z".to_string()),
+        original_end: Some("2026-08-24T07:00:00Z".to_string()),
     });
     assert_eq!(
         email_property_value(&counter, PID_TAG_MESSAGE_CLASS_W),
         Some(MapiValue::String("IPM.Schedule.Meeting.Resp.Tent".to_string()))
+    );
+    let mut declined_counter = counter.clone();
+    declined_counter
+        .calendar_meeting_response
+        .as_mut()
+        .expect("counter response exists")
+        .partstat = "declined".to_string();
+    assert_eq!(
+        email_property_value(&declined_counter, PID_TAG_MESSAGE_CLASS_W),
+        Some(MapiValue::String("IPM.Schedule.Meeting.Resp.Neg".to_string()))
     );
     assert_eq!(
         email_property_value(&counter, PID_LID_APPOINTMENT_COUNTER_PROPOSAL_TAG),

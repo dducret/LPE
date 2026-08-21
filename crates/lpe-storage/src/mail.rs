@@ -38,6 +38,8 @@ pub struct CalendarMeetingResponse {
     pub uid: String,
     pub proposed_start: Option<String>,
     pub proposed_end: Option<String>,
+    pub original_start: Option<String>,
+    pub original_end: Option<String>,
 }
 
 pub fn normalize_calendar_meeting_uid(value: &str) -> String {
@@ -76,6 +78,11 @@ fn parse_icalendar_meeting_response(bytes: &[u8]) -> Option<CalendarMeetingRespo
     if !matches!(method.as_str(), "REPLY" | "COUNTER") {
         return None;
     }
+    if lines.iter().filter(|line| *line == "BEGIN:VEVENT").count() != 1
+        || lines.iter().filter(|line| *line == "END:VEVENT").count() != 1
+    {
+        return None;
+    }
     let event_start = lines.iter().position(|line| line == "BEGIN:VEVENT")?;
     let event_end = lines
         .iter()
@@ -92,7 +99,7 @@ fn parse_icalendar_meeting_response(bytes: &[u8]) -> Option<CalendarMeetingRespo
         return None;
     };
     let partstat = icalendar_parameter(parameters, "PARTSTAT")?.to_ascii_lowercase();
-    if (method == "COUNTER" && partstat != "tentative")
+    if (method == "COUNTER" && !matches!(partstat.as_str(), "tentative" | "declined"))
         || (method == "REPLY" && !matches!(partstat.as_str(), "accepted" | "tentative" | "declined"))
     {
         return None;
@@ -111,16 +118,35 @@ fn parse_icalendar_meeting_response(bytes: &[u8]) -> Option<CalendarMeetingRespo
         .unwrap_or_default()
         .trim()
         .to_string();
-    let (proposed_start, proposed_end) = if method == "COUNTER" {
+    let (proposed_start, proposed_end, original_start, original_end) = if method == "COUNTER" {
         let timezone_offsets = icalendar_timezone_offsets(&lines);
         let start = icalendar_value_with_parameters(event, "DTSTART")?;
         let end = icalendar_value_with_parameters(event, "DTEND")?;
+        // [MS-OXCICAL] sections 2.1.3.1.1.20.59-.60 define these optional
+        // fields as the meeting interval for which the counter was made.
+        let original_start = match icalendar_value_with_parameters(event, "X-MS-OLK-ORIGINALSTART") {
+            Some((parameters, value)) => {
+                Some(parse_icalendar_datetime(parameters, value, &timezone_offsets)?)
+            }
+            None => None,
+        };
+        let original_end = match icalendar_value_with_parameters(event, "X-MS-OLK-ORIGINALEND") {
+            Some((parameters, value)) => {
+                Some(parse_icalendar_datetime(parameters, value, &timezone_offsets)?)
+            }
+            None => None,
+        };
+        if original_start.is_some() != original_end.is_some() {
+            return None;
+        }
         (
             Some(parse_icalendar_datetime(start.0, start.1, &timezone_offsets)?),
             Some(parse_icalendar_datetime(end.0, end.1, &timezone_offsets)?),
+            original_start,
+            original_end,
         )
     } else {
-        (None, None)
+        (None, None, None, None)
     };
     Some(CalendarMeetingResponse {
         method,
@@ -130,6 +156,8 @@ fn parse_icalendar_meeting_response(bytes: &[u8]) -> Option<CalendarMeetingRespo
         uid: normalize_calendar_meeting_uid(&uid),
         proposed_start,
         proposed_end,
+        original_start,
+        original_end,
     })
 }
 
@@ -692,8 +720,104 @@ mod tests {
                 uid: "mapi-goid:001122".to_string(),
                 proposed_start: Some("2026-08-24T06:30:00Z".to_string()),
                 proposed_end: Some("2026-08-24T07:30:00Z".to_string()),
+                original_start: None,
+                original_end: None,
             })
         );
+    }
+
+    #[test]
+    fn parse_calendar_meeting_response_accepts_outlook_declined_counter() {
+        let attachments = parse_message_attachments(
+            concat!(
+                "Content-Type: text/calendar; method=COUNTER; charset=UTF-8\r\n",
+                "\r\n",
+                "BEGIN:VCALENDAR\r\n",
+                "METHOD:COUNTER\r\n",
+                "VERSION:2.0\r\n",
+                "BEGIN:VTIMEZONE\r\n",
+                "TZID:UTC\r\n",
+                "BEGIN:STANDARD\r\n",
+                "TZOFFSETTO:+0000\r\n",
+                "END:STANDARD\r\n",
+                "BEGIN:DAYLIGHT\r\n",
+                "TZOFFSETTO:+0000\r\n",
+                "END:DAYLIGHT\r\n",
+                "END:VTIMEZONE\r\n",
+                "BEGIN:VEVENT\r\n",
+                "ATTENDEE;PARTSTAT=DECLINED;CN=Denis Ducret:mailto:denis.ducret@sdic.ch\r\n",
+                "DTSTART;TZID=UTC:20260824T123000\r\n",
+                "DTEND;TZID=UTC:20260824T130000\r\n",
+                "X-MS-OLK-ORIGINALSTART;TZID=UTC:20260824T090000\r\n",
+                "X-MS-OLK-ORIGINALEND;TZID=UTC:20260824T093000\r\n",
+                "UID:mapi-goid:040000008200e00074c5b7101a82e00800000000c08470cd9e31dd0100000\r\n",
+                " 0000000000010000000ecff8aec00ce584390f914bf6a87f955\r\n",
+                "END:VEVENT\r\n",
+                "END:VCALENDAR\r\n"
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            parse_calendar_meeting_response(&attachments),
+            Some(super::CalendarMeetingResponse {
+                method: "COUNTER".to_string(),
+                attendee_email: "denis.ducret@sdic.ch".to_string(),
+                attendee_name: "Denis Ducret".to_string(),
+                partstat: "declined".to_string(),
+                uid: "mapi-goid:040000008200e00074c5b7101a82e00800000000c08470cd9e31dd01000000000000000010000000ecff8aec00ce584390f914bf6a87f955".to_string(),
+                proposed_start: Some("2026-08-24T12:30:00Z".to_string()),
+                proposed_end: Some("2026-08-24T13:00:00Z".to_string()),
+                original_start: Some("2026-08-24T09:00:00Z".to_string()),
+                original_end: Some("2026-08-24T09:30:00Z".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_calendar_meeting_response_rejects_ambiguous_counter_payloads() {
+        let multiple_events = parse_message_attachments(
+            concat!(
+                "Content-Type: text/calendar; method=COUNTER; charset=UTF-8\r\n",
+                "\r\n",
+                "BEGIN:VCALENDAR\r\n",
+                "METHOD:COUNTER\r\n",
+                "BEGIN:VEVENT\r\n",
+                "ATTENDEE;PARTSTAT=TENTATIVE:mailto:denis.ducret@sdic.ch\r\n",
+                "DTSTART:20260824T063000Z\r\n",
+                "DTEND:20260824T070000Z\r\n",
+                "UID:mapi-goid:001122\r\n",
+                "END:VEVENT\r\n",
+                "BEGIN:VEVENT\r\n",
+                "UID:mapi-goid:334455\r\n",
+                "END:VEVENT\r\n",
+                "END:VCALENDAR\r\n"
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        assert!(parse_calendar_meeting_response(&multiple_events).is_none());
+
+        let partial_original = parse_message_attachments(
+            concat!(
+                "Content-Type: text/calendar; method=COUNTER; charset=UTF-8\r\n",
+                "\r\n",
+                "BEGIN:VCALENDAR\r\n",
+                "METHOD:COUNTER\r\n",
+                "BEGIN:VEVENT\r\n",
+                "ATTENDEE;PARTSTAT=TENTATIVE:mailto:denis.ducret@sdic.ch\r\n",
+                "DTSTART:20260824T063000Z\r\n",
+                "DTEND:20260824T070000Z\r\n",
+                "X-MS-OLK-ORIGINALSTART:20260824T060000Z\r\n",
+                "UID:mapi-goid:001122\r\n",
+                "END:VEVENT\r\n",
+                "END:VCALENDAR\r\n"
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        assert!(parse_calendar_meeting_response(&partial_original).is_none());
     }
 
     #[test]
@@ -736,6 +860,8 @@ mod tests {
                 uid: "mapi-goid:001122".to_string(),
                 proposed_start: None,
                 proposed_end: None,
+                original_start: None,
+                original_end: None,
             })
         );
     }

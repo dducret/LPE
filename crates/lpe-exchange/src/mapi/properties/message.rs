@@ -292,7 +292,10 @@ pub(in crate::mapi) fn conversation_index_for_uuid(conversation_id: Uuid) -> Vec
 pub(crate) fn message_class_for_email(email: &JmapEmail) -> &'static str {
     if let Some(response) = email.calendar_meeting_response.as_ref() {
         match response.method.as_str() {
-            "COUNTER" => "IPM.Schedule.Meeting.Resp.Tent",
+            "COUNTER" => match response.partstat.as_str() {
+                "declined" => "IPM.Schedule.Meeting.Resp.Neg",
+                _ => "IPM.Schedule.Meeting.Resp.Tent",
+            },
             "REPLY" => match response.partstat.as_str() {
                 "accepted" => "IPM.Schedule.Meeting.Resp.Pos",
                 "tentative" => "IPM.Schedule.Meeting.Resp.Tent",

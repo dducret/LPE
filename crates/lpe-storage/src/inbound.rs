@@ -601,12 +601,16 @@ impl Storage {
               AND owner_account_id = $2
               AND uid = $3
               AND lifecycle_state = 'active'
+              AND ($4::timestamptz IS NULL OR starts_at = $4::timestamptz)
+              AND ($5::timestamptz IS NULL OR ends_at = $5::timestamptz)
             FOR UPDATE
             "#,
         )
         .bind(tenant_id)
         .bind(organizer_account_id)
         .bind(normalize_calendar_meeting_uid(&response.uid))
+        .bind(response.original_start.as_deref())
+        .bind(response.original_end.as_deref())
         .fetch_optional(&mut **tx)
         .await?
         else {
