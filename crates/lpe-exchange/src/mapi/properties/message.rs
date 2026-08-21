@@ -41,6 +41,25 @@ pub(in crate::mapi) fn email_property_value(
             .filter(|response| response.method == "COUNTER")
             .and_then(|response| response.proposed_end.as_deref())
             .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
+        PID_TAG_START_DATE
+        | PID_LID_COMMON_START_TAG
+        | PID_LID_APPOINTMENT_START_WHOLE_TAG => {
+            calendar_response_meeting_time(email, true).or(Some(MapiValue::U64(0)))
+        }
+        PID_TAG_END_DATE | PID_LID_COMMON_END_TAG | PID_LID_APPOINTMENT_END_WHOLE_TAG => {
+            calendar_response_meeting_time(email, false).or(Some(MapiValue::U64(0)))
+        }
+        PID_LID_LOCATION_W_TAG => email
+            .calendar_meeting_response
+            .as_ref()
+            .and_then(|response| response.meeting_location.as_ref())
+            .cloned()
+            .map(MapiValue::String),
+        PID_LID_APPOINTMENT_SEQUENCE_TAG => email
+            .calendar_meeting_response
+            .as_ref()
+            .and_then(|response| response.meeting_sequence)
+            .map(MapiValue::I32),
         PID_LID_GLOBAL_OBJECT_ID_TAG | PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG => {
             calendar_response_global_object_id(email).map(MapiValue::Binary)
         }
@@ -72,13 +91,11 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_PROCESSED => Some(MapiValue::Bool(false)),
         PID_TAG_DEFERRED_DELIVERY_TIME
         | PID_TAG_DEFERRED_SEND_TIME
-        | PID_TAG_END_DATE
         | PID_TAG_ARCHIVE_DATE
         | PID_TAG_LAST_VERB_EXECUTION_TIME
         | PID_TAG_ORIGINAL_SUBMIT_TIME
         | PID_TAG_RETENTION_DATE
         | PID_TAG_REPORT_TIME => Some(MapiValue::U64(0)),
-        PID_TAG_START_DATE => Some(MapiValue::U64(0)),
         PID_TAG_ORIGINAL_AUTHOR_ENTRY_ID
         | PID_TAG_ARCHIVE_TAG
         | PID_TAG_PARENT_KEY
@@ -98,13 +115,17 @@ pub(in crate::mapi) fn email_property_value(
         | PID_TAG_PRIMARY_SEND_ACCOUNT_W
         | PID_TAG_REPORT_DISPOSITION_W
         | PID_TAG_REPLY_RECIPIENT_NAMES_W => Some(MapiValue::String(String::new())),
-        PID_TAG_ICON_INDEX
-        | PID_TAG_INTERNET_MAIL_OVERRIDE_FORMAT
+        PID_TAG_ICON_INDEX => Some(MapiValue::U32(calendar_response_icon_index(email).unwrap_or(0))),
+        PID_TAG_INTERNET_MAIL_OVERRIDE_FORMAT
         | PID_TAG_BLOCK_STATUS
         | PID_TAG_LAST_VERB_EXECUTED
         | PID_TAG_MESSAGE_EDITOR_FORMAT
         | PID_TAG_OWNER_APPOINTMENT_ID => Some(MapiValue::U32(0)),
-        PID_TAG_SUBJECT_PREFIX_W => Some(MapiValue::String(String::new())),
+        PID_TAG_SUBJECT_PREFIX_W => Some(MapiValue::String(
+            calendar_response_subject_prefix(email)
+                .unwrap_or_default()
+                .to_string(),
+        )),
         PID_TAG_MESSAGE_STATUS => Some(MapiValue::U32(0)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(message_flags(email))),
         PID_TAG_READ => Some(MapiValue::Bool(!email.unread)),
@@ -343,6 +364,44 @@ fn calendar_response_global_object_id(email: &JmapEmail) -> Option<Vec<u8>> {
             Some((nibble(pair[0])? << 4) | nibble(pair[1])?)
         })
         .collect()
+}
+
+fn calendar_response_meeting_time(email: &JmapEmail, start: bool) -> Option<MapiValue> {
+    let response = email.calendar_meeting_response.as_ref()?;
+    let value = if start {
+        response.meeting_start.as_deref()
+    } else {
+        response.meeting_end.as_deref()
+    }?;
+    Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value)))
+}
+
+fn calendar_response_subject_prefix(email: &JmapEmail) -> Option<&'static str> {
+    let response = email.calendar_meeting_response.as_ref()?;
+    match response.method.as_str() {
+        "COUNTER" => Some("New Time Proposed: "),
+        "REPLY" => match response.partstat.as_str() {
+            "accepted" => Some("Accepted: "),
+            "tentative" => Some("Tentative: "),
+            "declined" => Some("Declined: "),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn calendar_response_icon_index(email: &JmapEmail) -> Option<u32> {
+    let response = email.calendar_meeting_response.as_ref()?;
+    match response.method.as_str() {
+        "COUNTER" => Some(0x0000_0407),
+        "REPLY" => match response.partstat.as_str() {
+            "accepted" => Some(0x0000_0405),
+            "declined" => Some(0x0000_0406),
+            "tentative" => Some(0x0000_0407),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 pub(in crate::mapi) fn native_body_format(email: &JmapEmail) -> u32 {

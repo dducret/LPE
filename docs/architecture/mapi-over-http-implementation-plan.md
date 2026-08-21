@@ -2620,7 +2620,13 @@ one attendee whose address matches the envelope sender and whose UID resolves
 to an active event owned by the delivery recipient. A `COUNTER` keeps the
 scheduled event time unchanged while recording that attendee's proposed UTC
 start/end and projecting the Inbox item as a Meeting Response with
-`PidLidAppointmentCounterProposal`.
+`PidLidAppointmentCounterProposal`. The Meeting Response projection retains the
+meeting's start/end alongside its Global Object ID, rather than exposing zero
+time values that prevent Outlook from locating the organizer's Calendar item.
+It also projects the iCalendar location and appointment sequence carried by
+the response, plus its Outlook Meeting Response subject prefix.
+The matching response icon is also projected for accepted, declined,
+tentative, and counter-proposal messages.
 When a `COUNTER` supplies `X-MS-OLK-ORIGINALSTART` and
 `X-MS-OLK-ORIGINALEND`, both values must match the canonical scheduled interval
 before LPE updates attendee state; a stale response remains stored in Inbox but

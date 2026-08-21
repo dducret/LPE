@@ -3188,6 +3188,10 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
         attendee_name: "Denis Ducret".to_string(),
         partstat: "tentative".to_string(),
         uid: "mapi-goid:001122".to_string(),
+        meeting_start: Some("2026-08-24T06:30:00Z".to_string()),
+        meeting_end: Some("2026-08-24T07:00:00Z".to_string()),
+        meeting_location: Some("Les Planches".to_string()),
+        meeting_sequence: Some(0),
         proposed_start: Some("2026-08-24T06:30:00Z".to_string()),
         proposed_end: Some("2026-08-24T07:30:00Z".to_string()),
         original_start: Some("2026-08-24T06:30:00Z".to_string()),
@@ -3212,10 +3216,38 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
         Some(MapiValue::Bool(true))
     );
     assert_eq!(
+        email_property_value(&counter, PID_TAG_SUBJECT_PREFIX_W),
+        Some(MapiValue::String("New Time Proposed: ".to_string()))
+    );
+    assert_eq!(
+        email_property_value(&counter, PID_TAG_ICON_INDEX),
+        Some(MapiValue::U32(0x0000_0407))
+    );
+    assert_eq!(
         email_property_value(&counter, PID_LID_APPOINTMENT_PROPOSED_START_WHOLE_TAG),
         Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
             "2026-08-24T06:30:00Z"
         )))
+    );
+    assert_eq!(
+        email_property_value(&counter, PID_LID_APPOINTMENT_START_WHOLE_TAG),
+        Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+            "2026-08-24T06:30:00Z"
+        )))
+    );
+    assert_eq!(
+        email_property_value(&counter, PID_LID_APPOINTMENT_END_WHOLE_TAG),
+        Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+            "2026-08-24T07:00:00Z"
+        )))
+    );
+    assert_eq!(
+        email_property_value(&counter, PID_LID_LOCATION_W_TAG),
+        Some(MapiValue::String("Les Planches".to_string()))
+    );
+    assert_eq!(
+        email_property_value(&counter, PID_LID_APPOINTMENT_SEQUENCE_TAG),
+        Some(MapiValue::I32(0))
     );
     assert_eq!(
         email_property_value(&counter, PID_LID_GLOBAL_OBJECT_ID_TAG),

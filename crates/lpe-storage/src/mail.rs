@@ -36,6 +36,10 @@ pub struct CalendarMeetingResponse {
     pub attendee_name: String,
     pub partstat: String,
     pub uid: String,
+    pub meeting_start: Option<String>,
+    pub meeting_end: Option<String>,
+    pub meeting_location: Option<String>,
+    pub meeting_sequence: Option<i32>,
     pub proposed_start: Option<String>,
     pub proposed_end: Option<String>,
     pub original_start: Option<String>,
@@ -118,8 +122,14 @@ fn parse_icalendar_meeting_response(bytes: &[u8]) -> Option<CalendarMeetingRespo
         .unwrap_or_default()
         .trim()
         .to_string();
-    let (proposed_start, proposed_end, original_start, original_end) = if method == "COUNTER" {
-        let timezone_offsets = icalendar_timezone_offsets(&lines);
+    let meeting_location = icalendar_value(event, "LOCATION").filter(|value| !value.is_empty());
+    let meeting_sequence = icalendar_value(event, "X-MICROSOFT-CDO-APPT-SEQUENCE")
+        .or_else(|| icalendar_value(event, "SEQUENCE"))
+        .and_then(|value| value.parse::<u32>().ok())
+        .and_then(|value| i32::try_from(value).ok());
+    let timezone_offsets = icalendar_timezone_offsets(&lines);
+    let (meeting_start, meeting_end, proposed_start, proposed_end, original_start, original_end) =
+        if method == "COUNTER" {
         let start = icalendar_value_with_parameters(event, "DTSTART")?;
         let end = icalendar_value_with_parameters(event, "DTEND")?;
         // [MS-OXCICAL] sections 2.1.3.1.1.20.59-.60 define these optional
@@ -139,14 +149,36 @@ fn parse_icalendar_meeting_response(bytes: &[u8]) -> Option<CalendarMeetingRespo
         if original_start.is_some() != original_end.is_some() {
             return None;
         }
+        let proposed_start = parse_icalendar_datetime(start.0, start.1, &timezone_offsets)?;
+        let proposed_end = parse_icalendar_datetime(end.0, end.1, &timezone_offsets)?;
+        let (meeting_start, meeting_end) = match (&original_start, &original_end) {
+            (Some(start), Some(end)) => (start.clone(), end.clone()),
+            _ => (proposed_start.clone(), proposed_end.clone()),
+        };
         (
-            Some(parse_icalendar_datetime(start.0, start.1, &timezone_offsets)?),
-            Some(parse_icalendar_datetime(end.0, end.1, &timezone_offsets)?),
+            Some(meeting_start),
+            Some(meeting_end),
+            Some(proposed_start),
+            Some(proposed_end),
             original_start,
             original_end,
         )
     } else {
-        (None, None, None, None)
+        match (
+            icalendar_value_with_parameters(event, "DTSTART"),
+            icalendar_value_with_parameters(event, "DTEND"),
+        ) {
+            (None, None) => (None, None, None, None, None, None),
+            (Some(start), Some(end)) => (
+                Some(parse_icalendar_datetime(start.0, start.1, &timezone_offsets)?),
+                Some(parse_icalendar_datetime(end.0, end.1, &timezone_offsets)?),
+                None,
+                None,
+                None,
+                None,
+            ),
+            _ => return None,
+        }
     };
     Some(CalendarMeetingResponse {
         method,
@@ -154,6 +186,10 @@ fn parse_icalendar_meeting_response(bytes: &[u8]) -> Option<CalendarMeetingRespo
         attendee_name,
         partstat,
         uid: normalize_calendar_meeting_uid(&uid),
+        meeting_start,
+        meeting_end,
+        meeting_location,
+        meeting_sequence,
         proposed_start,
         proposed_end,
         original_start,
@@ -718,6 +754,10 @@ mod tests {
                 attendee_name: "Denis Ducret".to_string(),
                 partstat: "tentative".to_string(),
                 uid: "mapi-goid:001122".to_string(),
+                meeting_start: Some("2026-08-24T06:30:00Z".to_string()),
+                meeting_end: Some("2026-08-24T07:30:00Z".to_string()),
+                meeting_location: None,
+                meeting_sequence: None,
                 proposed_start: Some("2026-08-24T06:30:00Z".to_string()),
                 proposed_end: Some("2026-08-24T07:30:00Z".to_string()),
                 original_start: None,
@@ -750,8 +790,10 @@ mod tests {
                 "DTEND;TZID=UTC:20260824T130000\r\n",
                 "X-MS-OLK-ORIGINALSTART;TZID=UTC:20260824T090000\r\n",
                 "X-MS-OLK-ORIGINALEND;TZID=UTC:20260824T093000\r\n",
+                "LOCATION;LANGUAGE=en-US:Les Planches\r\n",
                 "UID:mapi-goid:040000008200e00074c5b7101a82e00800000000c08470cd9e31dd0100000\r\n",
                 " 0000000000010000000ecff8aec00ce584390f914bf6a87f955\r\n",
+                "SEQUENCE:0\r\n",
                 "END:VEVENT\r\n",
                 "END:VCALENDAR\r\n"
             )
@@ -767,6 +809,10 @@ mod tests {
                 attendee_name: "Denis Ducret".to_string(),
                 partstat: "declined".to_string(),
                 uid: "mapi-goid:040000008200e00074c5b7101a82e00800000000c08470cd9e31dd01000000000000000010000000ecff8aec00ce584390f914bf6a87f955".to_string(),
+                meeting_start: Some("2026-08-24T09:00:00Z".to_string()),
+                meeting_end: Some("2026-08-24T09:30:00Z".to_string()),
+                meeting_location: Some("Les Planches".to_string()),
+                meeting_sequence: Some(0),
                 proposed_start: Some("2026-08-24T12:30:00Z".to_string()),
                 proposed_end: Some("2026-08-24T13:00:00Z".to_string()),
                 original_start: Some("2026-08-24T09:00:00Z".to_string()),
@@ -842,6 +888,8 @@ mod tests {
                 "METHOD:REPLY\r\n",
                 "BEGIN:VEVENT\r\n",
                 "ATTENDEE;PARTSTAT=ACCEPTED:mailto:denis.ducret@sdic.ch\r\n",
+                "DTSTART:20260825T080000Z\r\n",
+                "DTEND:20260825T083000Z\r\n",
                 "UID:MAPI-GOID:001122\r\n",
                 "END:VEVENT\r\n",
                 "END:VCALENDAR\r\n"
@@ -858,6 +906,10 @@ mod tests {
                 attendee_name: String::new(),
                 partstat: "accepted".to_string(),
                 uid: "mapi-goid:001122".to_string(),
+                meeting_start: Some("2026-08-25T08:00:00Z".to_string()),
+                meeting_end: Some("2026-08-25T08:30:00Z".to_string()),
+                meeting_location: None,
+                meeting_sequence: None,
                 proposed_start: None,
                 proposed_end: None,
                 original_start: None,
