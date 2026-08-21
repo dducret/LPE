@@ -28,6 +28,7 @@
 - Contacts:
   - map canonical `contacts` to `vCard`
   - write `vCard` updates back to canonical contacts
+  - round-trip the canonical structured-name `nickname` through `NICKNAME`
 - Calendar:
   - map canonical `calendar_events` to `iCalendar` `VEVENT`
   - write supported `VEVENT` fields back to canonical events

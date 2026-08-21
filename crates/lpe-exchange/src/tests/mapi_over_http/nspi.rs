@@ -347,6 +347,63 @@ async fn mapi_over_http_nspi_get_props_returns_one_error_for_one_missing_propert
 }
 
 #[tokio::test]
+async fn mapi_over_http_nspi_get_props_does_not_synthesize_unset_contact_details() {
+    let contact_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        contacts: Arc::new(Mutex::new(vec![FakeStore::contact(
+            contact_id,
+            "Bob Contact",
+            "bob@example.test",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let dn_to_mid_headers = nspi_bound_headers(&service, "DNToMId").await;
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Nspi,
+            &dn_to_mid_headers,
+            &nspi_dn_to_mid_request(&["bob@example.test"]),
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    let contact_mid = u32::from_le_bytes(body[13..17].try_into().unwrap());
+    assert_ne!(contact_mid, 0);
+
+    let headers = nspi_bound_headers(&service, "GetProps").await;
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Nspi,
+            &headers,
+            &nspi_get_props_request(contact_mid, 1252, &[0x3A17_001F]),
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+
+    assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
+    assert_eq!(
+        u32::from_le_bytes(body[4..8].try_into().unwrap()),
+        0x0004_0380
+    );
+    assert_eq!(body[12], 1);
+    assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 1);
+    assert_eq!(
+        u32::from_le_bytes(body[17..21].try_into().unwrap()),
+        0x3A17_000A
+    );
+    assert_eq!(
+        u32::from_le_bytes(body[21..25].try_into().unwrap()),
+        0x8004_010F
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_nspi_get_props_unknown_current_rec_returns_ordered_errors() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

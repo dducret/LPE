@@ -473,7 +473,9 @@ pub(super) fn nspi_get_props_property_value_list(
     let mut errors_returned = false;
     write_u32(&mut values, tags.len() as u32);
     for property_tag in tags {
-        if nspi_property_tag_is_supported(*property_tag) {
+        if nspi_property_tag_is_supported(*property_tag)
+            && nspi_entry_has_property(entry, *property_tag)
+        {
             write_address_book_tagged_property_value(
                 &mut values,
                 *property_tag,
@@ -491,6 +493,37 @@ pub(super) fn nspi_get_props_property_value_list(
         }
     }
     (values, errors_returned)
+}
+
+fn nspi_entry_has_property(entry: &ExchangeAddressBookEntry, property_tag: u32) -> bool {
+    let property_id = property_tag & 0xFFFF_0000;
+    if !matches!(
+        property_id,
+        0x3A06_0000
+            | 0x3A08_0000
+            | 0x3A09_0000
+            | 0x3A11_0000
+            | 0x3A15_0000
+            | 0x3A16_0000
+            | 0x3A17_0000
+            | 0x3A18_0000
+            | 0x3A1A_0000
+            | 0x3A1B_0000
+            | 0x3A1C_0000
+            | 0x3A26_0000
+            | 0x3A27_0000
+            | 0x3A28_0000
+            | 0x3A29_0000
+            | 0x3A2A_0000
+            | 0x3A4F_0000
+            | 0x3A8D_0000
+            | 0x3A8E_0000
+    ) {
+        return true;
+    }
+    nspi_entry_available_property_tags(entry, 0)
+        .iter()
+        .any(|available_tag| available_tag & 0xFFFF_0000 == property_id)
 }
 
 pub(super) fn nspi_get_props_missing_property_value_list(tags: &[u32]) -> Vec<u8> {

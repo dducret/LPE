@@ -109,7 +109,11 @@ pub(crate) fn decode_wbxml(bytes: &[u8]) -> Result<WbxmlNode> {
     if bytes.len() < 4 {
         bail!("WBXML payload is too short");
     }
+    let version = bytes[cursor];
     cursor += 1;
+    if version != 0x03 {
+        bail!("unsupported WBXML version");
+    }
     let _ = read_multibyte_int(bytes, &mut cursor)?;
     let charset = read_multibyte_int(bytes, &mut cursor)?;
     if charset != 0x6A {

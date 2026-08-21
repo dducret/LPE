@@ -2080,6 +2080,41 @@ async fn malformed_wbxml_is_rejected_before_sync_state_is_written() {
     assert!(store.sync_states.lock().unwrap().is_empty());
 }
 
+#[tokio::test]
+async fn non_13_wbxml_sync_header_is_rejected_before_sync_state_is_written() {
+    // [MS-ASWBXML] §2.1.2.1: ActiveSync command WBXML uses the 1.3 header
+    // (`03 01 6A 00`). A version 1.2 header must not reach Sync dispatch.
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::inbox_mailbox()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+    let mut request = encode_wbxml(&{
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", "0"));
+        collection.push(WbxmlNode::with_text(0, "CollectionId", "inbox"));
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    });
+    request[0] = 0x02;
+
+    let error = service
+        .handle_request(
+            active_sync_query("Sync", "dev-wbxml-12"),
+            &bearer_headers(),
+            &request,
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(error_response(error).status(), StatusCode::BAD_REQUEST);
+    assert!(store.sync_states.lock().unwrap().is_empty());
+}
+
 #[test]
 fn base64_query_rejects_unsupported_protocol_version() {
     let error = ParsedActiveSyncQuery::from_raw_query(Some(&base64_query_with_version(

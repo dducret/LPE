@@ -12849,9 +12849,11 @@ async fn deleted_shared_task_list_push_change_wakes_former_grantee_principal() {
 
 #[tokio::test]
 async fn contacts_methods_use_canonical_contact_store() {
+    let mut contact = FakeStore::contact();
+    contact.structured_name.nickname = "Bobby".to_string();
     let store = FakeStore {
         session: Some(FakeStore::account()),
-        contacts: Arc::new(Mutex::new(vec![FakeStore::contact()])),
+        contacts: Arc::new(Mutex::new(vec![contact])),
         ..Default::default()
     };
     let service = JmapService::new_with_validator(
@@ -12913,6 +12915,10 @@ async fn contacts_methods_use_canonical_contact_store() {
     assert_eq!(
         response.method_responses[1].1["list"][0]["name"]["full"],
         Value::String("Bob Example".to_string())
+    );
+    assert_eq!(
+        response.method_responses[1].1["list"][0]["name"]["nickname"],
+        Value::String("Bobby".to_string())
     );
     assert_eq!(
         response.method_responses[1].1["list"][0]["photo"]["contentType"],

@@ -10,6 +10,9 @@ where
         principal: &AccountPrincipal,
         request: &str,
     ) -> Result<String> {
+        if let Err((code, message)) = resolve_names_query(request) {
+            return Ok(resolve_names_error_response(code, message));
+        }
         let entries = self.store.fetch_address_book_entries(principal).await?;
         Ok(resolve_names_response(principal, request, &entries))
     }

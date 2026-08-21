@@ -453,6 +453,7 @@ impl DavStore for FakeStore {
                 phone: input.phone,
                 team: input.team,
                 notes: input.notes,
+                structured_name: input.structured_name,
                 ..AccessibleContact::default()
             };
             contacts.retain(|entry| entry.id != contact.id);
@@ -858,6 +859,48 @@ async fn put_upserts_contact_from_vcard() {
     assert_eq!(contacts.len(), 1);
     assert_eq!(contacts[0].id, contact_id);
     assert_eq!(contacts[0].email, "carol@example.test");
+}
+
+#[tokio::test]
+async fn put_and_get_round_trip_canonical_contact_nickname() {
+    let contact_id = Uuid::parse_str("34343434-3434-3434-3434-343434343434").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = DavService::new(store.clone());
+    let path = "/dav/addressbooks/me/default/34343434-3434-3434-3434-343434343434.vcf";
+
+    let response = service
+        .handle(
+            &Method::PUT,
+            &Uri::from_static(path),
+            &bearer_headers(),
+            b"BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Caroline Example\r\nNICKNAME:Carrie\r\nEMAIL:caroline@example.test\r\nEND:VCARD",
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    assert_eq!(
+        store.contacts.lock().unwrap()[0].structured_name.nickname,
+        "Carrie"
+    );
+
+    let response = service
+        .handle(
+            &Method::GET,
+            &Uri::from_static(path),
+            &bearer_headers(),
+            &[],
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("NICKNAME:Carrie"));
+    assert!(body.contains(&format!("UID:{contact_id}")));
 }
 
 #[tokio::test]

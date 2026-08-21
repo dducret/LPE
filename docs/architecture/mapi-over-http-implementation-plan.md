@@ -2310,13 +2310,17 @@ minimum for G013, G043-G051, and G116-G118:
 | Permissions and notifications, including rejected input without mutation | `mapi_over_http_shared_calendar_without_share_right_rejects_modify_permissions`; `mapi_over_http_notification_wait_reports_content_event_after_registered_save` | [MS-OXCROPS] section 2.2 |
 | Typed properties, FastTransfer/ICS, and FAI configuration | `mapi_over_http_microsoft_oxcdata_property_row_example_streams_oversized_body`; `calendar_sync_object_projects_stable_identity_and_attachment_presence`; `mapi_over_http_microsoft_oxcfxics_4_5_content_sync_stream_shape`; `mapi_over_http_microsoft_oxocfg_configuration_examples_round_trip_fai` | [MS-OXCDATA] section 2.8; [MS-OXCFXICS] sections 2.2.4 and 3.1.5.3; [MS-OXOCFG] sections 4.1-4.4 |
 
-`RopFastTransferSourceCopyTo` and `RopFastTransferSourceCopyProperties` on a
-Folder remain an explicit fail-closed boundary: LPE returns a parseable ROP
-error rather than emitting the obsolete diagnostic manifest because it does not
-yet implement the required `folderContent` grammar. The retained boundary is
-covered by `fast_transfer_copy_to_and_copy_properties_reject_folder_objects`;
-the minimal future work is a complete [MS-OXCFXICS] sections 2.2.4.2, 2.2.4.3.6,
-and 2.2.4.4 serializer with `Level`, property-list, and transmittable-property
+Folder `RopFastTransferSourceCopyTo` with a nonzero `Level` emits the required
+direct `folderContent` root from canonical Folder properties, applies the
+request's exclusion list, and excludes all descendant objects. The bounded
+behavior is covered by
+`fast_transfer_copy_to_folder_without_subobjects_serializes_filtered_folder_content`.
+Folder `RopFastTransferSourceCopyTo` with descendant subobjects and Folder
+`RopFastTransferSourceCopyProperties` remain explicit fail-closed boundaries:
+LPE returns a parseable ROP error rather than emitting the obsolete diagnostic
+manifest because it does not yet implement their complete `folderContent`
+serializers. The minimal future work is complete [MS-OXCFXICS] sections 2.2.4.2,
+2.2.4.3.6, and 2.2.4.4 `Level`, property-list, and transmittable-property
 semantics, not a partial root marker.
 
 ### RCA Gate

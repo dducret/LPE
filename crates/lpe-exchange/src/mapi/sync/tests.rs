@@ -2387,32 +2387,51 @@ fn fast_transfer_copy_folder_rejects_message_objects() {
 }
 
 #[test]
-fn fast_transfer_copy_to_and_copy_properties_reject_folder_objects() {
+fn fast_transfer_copy_to_folder_without_subobjects_serializes_filtered_folder_content() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let object = MapiObject::Folder {
         folder_id: INBOX_FOLDER_ID,
         properties: HashMap::new(),
     };
-
-    for rop_id in [
+    let excluded_container_class = 0x3613_001Fu32;
+    let transfer = fast_transfer_manifest_for_object(
         RopId::FastTransferSourceCopyTo.as_u8(),
-        RopId::FastTransferSourceCopyProperties.as_u8(),
-    ] {
-        // [MS-OXCFXICS] sections 2.2.4.2, 2.2.4.3.6, and 2.2.4.4 require a
-        // folderContent root, which LPE does not yet serialize.
-        assert!(fast_transfer_manifest_for_object(
-            rop_id,
-            0x09,
-            0,
-            &[],
-            &object,
-            &sync_principal(account_id),
-            &[],
-            &[],
-            &MapiMailStoreSnapshot::empty(),
-        )
-        .is_none());
-    }
+        0x09,
+        1,
+        &[excluded_container_class],
+        &object,
+        &sync_principal(account_id),
+        &[mailbox(1, "inbox", "Inbox")],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+    )
+    .expect("Folder CopyTo must produce folderContent")
+    .1;
+
+    // [MS-OXCFXICS] sections 2.2.4.2 and 2.2.4.4: a nonzero Level omits
+    // subobjects, while CopyTo's property list excludes direct properties.
+    assert_eq!(
+        &transfer[..4],
+        &crate::mapi::wire::FastTransferMarker::StartTopFld
+            .as_u32()
+            .to_le_bytes()
+    );
+    assert_eq!(
+        &transfer[transfer.len() - 4..],
+        &crate::mapi::wire::FastTransferMarker::EndFolder
+            .as_u32()
+            .to_le_bytes()
+    );
+    assert!(!transfer
+        .windows(4)
+        .any(|value| value == excluded_container_class.to_le_bytes()));
+    assert!(transfer
+        .windows(4)
+        .any(|value| value == 0x3602_0003u32.to_le_bytes()));
+    assert!(!transfer.windows(4).any(|value| value
+        == crate::mapi::wire::FastTransferMarker::StartMessage
+            .as_u32()
+            .to_le_bytes()));
 }
 
 #[test]

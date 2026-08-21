@@ -4269,6 +4269,7 @@ struct FakeStore {
     updated_mailboxes: Arc<Mutex<Vec<JmapMailboxUpdateInput>>>,
     destroyed_mailboxes: Arc<Mutex<Vec<Uuid>>>,
     directory_accounts: Arc<Mutex<Vec<AuthenticatedAccount>>>,
+    address_book_fetches: Arc<AtomicU64>,
     extra_address_book_entries: Arc<Mutex<Vec<ExchangeAddressBookEntry>>>,
     extra_address_book_entry_tenants: Arc<Mutex<HashMap<Uuid, Uuid>>>,
     hidden_address_book_entry_ids: Arc<Mutex<Vec<Uuid>>>,
@@ -8844,6 +8845,7 @@ impl ExchangeStore for FakeStore {
         &'a self,
         principal: &'a AccountPrincipal,
     ) -> StoreFuture<'a, Vec<ExchangeAddressBookEntry>> {
+        self.address_book_fetches.fetch_add(1, Ordering::Relaxed);
         let principal_account = self.session.clone().filter(|account| {
             account.tenant_id == principal.tenant_id && account.account_id == principal.account_id
         });

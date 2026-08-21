@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 mod client_state;
 mod diagnostics;
+mod folder_copy;
 mod folders;
 mod hierarchy_properties;
 mod manifest;
@@ -23,6 +24,7 @@ pub(crate) use client_state::{
     select_download_manifest_for_client_state, validate_download_state_property,
     DownloadChangeFact,
 };
+pub(crate) use folder_copy::fast_transfer_folder_content_without_subobjects;
 pub(crate) use folders::*;
 
 #[cfg(test)]
@@ -964,7 +966,13 @@ fn write_fast_transfer_folder_content(
         },
     );
     write_fast_transfer_folder_properties(
-        buffer, folder_id, mailbox, mailboxes, emails, top_folder,
+        buffer,
+        folder_id,
+        mailbox,
+        mailboxes,
+        emails,
+        top_folder,
+        FastTransferDirectPropertyFilter::All,
     );
     let folder_messages = fast_transfer_emails_for_folder(folder_id, mailboxes, emails);
     buffer.extend_from_slice(&fast_transfer_message_list_buffer_with_attachments(
@@ -996,36 +1004,53 @@ fn write_fast_transfer_folder_properties(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     top_folder: bool,
+    property_filter: FastTransferDirectPropertyFilter<'_>,
 ) {
     if !top_folder {
-        write_u32(buffer, PID_TAG_FOLDER_ID);
-        write_object_id(buffer, folder_id);
-        write_utf16_property(
-            buffer,
-            PID_TAG_DISPLAY_NAME_W,
-            mapi_folder_display_name(mailbox),
-        );
-        write_u32(buffer, PID_TAG_PARENT_FOLDER_ID);
-        write_object_id(
-            buffer,
-            mapi_folder_parent_id_for_mailbox(mailbox, mailboxes),
-        );
+        if property_filter.includes(PID_TAG_FOLDER_ID) {
+            write_u32(buffer, PID_TAG_FOLDER_ID);
+            write_object_id(buffer, folder_id);
+        }
+        if property_filter.includes(PID_TAG_DISPLAY_NAME_W) {
+            write_utf16_property(
+                buffer,
+                PID_TAG_DISPLAY_NAME_W,
+                mapi_folder_display_name(mailbox),
+            );
+        }
+        if property_filter.includes(PID_TAG_PARENT_FOLDER_ID) {
+            write_u32(buffer, PID_TAG_PARENT_FOLDER_ID);
+            write_object_id(
+                buffer,
+                mapi_folder_parent_id_for_mailbox(mailbox, mailboxes),
+            );
+        }
     }
     let (content_count, unread_count, _) =
         folder_content_counts(folder_id, mailbox, mailboxes, emails);
-    write_utf16_property(
-        buffer,
-        PID_TAG_CONTAINER_CLASS_W,
-        mapi_folder_message_class(mailbox),
-    );
-    write_i32_property(buffer, PID_TAG_CONTENT_COUNT, content_count);
-    write_i32_property(buffer, PID_TAG_CONTENT_UNREAD_COUNT, unread_count);
-    write_i32_property(buffer, PID_TAG_ACCESS, MAPI_FOLDER_ACCESS as i32);
-    write_bool_property(
-        buffer,
-        PID_TAG_SUBFOLDERS,
-        mapi_folder_has_subfolders(mailbox, mailboxes),
-    );
+    if property_filter.includes(PID_TAG_CONTAINER_CLASS_W) {
+        write_utf16_property(
+            buffer,
+            PID_TAG_CONTAINER_CLASS_W,
+            mapi_folder_message_class(mailbox),
+        );
+    }
+    if property_filter.includes(PID_TAG_CONTENT_COUNT) {
+        write_i32_property(buffer, PID_TAG_CONTENT_COUNT, content_count);
+    }
+    if property_filter.includes(PID_TAG_CONTENT_UNREAD_COUNT) {
+        write_i32_property(buffer, PID_TAG_CONTENT_UNREAD_COUNT, unread_count);
+    }
+    if property_filter.includes(PID_TAG_ACCESS) {
+        write_i32_property(buffer, PID_TAG_ACCESS, MAPI_FOLDER_ACCESS as i32);
+    }
+    if property_filter.includes(PID_TAG_SUBFOLDERS) {
+        write_bool_property(
+            buffer,
+            PID_TAG_SUBFOLDERS,
+            mapi_folder_has_subfolders(mailbox, mailboxes),
+        );
+    }
 }
 
 fn fast_transfer_child_mailboxes<'a>(

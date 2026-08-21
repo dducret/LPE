@@ -2,8 +2,8 @@ use anyhow::{anyhow, bail, Result};
 use lpe_storage::{
     calendar_attendee_labels, normalize_calendar_email, normalize_calendar_participation_status,
     serialize_calendar_participants_metadata, CalendarOrganizerMetadata,
-    CalendarParticipantMetadata, CalendarParticipantsMetadata, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientTaskInput,
+    CalendarParticipantMetadata, CalendarParticipantsMetadata, ContactNameFields,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use uuid::Uuid;
 
@@ -19,6 +19,7 @@ pub(crate) fn parse_vcard(
     let mut phone = String::new();
     let mut team = String::new();
     let mut notes = String::new();
+    let mut structured_name = ContactNameFields::default();
 
     for line in unfolded_lines(content) {
         let Some((left, raw_value)) = line.split_once(':') else {
@@ -32,6 +33,7 @@ pub(crate) fn parse_vcard(
         let value = text_unescape(raw_value.trim());
         match key.as_str() {
             "FN" => name = value,
+            "NICKNAME" => structured_name.nickname = value,
             "TITLE" => role = value,
             "EMAIL" => email = value,
             "TEL" => phone = value,
@@ -54,6 +56,7 @@ pub(crate) fn parse_vcard(
         phone,
         team,
         notes,
+        structured_name,
         ..Default::default()
     })
 }

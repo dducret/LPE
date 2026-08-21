@@ -1133,14 +1133,25 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                     ),
                 ));
             }
+            if RopId::from_u8(rop_id) == Some(RopId::FastTransferSourceCopyTo) && level != 0 {
+                // [MS-OXCFXICS] sections 2.2.4.2 and 2.2.4.4 require a
+                // folderContent root. A nonzero Level excludes subobjects,
+                // so direct canonical Folder properties need no recursive
+                // folder or message serializer.
+                return mapi_mailstore::fast_transfer_folder_content_without_subobjects(
+                    *folder_id,
+                    mailboxes,
+                    emails,
+                    direct_property_filter,
+                )
+                .map(|buffer| (*folder_id, buffer));
+            }
             if matches!(
                 RopId::from_u8(rop_id),
                 Some(RopId::FastTransferSourceCopyTo | RopId::FastTransferSourceCopyProperties)
             ) {
-                // [MS-OXCFXICS] sections 2.2.4.2, 2.2.4.3.6, and 2.2.4.4
-                // require folderContent for Folder CopyTo/CopyProperties.
-                // LPE has no bounded folderContent serializer yet; reject
-                // rather than emit the legacy diagnostic manifest.
+                // Folder CopyTo with subobjects and CopyProperties still need
+                // the complete folderContent serializer.
                 return None;
             }
             let folder = folder_row_for_id(*folder_id, mailboxes)

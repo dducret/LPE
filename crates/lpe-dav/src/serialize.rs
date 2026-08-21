@@ -10,6 +10,7 @@ pub(crate) fn serialize_vcard(contact: &AccessibleContact) -> String {
         format!("UID:{}", contact.id),
         format!("FN:{}", text_escape(&contact.name)),
     ];
+    push_line(&mut lines, "NICKNAME", &contact.structured_name.nickname);
     push_line(&mut lines, "TITLE", &contact.role);
     push_line(&mut lines, "EMAIL;TYPE=INTERNET", &contact.email);
     push_line(&mut lines, "TEL", &contact.phone);

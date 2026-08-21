@@ -1957,6 +1957,33 @@ async fn resolve_names_returns_authenticated_mailbox_match() {
 }
 
 #[tokio::test]
+async fn resolve_names_rejects_an_unsupported_shape_before_address_book_projection() {
+    // [MS-OXWSRSLNM] §§3.1.4.1 and 3.1.4.1.3.5: validate the request
+    // shape before resolving canonical directory or contact candidates.
+    let address_book_fetches = Arc::new(AtomicU64::new(0));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        address_book_fetches: address_book_fetches.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:ResolveNames ReturnFullContactData="true"><m:UnresolvedEntry>alice</m:UnresolvedEntry></m:ResolveNames></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResolveNamesResponseMessage ResponseClass=\"Error\">"));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert_eq!(address_book_fetches.load(Ordering::Relaxed), 0);
+}
+
+#[tokio::test]
 async fn resolve_names_returns_tenant_directory_account_match() {
     let mut bob = FakeStore::account();
     bob.account_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
