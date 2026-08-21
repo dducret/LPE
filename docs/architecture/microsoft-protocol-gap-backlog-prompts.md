@@ -2,6 +2,10 @@
 
 This prompt bank covers every P0/P1 entry in docs/architecture/microsoft-protocol-gap-backlog.md. Follow the entry's Decision: implement implement-now work; obtain the stated evidence before needs-trace work; and preserve a keep-explicitly-unsupported boundary until its evidence gate is met. These prompts never authorize endpoint publication.
 
+Implementation records below describe the checked-in bounded behavior as of their
+date. They do not replace the deployment, Microsoft RCA, or real-client evidence
+required by the corresponding acceptance gate.
+
 ## Shared Instructions
 
 Prepend these instructions to each prompt.
@@ -68,11 +72,26 @@ Apply the shared instructions. Address G001-G009: ActiveSync commands, WBXML, st
 
 Test exact WBXML/status values, sync tokens, SendMail canonical Sent visibility, attachments, contact/calendar mutation, provisioning, and malformed/foreign input. Run mobile preflight plus Outlook mobile and iOS Mail evidence. Do not add task folders, SMS, Notes, DocumentLibrary, conversation, or IRM breadth.
 
+Implementation record (2026-08-21): G001-G009 are classified in the backlog as
+implemented and tested or concretely bounded. The adopted mobile surface remains
+Exchange ActiveSync 16.1 over canonical mailbox, contact, calendar, attachment,
+and submission state, with `ItemOperations Fetch` attachment retrieval and
+permissive provisioning, following [MS-ASAIRS] section 2.2 and [MS-ASPROV]
+section 3. Outlook mobile and iOS Mail evidence remain release evidence; this
+record does not claim either external client gate has passed.
+
 ## 10. P0 Autodiscover Publication And Outlook Shapes
 
 Apply the shared instructions. Address G110-G111. Inspect Autodiscover, LPE-CT edge publication, EWS/MAPI routing, and readiness checks; use MS-OXDISCO and MS-OXDSCLI. Publish only implemented, authenticated LPE-CT-exposed endpoints; do not infer MAPI usability from X-MapiHttpCapability. EXCH, MAPI, and EXPR metadata each require a real transport and its separate gate.
 
 Acceptance: deterministic response/edge tests, scripted readiness, Microsoft RCA, and a real Outlook profile agree before MAPI publication. No unimplemented SMTP or RPC path is advertised. Update autoconfiguration and edge docs.
+
+Implementation record (2026-08-21): G110-G111 are a bounded implementation
+with retained evidence. `mapiHttp`, EXCH, and EXPR publication retain separate
+real-transport and evidence gates; `X-MapiHttpCapability` alone never proves
+MAPI usability, following [MS-OXDSCLI] section 3.2.5.1. No record here
+authorizes MAPI, EXCH, EXPR, SMTP, or RPC publication without the stated edge,
+RCA, and Outlook-profile evidence.
 
 ## 11. P1 IMAP NTLM And Delegate Extension Boundary
 
@@ -86,11 +105,26 @@ Apply the shared instructions. Address G115. Authenticated client SMTP is LPE-CT
 
 Acceptance: submission tests cover authentication, rejection, tenant isolation, handoff/retry/trace, and authoritative LPE Sent visibility; edge tests prove public ingress offers no AUTH; Autodiscover publishes SMTP only for the real authenticated service. Never move SMTP into core or advertise internal relay.
 
+Implementation record (2026-08-21): G115 is a bounded LPE-CT implementation.
+Authenticated SMTP submission remains on the LPE-CT submission listener, public
+ingress does not offer `AUTH`, and LPE remains the canonical owner of the Sent
+copy, following [MS-OXSMTP] section 3.2.5.1 and [MS-XLOGIN] section 2.2.
+Autodiscover remains separately gated on the deployed authenticated submission
+service; the internal LPE-to-LPE-CT relay is not a client endpoint.
+
 ## 13. P0 Spam And Phishing Metadata Boundary
 
 Apply the shared instructions. Address G029. Inspect LPE-CT filtering, reputation, quarantine, traceability, and safe LPE mailbox projection. Use MS-OXCSPAM 2.2 and MS-OXPHISH 2.2. Perimeter decisions remain LPE-CT-owned; LPE may project only safe documented mailbox facts.
 
 Acceptance: trace evidence links each safe projection to its LPE-CT source; tenant, Bcc-safe search/AI, quarantine isolation, stale-metadata, and client-projection tests pass. No public protocol mutates reputation/quarantine or duplicates filtering. Update security/traceability docs.
+
+Implementation record (2026-08-21): G029 is a bounded perimeter implementation.
+LPE-CT remains authoritative for filtering, reputation, quarantine, and trace
+operations; LPE projects only the documented signed bridge trace fact. Internet
+supplied trace values are not accepted as canonical facts, and no public client
+protocol mutates reputation or quarantine; [MS-OXCSPAM] section 2.2.1.3 and
+[MS-OXPHISH] section 2.2.1.1 remain perimeter facts. Deployment-specific
+filtering and trace evidence remain required.
 
 ## 14. P1 Trace Gate: Protected Delegate/Free-Busy Semantics
 
@@ -102,15 +136,18 @@ Map a proven minimal behavior only to calendar grants, sender rights, delegate_p
 
 Apply the shared instructions. Address G014, G017-G018, G104, and G119: address-book referral, object projection, UI templates, EWS ResolveNames, and NSPI request/property gaps. Inspect NSPI/EWS name resolution and canonical accounts, contacts, groups, and visibility. Use MS-OXABREF, MS-OXOABK 2.2, MS-OXOABKT templates, MS-OXNSPI 3.1.4, and MS-OXPROPS.
 
-Implementation record (2026-08-20): bounded canonical projection, referral probes,
+Implementation record (2026-08-21): bounded canonical projection, referral probes,
 special tables/template-info, and EWS/NSPI resolution coverage are implemented.
 `ResolveNames` now validates the complete ordered request before accessing or
 allocating address-book projection state and rejects malformed/trailing input
 parseably, while retaining the observed all-zero RCA bootstrap probe. EWS and
 NSPI share the canonical readable-contact scope; private contacts remain absent
 from both surfaces. This follows [MS-OXNSPI] section 3.1.4.1.16 and
-[MS-OXWSRSLNM] section 3.1.4.1. The full MS-OXOABKT template catalog and
-Exchange RFRI directory-routing behavior remain explicitly bounded.
+[MS-OXWSRSLNM] section 3.1.4.1. `GetTemplateInfo` now validates its complete
+MAPI/HTTP request before principal projection, following [MS-OXCMAPIHTTP]
+section 2.2.5.9.1 and [MS-OXNSPI] section 3.1.4.1.18. The full MS-OXOABKT
+template catalog and Exchange RFRI directory-routing behavior remain explicitly
+bounded.
 
 Acceptance: NSPI bootstrap, ResolveNames, request ordering/columns,
 referral/templates, tenant/hidden/ambiguous/missing cases, property-shape, and
