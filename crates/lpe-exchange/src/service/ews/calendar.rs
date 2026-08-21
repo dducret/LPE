@@ -647,13 +647,32 @@ fn requested_time_zone(request: &str) -> Result<Option<String>> {
 
 fn ews_datetime_parts(value: &str) -> Option<(String, String)> {
     let trimmed = value.trim();
-    if trimmed.len() < 16 || trimmed.get(10..11) != Some("T") {
+    if !matches!(trimmed.len(), 16 | 17 | 19 | 20)
+        || trimmed.get(10..11) != Some("T")
+        || !matches!(trimmed.get(16..), Some("" | "Z" | ":00" | ":00Z"))
+    {
         return None;
     }
     let date = trimmed.get(0..10)?;
     let time = trimmed.get(11..16)?;
-    (ews_date_parts(date).is_some() && time_minutes(time).is_some())
-        .then(|| (date.to_string(), time.to_string()))
+    let date_bytes = date.as_bytes();
+    let time_bytes = time.as_bytes();
+    let date_is_yyyy_mm_dd = date_bytes[4] == b'-'
+        && date_bytes[7] == b'-'
+        && date_bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit());
+    let time_is_hh_mm = time_bytes[2] == b':'
+        && time_bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| index == 2 || byte.is_ascii_digit());
+    (date_is_yyyy_mm_dd
+        && time_is_hh_mm
+        && ews_date_parts(date).is_some()
+        && time_minutes(time).is_some())
+    .then(|| (date.to_string(), time.to_string()))
 }
 
 fn ews_duration_minutes(start: &str, end: &str) -> Option<i32> {

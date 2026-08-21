@@ -10714,12 +10714,42 @@ async fn calendar_item_times_are_validated_before_canonical_mutation() {
     let response = service
         .handle(
             &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:CreateItem><m:Items><t:CalendarItem><t:Start>2026-05-04T08:00not-a-timezone</t:Start><t:End>2026-05-04T10:00:00Z</t:End></t:CalendarItem></m:Items></m:CreateItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("CalendarItem is missing a valid Start value"));
+    assert_eq!(events.lock().unwrap().len(), 1);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
             br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>calendar:default:0</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#,
         )
         .await
         .unwrap();
     let body = response_text(response).await;
     let change_key = test_item_change_key(&body, &format!("event:{event_id}"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:UpdateItem><m:ItemChanges><t:ItemChange><t:ItemId Id="event:{event_id}" ChangeKey="{change_key}"/><t:Updates><t:SetItemField><t:FieldURI FieldURI="calendar:Start"/><t:CalendarItem><t:Start>2026-05-04T08:00not-a-timezone</t:Start></t:CalendarItem></t:SetItemField></t:Updates></t:ItemChange></m:ItemChanges></m:UpdateItem></s:Body></s:Envelope>"#,
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("CalendarItem Start is invalid"));
+    let event = events.lock().unwrap();
+    assert_eq!(event[0].time, "09:00");
+    assert_eq!(event[0].duration_minutes, 120);
+    drop(event);
 
     let response = service
         .handle(
