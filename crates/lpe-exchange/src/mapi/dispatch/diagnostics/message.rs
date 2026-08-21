@@ -364,6 +364,7 @@ mod tests {
             categories: Vec::new(),
             has_attachments: false,
             calendar_invitation: false,
+            calendar_meeting_response: None,
             size_octets: 0,
             internet_message_id: None,
             mime_blob_ref: None,

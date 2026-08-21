@@ -653,6 +653,9 @@ fn attendees_from_nodes(application_data: &WbxmlNode) -> Option<CalendarParticip
                     _ => "needs-action".to_string(),
                 },
                 rsvp: false,
+                proposed_start: None,
+                proposed_end: None,
+                counter_proposal: false,
             })
         })
         .collect::<Vec<_>>();

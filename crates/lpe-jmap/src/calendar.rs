@@ -1370,6 +1370,9 @@ fn parse_jmap_calendar_participants(value: Option<&Value>) -> Result<CalendarPar
                 .get("expectReply")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            proposed_start: None,
+            proposed_end: None,
+            counter_proposal: false,
         });
     }
     Ok(metadata)

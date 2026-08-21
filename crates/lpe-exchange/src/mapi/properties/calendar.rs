@@ -672,6 +672,9 @@ pub(in crate::mapi) fn apply_calendar_pending_recipients(
             .to_string(),
             partstat: "needs-action".to_string(),
             rsvp: false,
+            proposed_start: None,
+            proposed_end: None,
+            counter_proposal: false,
         })
         .collect();
     input.attendees = calendar_attendee_labels(&metadata);
@@ -829,6 +832,9 @@ pub(in crate::mapi) fn meeting_response_event_input_from_mapi(
             role: "REQ-PARTICIPANT".to_string(),
             partstat: partstat.to_string(),
             rsvp: false,
+            proposed_start: None,
+            proposed_end: None,
+            counter_proposal: false,
         });
     }
     let attendees_json = serialize_calendar_participants_metadata(&metadata);
@@ -950,6 +956,9 @@ fn calendar_participants_from_display_string(
             role: role.to_string(),
             partstat: "needs-action".to_string(),
             rsvp: false,
+            proposed_start: None,
+            proposed_end: None,
+            counter_proposal: false,
         })
         .collect()
 }

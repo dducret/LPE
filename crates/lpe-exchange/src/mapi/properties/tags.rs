@@ -519,6 +519,12 @@ pub(in crate::mapi) const PID_LID_TIME_ZONE_STRUCT: u32 = 0x0000_8233;
 pub(in crate::mapi) const PID_LID_TIME_ZONE_DESCRIPTION: u32 = 0x0000_8234;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY: u32 = 0x0000_825E;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY: u32 = 0x0000_825F;
+// [MS-OXOCAL] sections 2.2.4.7 and 2.2.7.3-2.2.7.4 define the counter-proposal
+// flag and proposed UTC endpoints on a Meeting Response object.
+pub(in crate::mapi) const PID_LID_APPOINTMENT_PROPOSED_START_WHOLE: u32 = 0x0000_8250;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_PROPOSED_END_WHOLE: u32 = 0x0000_8251;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_COUNTER_PROPOSAL: u32 = 0x0000_8257;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_PROPOSAL_NUMBER: u32 = 0x0000_8259;
 pub(in crate::mapi) const PID_LID_OUTLOOK_APPOINTMENT_8F07: u32 = 0x0000_8F07;
 pub(in crate::mapi) const PID_LID_COMPANIES: u32 = 0x0000_8539;
 pub(in crate::mapi) const PID_LID_CONTACTS: u32 = 0x0000_853A;
@@ -634,6 +640,10 @@ pub(in crate::mapi) const PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY
     0x825E_0102;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY_TAG: u32 =
     0x825F_0102;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_PROPOSED_START_WHOLE_TAG: u32 = 0x8250_0040;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_PROPOSED_END_WHOLE_TAG: u32 = 0x8251_0040;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_COUNTER_PROPOSAL_TAG: u32 = 0x8257_000B;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_PROPOSAL_NUMBER_TAG: u32 = 0x8259_0003;
 pub(in crate::mapi) const PID_LID_REMINDER_TIME_TAG: u32 = 0x8502_0040;
 pub(in crate::mapi) const PID_LID_REMINDER_SET_TAG: u32 = 0x8503_000B;
 pub(in crate::mapi) const PID_LID_SIDE_EFFECTS_TAG: u32 = 0x8510_0003;

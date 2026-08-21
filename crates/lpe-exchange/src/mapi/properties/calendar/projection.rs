@@ -182,6 +182,12 @@ fn event_property_value_with_optional_version(
         PID_LID_OUTLOOK_COMMON_8578_TAG => Some(MapiValue::I32(0)),
         PID_LID_APPOINTMENT_SUB_TYPE_TAG => Some(MapiValue::Bool(event.all_day)),
         PID_LID_APPOINTMENT_STATE_FLAGS_TAG => Some(MapiValue::I32(appointment_state_flags(event))),
+        PID_LID_APPOINTMENT_COUNTER_PROPOSAL_TAG => {
+            Some(MapiValue::Bool(calendar_counter_proposal_count(event) > 0))
+        }
+        PID_LID_APPOINTMENT_PROPOSAL_NUMBER_TAG => {
+            Some(MapiValue::I32(calendar_counter_proposal_count(event) as i32))
+        }
         PID_LID_RESPONSE_STATUS_TAG => Some(MapiValue::I32(response_status(event))),
         PID_LID_RECURRING_TAG => Some(MapiValue::Bool(!event.recurrence_rule.trim().is_empty())),
         PID_LID_IS_RECURRING_TAG => Some(MapiValue::Bool(!event.recurrence_rule.trim().is_empty())),
@@ -387,6 +393,8 @@ pub(in crate::mapi) fn calendar_enumerable_property_tags(
         PID_LID_APPOINTMENT_DURATION_TAG,
         PID_LID_APPOINTMENT_SUB_TYPE_TAG,
         PID_LID_APPOINTMENT_STATE_FLAGS_TAG,
+        PID_LID_APPOINTMENT_COUNTER_PROPOSAL_TAG,
+        PID_LID_APPOINTMENT_PROPOSAL_NUMBER_TAG,
         PID_LID_RESPONSE_STATUS_TAG,
         PID_LID_SIDE_EFFECTS_TAG,
         PID_LID_OUTLOOK_COMMON_8578_TAG,
@@ -422,4 +430,12 @@ pub(in crate::mapi) fn calendar_enumerable_property_tags(
                 .is_some()
     });
     tags
+}
+
+fn calendar_counter_proposal_count(event: &AccessibleEvent) -> usize {
+    parse_calendar_participants_metadata(&event.attendees_json)
+        .attendees
+        .iter()
+        .filter(|attendee| attendee.counter_proposal)
+        .count()
 }

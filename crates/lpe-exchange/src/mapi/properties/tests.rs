@@ -3151,6 +3151,7 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
         categories: Vec::new(),
         has_attachments: false,
         calendar_invitation: false,
+        calendar_meeting_response: None,
         size_octets: 128,
         internet_message_id: Some("rss-guid".to_string()),
         mime_blob_ref: None,
@@ -3179,6 +3180,34 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
         Some(MapiValue::String(
             "urn:content-classes:calendarmessage".to_string()
         ))
+    );
+    let mut counter = email.clone();
+    counter.calendar_meeting_response = Some(lpe_storage::CalendarMeetingResponse {
+        method: "COUNTER".to_string(),
+        attendee_email: "denis.ducret@sdic.ch".to_string(),
+        attendee_name: "Denis Ducret".to_string(),
+        partstat: "tentative".to_string(),
+        uid: "mapi-goid:001122".to_string(),
+        proposed_start: Some("2026-08-24T06:30:00Z".to_string()),
+        proposed_end: Some("2026-08-24T07:30:00Z".to_string()),
+    });
+    assert_eq!(
+        email_property_value(&counter, PID_TAG_MESSAGE_CLASS_W),
+        Some(MapiValue::String("IPM.Schedule.Meeting.Resp.Tent".to_string()))
+    );
+    assert_eq!(
+        email_property_value(&counter, PID_LID_APPOINTMENT_COUNTER_PROPOSAL_TAG),
+        Some(MapiValue::Bool(true))
+    );
+    assert_eq!(
+        email_property_value(&counter, PID_LID_APPOINTMENT_PROPOSED_START_WHOLE_TAG),
+        Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+            "2026-08-24T06:30:00Z"
+        )))
+    );
+    assert_eq!(
+        email_property_value(&counter, PID_LID_GLOBAL_OBJECT_ID_TAG),
+        Some(MapiValue::Binary(vec![0x00, 0x11, 0x22]))
     );
     assert_eq!(
         email_property_value(&email, PID_TAG_ACCESS_LEVEL),
@@ -3538,6 +3567,7 @@ fn followup_mail_projects_outlook_flag_properties() {
         categories: Vec::new(),
         has_attachments: false,
         calendar_invitation: false,
+        calendar_meeting_response: None,
         size_octets: 128,
         internet_message_id: None,
         mime_blob_ref: None,
@@ -3992,6 +4022,9 @@ fn calendar_projection_uses_canonical_all_day_status_and_participants() {
                     role: "REQ-PARTICIPANT".to_string(),
                     partstat: "accepted".to_string(),
                     rsvp: false,
+                    proposed_start: Some("2026-05-21T09:00:00Z".to_string()),
+                    proposed_end: Some("2026-05-21T10:30:00Z".to_string()),
+                    counter_proposal: true,
                 },
                 lpe_storage::CalendarParticipantMetadata {
                     email: "cara@example.test".to_string(),
@@ -3999,6 +4032,9 @@ fn calendar_projection_uses_canonical_all_day_status_and_participants() {
                     role: "OPT-PARTICIPANT".to_string(),
                     partstat: "needs-action".to_string(),
                     rsvp: false,
+                    proposed_start: None,
+                    proposed_end: None,
+                    counter_proposal: false,
                 },
             ],
         }),
@@ -4044,6 +4080,24 @@ fn calendar_projection_uses_canonical_all_day_status_and_participants() {
             PID_LID_APPOINTMENT_STATE_FLAGS_TAG
         ),
         Some(MapiValue::I32(0x0000_0005))
+    );
+    assert_eq!(
+        event_property_value(
+            &event,
+            1,
+            CALENDAR_FOLDER_ID,
+            PID_LID_APPOINTMENT_COUNTER_PROPOSAL_TAG
+        ),
+        Some(MapiValue::Bool(true))
+    );
+    assert_eq!(
+        event_property_value(
+            &event,
+            1,
+            CALENDAR_FOLDER_ID,
+            PID_LID_APPOINTMENT_PROPOSAL_NUMBER_TAG
+        ),
+        Some(MapiValue::I32(1))
     );
     assert_eq!(
         event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_RESPONSE_STATUS_TAG),
@@ -4424,6 +4478,9 @@ fn calendar_projection_keeps_meeting_state_after_all_attendees_are_removed() {
                 role: "REQ-PARTICIPANT".to_string(),
                 partstat: "needs-action".to_string(),
                 rsvp: false,
+                proposed_start: None,
+                proposed_end: None,
+                counter_proposal: false,
             }],
         });
     let mut properties = HashMap::new();
@@ -6272,6 +6329,7 @@ fn client_submit_time_falls_back_to_received_time_for_imported_mail() {
         categories: Vec::new(),
         has_attachments: false,
         calendar_invitation: false,
+        calendar_meeting_response: None,
         size_octets: 128,
         internet_message_id: None,
         mime_blob_ref: None,

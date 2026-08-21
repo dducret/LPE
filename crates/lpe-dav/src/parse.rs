@@ -307,6 +307,9 @@ fn parse_attendee(left: &str, value: &str) -> Result<CalendarParticipantMetadata
         rsvp: property_parameter(left, "RSVP")
             .map(|value| value.eq_ignore_ascii_case("TRUE"))
             .unwrap_or(false),
+        proposed_start: None,
+        proposed_end: None,
+        counter_proposal: false,
     })
 }
 

@@ -622,6 +622,9 @@ fn parse_attendee(attendee: &str, role: &str) -> Option<CalendarParticipantMetad
         role: role.to_string(),
         partstat: ews_response_type_to_partstat(&element_text(attendee, "ResponseType")),
         rsvp: false,
+        proposed_start: None,
+        proposed_end: None,
+        counter_proposal: false,
     })
 }
 

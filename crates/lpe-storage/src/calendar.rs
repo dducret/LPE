@@ -9,6 +9,12 @@ pub struct CalendarParticipantMetadata {
     pub role: String,
     pub partstat: String,
     pub rsvp: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposed_start: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposed_end: Option<String>,
+    #[serde(default)]
+    pub counter_proposal: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -96,6 +102,9 @@ pub fn parse_calendar_participants_metadata(raw: &str) -> CalendarParticipantsMe
                         .and_then(Value::as_bool)
                         .or_else(|| participant.get("rsvp").and_then(Value::as_bool))
                         .unwrap_or(false),
+                    proposed_start: None,
+                    proposed_end: None,
+                    counter_proposal: false,
                 });
             }
             return normalize_calendar_participants_metadata(metadata);
@@ -167,6 +176,9 @@ fn normalize_calendar_participants_metadata(
                 },
                 partstat: normalize_calendar_participation_status(&attendee.partstat),
                 rsvp: attendee.rsvp,
+                proposed_start: attendee.proposed_start,
+                proposed_end: attendee.proposed_end,
+                counter_proposal: attendee.counter_proposal,
             })
         })
         .collect();
@@ -190,6 +202,9 @@ mod tests {
                 role: "REQ-PARTICIPANT".to_string(),
                 partstat: "accepted".to_string(),
                 rsvp: true,
+                proposed_start: None,
+                proposed_end: None,
+                counter_proposal: false,
             }],
         });
         let value: Value = serde_json::from_str(&serialized).unwrap();

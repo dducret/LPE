@@ -62,6 +62,7 @@ pub use crate::calendar::{
     serialize_calendar_participants_metadata, CalendarOrganizerMetadata,
     CalendarParticipantMetadata, CalendarParticipantsMetadata,
 };
+pub use crate::mail::{normalize_calendar_meeting_uid, CalendarMeetingResponse};
 pub use crate::change::{
     CanonicalChangeCategory, CanonicalChangeListener, CanonicalChangeReplay, CanonicalPushChangeSet,
 };

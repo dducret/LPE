@@ -11,9 +11,16 @@ use sqlx::{Postgres, Row};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
-use crate::mail::{parse_header_recipients, parse_headers_map, parse_rfc822_message};
+use crate::mail::{
+    parse_calendar_meeting_response, parse_header_recipients, parse_headers_map,
+    parse_rfc822_message, CalendarMeetingResponse,
+};
 use crate::shared::allocate_uid_validity;
-use crate::{submission, AttachmentUploadInput, AuditEntryInput, Storage, SubmittedRecipientInput};
+use crate::{
+    calendar_attendee_labels, parse_calendar_participants_metadata,
+    serialize_calendar_participants_metadata, submission, AttachmentUploadInput, AuditEntryInput,
+    CanonicalChangeCategory, Storage, SubmittedRecipientInput, normalize_calendar_meeting_uid,
+};
 
 const MAX_SIEVE_REDIRECTS_PER_MESSAGE: usize = 4;
 const DEFAULT_SIEVE_MAILBOX_RETENTION_DAYS: i32 = 365;
@@ -113,6 +120,8 @@ impl Storage {
         let mut stored_messages = Vec::new();
         let thread_id = Uuid::new_v4();
         let attachments = parsed_message.attachments;
+        let calendar_response = parse_calendar_meeting_response(&attachments)
+            .filter(|response| response.attendee_email == mail_from);
         let mut followups = Vec::new();
 
         for recipient in &rcpt_to {
@@ -178,6 +187,16 @@ impl Storage {
                     &attachments,
                 )
                 .await?;
+                if let Some(response) = calendar_response.as_ref() {
+                    self.apply_calendar_meeting_response_in_tx(
+                        &mut tx,
+                        &tenant_id,
+                        account_id,
+                        response,
+                        &mail_from,
+                    )
+                    .await?;
+                }
                 stored_messages.push((account_id, message_id));
             }
 
@@ -561,6 +580,142 @@ impl Storage {
             participants,
             body_text,
             "",
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn apply_calendar_meeting_response_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        organizer_account_id: Uuid,
+        response: &CalendarMeetingResponse,
+        mail_from: &str,
+    ) -> Result<()> {
+        let Some(event) = sqlx::query(
+            r#"
+            SELECT id, calendar_id, uid, attendees_json::text AS attendees_json
+            FROM calendar_events
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND uid = $3
+              AND lifecycle_state = 'active'
+            FOR UPDATE
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(organizer_account_id)
+        .bind(normalize_calendar_meeting_uid(&response.uid))
+        .fetch_optional(&mut **tx)
+        .await?
+        else {
+            return Ok(());
+        };
+        let event_id: Uuid = event.try_get("id")?;
+        let calendar_id: Uuid = event.try_get("calendar_id")?;
+        let uid: String = event.try_get("uid")?;
+        let attendees_json: String = event.try_get("attendees_json")?;
+        let mut participants = parse_calendar_participants_metadata(&attendees_json);
+        let Some(attendee) = participants.attendees.iter_mut().find(|attendee| {
+            !attendee.email.is_empty()
+                && attendee.email.eq_ignore_ascii_case(&response.attendee_email)
+        }) else {
+            return Ok(());
+        };
+
+        let counter_proposal = response.method == "COUNTER";
+        let changed = attendee.partstat != response.partstat
+            || attendee.counter_proposal != counter_proposal
+            || attendee.proposed_start != response.proposed_start
+            || attendee.proposed_end != response.proposed_end;
+        if !changed {
+            return Ok(());
+        }
+        attendee.partstat = response.partstat.clone();
+        attendee.counter_proposal = counter_proposal;
+        attendee.proposed_start = response.proposed_start.clone();
+        attendee.proposed_end = response.proposed_end.clone();
+        let attendees = calendar_attendee_labels(&participants);
+        let attendees_json = serialize_calendar_participants_metadata(&participants);
+        sqlx::query(
+            r#"
+            UPDATE calendar_events
+            SET attendees_json = $4::jsonb,
+                source_payload_json = jsonb_set(
+                    source_payload_json,
+                    '{attendees}',
+                    to_jsonb($5::text),
+                    TRUE
+                )
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND id = $3
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(organizer_account_id)
+        .bind(event_id)
+        .bind(&attendees_json)
+        .bind(attendees)
+        .execute(&mut **tx)
+        .await?;
+        let modseq = self
+            .allocate_account_modseq_in_tx(
+                tx,
+                tenant_id,
+                organizer_account_id,
+                CanonicalChangeCategory::Calendar.as_str(),
+            )
+            .await?;
+        self.advance_calendar_event_version_in_tx(
+            tx,
+            tenant_id,
+            organizer_account_id,
+            event_id,
+            modseq,
+        )
+        .await?;
+        let affected_principals = Self::calendar_event_affected_principals_in_tx(
+            tx,
+            tenant_id,
+            organizer_account_id,
+            event_id,
+        )
+        .await?;
+        Self::insert_mail_change_log_in_tx(
+            tx,
+            tenant_id,
+            Some(organizer_account_id),
+            None,
+            "calendar_event",
+            event_id,
+            "updated",
+            modseq,
+            &affected_principals,
+            serde_json::json!({
+                "collectionId": calendar_id,
+                "objectUid": uid,
+                "meetingResponse": response.method,
+                "counterProposal": counter_proposal,
+            }),
+        )
+        .await?;
+        Self::emit_collaboration_change(
+            tx,
+            tenant_id,
+            CanonicalChangeCategory::Calendar,
+            organizer_account_id,
+        )
+        .await?;
+        self.insert_audit(
+            tx,
+            tenant_id,
+            AuditEntryInput {
+                actor: mail_from.to_string(),
+                action: "calendar.meeting-response.received".to_string(),
+                subject: uid,
+            },
         )
         .await?;
         Ok(())

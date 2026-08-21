@@ -2614,7 +2614,13 @@ FastTransfer/ICS calendar sync can project the bounded recurrence blob back
 from canonical event state. Appointment-like `IPM.Schedule.Meeting.Request`
 payloads that contain only the bounded event property subset are canonicalized
 as `calendar_events`; bounded meeting responses update canonical attendee
-participation status on the existing event; and the bounded import cancellation
+participation status on the existing event. Inbound iCalendar `REPLY` and
+`COUNTER` messages are accepted only when they have exactly one attendee whose
+address matches the envelope sender and whose UID resolves to an active event
+owned by the delivery recipient. A `COUNTER` keeps the scheduled event time
+unchanged while recording that attendee's proposed UTC start/end and projecting
+the Inbox item as `IPM.Schedule.Meeting.Resp.Tent` with
+`PidLidAppointmentCounterProposal`. The bounded import cancellation
 path deletes the existing canonical event. Cancellation submitted as a mutation
 on an already-open Event handle remains fail-closed at parent Save until
 deletion participates in the same staged atomic commit. Modified exceptions

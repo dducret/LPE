@@ -1,6 +1,6 @@
 use anyhow::Result;
 use lpe_magika::{collect_mime_attachment_parts, extract_visible_body_parts};
-use sqlx::types::chrono::{DateTime, Utc};
+use sqlx::types::chrono::{DateTime, FixedOffset, NaiveDate, TimeZone, Utc};
 use std::collections::HashMap;
 
 use crate::{AttachmentUploadInput, SubmittedRecipientInput};
@@ -27,6 +27,227 @@ pub struct ParsedRfc822Message {
 pub struct ParsedRfc822Header {
     pub name: String,
     pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CalendarMeetingResponse {
+    pub method: String,
+    pub attendee_email: String,
+    pub attendee_name: String,
+    pub partstat: String,
+    pub uid: String,
+    pub proposed_start: Option<String>,
+    pub proposed_end: Option<String>,
+}
+
+pub fn normalize_calendar_meeting_uid(value: &str) -> String {
+    let value = value.trim();
+    let Some(encoded) = value
+        .get(.."mapi-goid:".len())
+        .filter(|prefix| prefix.eq_ignore_ascii_case("mapi-goid:"))
+        .and_then(|_| value.get("mapi-goid:".len()..))
+    else {
+        return value.to_string();
+    };
+    if encoded.len() % 2 == 0 && encoded.as_bytes().iter().all(u8::is_ascii_hexdigit) {
+        format!("mapi-goid:{}", encoded.to_ascii_lowercase())
+    } else {
+        value.to_string()
+    }
+}
+
+pub fn parse_calendar_meeting_response(
+    attachments: &[AttachmentUploadInput],
+) -> Option<CalendarMeetingResponse> {
+    attachments.iter().find_map(|attachment| {
+        attachment
+            .media_type
+            .trim()
+            .to_ascii_lowercase()
+            .starts_with("text/calendar")
+            .then(|| parse_icalendar_meeting_response(&attachment.blob_bytes))
+            .flatten()
+    })
+}
+
+fn parse_icalendar_meeting_response(bytes: &[u8]) -> Option<CalendarMeetingResponse> {
+    let lines = unfold_icalendar_lines(&String::from_utf8_lossy(bytes));
+    let method = icalendar_value(&lines, "METHOD")?.to_ascii_uppercase();
+    if !matches!(method.as_str(), "REPLY" | "COUNTER") {
+        return None;
+    }
+    let event_start = lines.iter().position(|line| line == "BEGIN:VEVENT")?;
+    let event_end = lines
+        .iter()
+        .skip(event_start + 1)
+        .position(|line| line == "END:VEVENT")?
+        + event_start
+        + 1;
+    let event = &lines[event_start + 1..event_end];
+    let attendees = event
+        .iter()
+        .filter_map(|line| icalendar_property(line, "ATTENDEE"))
+        .collect::<Vec<_>>();
+    let [(parameters, value)] = attendees.as_slice() else {
+        return None;
+    };
+    let partstat = icalendar_parameter(parameters, "PARTSTAT")?.to_ascii_lowercase();
+    if (method == "COUNTER" && partstat != "tentative")
+        || (method == "REPLY" && !matches!(partstat.as_str(), "accepted" | "tentative" | "declined"))
+    {
+        return None;
+    }
+    let attendee_email = value
+        .trim()
+        .strip_prefix("mailto:")
+        .or_else(|| value.trim().strip_prefix("MAILTO:"))
+        .map(crate::normalize_email)
+        .filter(|value| !value.is_empty())?;
+    let uid = icalendar_value(event, "UID")?;
+    if uid.trim().is_empty() {
+        return None;
+    }
+    let attendee_name = icalendar_parameter(parameters, "CN")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let (proposed_start, proposed_end) = if method == "COUNTER" {
+        let timezone_offsets = icalendar_timezone_offsets(&lines);
+        let start = icalendar_value_with_parameters(event, "DTSTART")?;
+        let end = icalendar_value_with_parameters(event, "DTEND")?;
+        (
+            Some(parse_icalendar_datetime(start.0, start.1, &timezone_offsets)?),
+            Some(parse_icalendar_datetime(end.0, end.1, &timezone_offsets)?),
+        )
+    } else {
+        (None, None)
+    };
+    Some(CalendarMeetingResponse {
+        method,
+        attendee_email,
+        attendee_name,
+        partstat,
+        uid: normalize_calendar_meeting_uid(&uid),
+        proposed_start,
+        proposed_end,
+    })
+}
+
+fn unfold_icalendar_lines(value: &str) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for line in value.lines().map(|line| line.trim_end_matches('\r')) {
+        if (line.starts_with(' ') || line.starts_with('\t')) && !lines.is_empty() {
+            lines.last_mut().expect("iCalendar line exists").push_str(line.trim_start());
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    lines
+}
+
+fn icalendar_property<'a>(line: &'a str, name: &str) -> Option<(&'a str, &'a str)> {
+    let (left, value) = line.split_once(':')?;
+    let (property_name, parameters) = left.split_once(';').unwrap_or((left, ""));
+    property_name.eq_ignore_ascii_case(name).then_some((parameters, value))
+}
+
+fn icalendar_value(lines: &[String], name: &str) -> Option<String> {
+    lines.iter().find_map(|line| {
+        icalendar_property(line, name).map(|(_, value)| value.trim().to_string())
+    })
+}
+
+fn icalendar_value_with_parameters<'a>(
+    lines: &'a [String],
+    name: &str,
+) -> Option<(&'a str, &'a str)> {
+    lines.iter().find_map(|line| icalendar_property(line, name))
+}
+
+fn icalendar_parameter(parameters: &str, name: &str) -> Option<String> {
+    parameters.split(';').find_map(|parameter| {
+        let (key, value) = parameter.split_once('=')?;
+        key.eq_ignore_ascii_case(name)
+            .then_some(value.trim_matches('"').to_string())
+    })
+}
+
+fn icalendar_timezone_offsets(lines: &[String]) -> HashMap<String, i32> {
+    let mut offsets = HashMap::<String, Vec<i32>>::new();
+    let mut current_tzid = None;
+    for line in lines {
+        if line == "BEGIN:VTIMEZONE" {
+            current_tzid = None;
+        } else if let Some((_, value)) = icalendar_property(line, "TZID") {
+            current_tzid = Some(value.trim().to_string());
+        } else if let Some((_, value)) = icalendar_property(line, "TZOFFSETTO") {
+            if let (Some(tzid), Some(offset)) = (current_tzid.as_ref(), parse_icalendar_offset(value)) {
+                offsets.entry(tzid.clone()).or_default().push(offset);
+            }
+        }
+    }
+    offsets
+        .into_iter()
+        .filter_map(|(tzid, values)| {
+            values
+                .first()
+                .copied()
+                .filter(|first| values.iter().all(|value| value == first))
+                .map(|offset| (tzid, offset))
+        })
+        .collect()
+}
+
+fn parse_icalendar_offset(value: &str) -> Option<i32> {
+    let bytes = value.trim().as_bytes();
+    if bytes.len() != 5
+        || !matches!(bytes[0], b'+' | b'-')
+        || !bytes[1..].iter().all(u8::is_ascii_digit)
+    {
+        return None;
+    }
+    let hours = i32::from((bytes[1] - b'0') * 10 + bytes[2] - b'0');
+    let minutes = i32::from((bytes[3] - b'0') * 10 + bytes[4] - b'0');
+    (hours <= 23 && minutes <= 59).then_some(
+        (hours * 3_600 + minutes * 60) * if bytes[0] == b'-' { -1 } else { 1 },
+    )
+}
+
+fn parse_icalendar_datetime(
+    parameters: &str,
+    value: &str,
+    timezone_offsets: &HashMap<String, i32>,
+) -> Option<String> {
+    let value = value.trim();
+    let utc = value.ends_with('Z');
+    let value = value.strip_suffix('Z').unwrap_or(value);
+    if value.len() != 15
+        || value.as_bytes().get(8) != Some(&b'T')
+        || !value
+            .as_bytes()
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| index == 8 || byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let parse = |start, end| value.get(start..end)?.parse::<u32>().ok();
+    let date = NaiveDate::from_ymd_opt(parse(0, 4)? as i32, parse(4, 6)?, parse(6, 8)?)?;
+    let date_time = date.and_hms_opt(parse(9, 11)?, parse(11, 13)?, parse(13, 15)?)?;
+    let offset = if utc {
+        0
+    } else {
+        let tzid = icalendar_parameter(parameters, "TZID")?;
+        *timezone_offsets.get(&tzid)?
+    };
+    Some(
+        FixedOffset::east_opt(offset)?
+            .from_local_datetime(&date_time)
+            .single()?
+            .with_timezone(&Utc)
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string(),
+    )
 }
 
 pub fn parse_message_attachments(bytes: &[u8]) -> Result<Vec<AttachmentUploadInput>> {
@@ -298,8 +519,8 @@ fn trim_single_structural_crlf(bytes: &mut Vec<u8>) {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_header_recipients, parse_message_attachments, parse_message_date_header,
-        parse_rfc822_message,
+        parse_calendar_meeting_response, parse_header_recipients, parse_message_attachments,
+        parse_message_date_header, parse_rfc822_message,
     };
 
     #[test]
@@ -432,6 +653,90 @@ mod tests {
         assert_eq!(
             attachments[0].blob_bytes,
             b"BEGIN:VCALENDAR\r\nMETHOD:COUNTER\r\nEND:VCALENDAR".to_vec()
+        );
+    }
+
+    #[test]
+    fn parse_calendar_meeting_response_accepts_outlook_counter_with_fixed_offset_timezone() {
+        let attachments = parse_message_attachments(
+            concat!(
+                "Content-Type: text/calendar; method=COUNTER; charset=UTF-8\r\n",
+                "\r\n",
+                "BEGIN:VCALENDAR\r\n",
+                "METHOD:COUNTER\r\n",
+                "BEGIN:VTIMEZONE\r\n",
+                "TZID:Greenwich Standard Time\r\n",
+                "BEGIN:STANDARD\r\n",
+                "TZOFFSETTO:+0000\r\n",
+                "END:STANDARD\r\n",
+                "END:VTIMEZONE\r\n",
+                "BEGIN:VEVENT\r\n",
+                "ATTENDEE;PARTSTAT=TENTATIVE;CN=Denis Ducret:mailto:denis.ducret@sdic.ch\r\n",
+                "DTSTART;TZID=Greenwich Standard Time:20260824T063000\r\n",
+                "DTEND;TZID=Greenwich Standard Time:20260824T073000\r\n",
+                "UID:mapi-goid:001122\r\n",
+                "END:VEVENT\r\n",
+                "END:VCALENDAR\r\n"
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            parse_calendar_meeting_response(&attachments),
+            Some(super::CalendarMeetingResponse {
+                method: "COUNTER".to_string(),
+                attendee_email: "denis.ducret@sdic.ch".to_string(),
+                attendee_name: "Denis Ducret".to_string(),
+                partstat: "tentative".to_string(),
+                uid: "mapi-goid:001122".to_string(),
+                proposed_start: Some("2026-08-24T06:30:00Z".to_string()),
+                proposed_end: Some("2026-08-24T07:30:00Z".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn normalizes_mapi_global_object_id_calendar_uids() {
+        assert_eq!(
+            super::normalize_calendar_meeting_uid(" MAPI-GOID:0011aAbb "),
+            "mapi-goid:0011aabb"
+        );
+        assert_eq!(
+            super::normalize_calendar_meeting_uid("opaque-uid@example.test"),
+            "opaque-uid@example.test"
+        );
+    }
+
+    #[test]
+    fn parse_calendar_meeting_response_accepts_reply_and_clears_proposal_fields() {
+        let attachments = parse_message_attachments(
+            concat!(
+                "Content-Type: text/calendar; method=REPLY; charset=UTF-8\r\n",
+                "\r\n",
+                "BEGIN:VCALENDAR\r\n",
+                "METHOD:REPLY\r\n",
+                "BEGIN:VEVENT\r\n",
+                "ATTENDEE;PARTSTAT=ACCEPTED:mailto:denis.ducret@sdic.ch\r\n",
+                "UID:MAPI-GOID:001122\r\n",
+                "END:VEVENT\r\n",
+                "END:VCALENDAR\r\n"
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            parse_calendar_meeting_response(&attachments),
+            Some(super::CalendarMeetingResponse {
+                method: "REPLY".to_string(),
+                attendee_email: "denis.ducret@sdic.ch".to_string(),
+                attendee_name: String::new(),
+                partstat: "accepted".to_string(),
+                uid: "mapi-goid:001122".to_string(),
+                proposed_start: None,
+                proposed_end: None,
+            })
         );
     }
 

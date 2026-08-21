@@ -9,9 +9,10 @@ use uuid::Uuid;
 use crate::{
     submission,
     submission::{AttachmentUploadInput, SubmittedRecipientInput},
-    AuditEntryInput, JmapEmailRecipientRow, JmapEmailRow, JmapEmailSubmissionRow,
+    AuditEntryInput, CalendarMeetingResponse, JmapEmailRecipientRow, JmapEmailRow, JmapEmailSubmissionRow,
     MessageBccRecipientRecordRow, Storage, DEFAULT_TASK_LIST_ROLE,
 };
+use crate::mail::parse_calendar_meeting_response;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct JmapEmailAddress {
@@ -61,6 +62,8 @@ pub struct JmapEmail {
     pub categories: Vec<String>,
     pub has_attachments: bool,
     pub calendar_invitation: bool,
+    #[serde(skip)]
+    pub calendar_meeting_response: Option<CalendarMeetingResponse>,
     pub size_octets: i64,
     pub internet_message_id: Option<String>,
     pub mime_blob_ref: Option<String>,
@@ -927,6 +930,47 @@ impl Storage {
         .fetch_all(&self.pool)
         .await?;
 
+        let calendar_parts = sqlx::query(
+            r#"
+            SELECT part.message_id, part.content_type, blob.blob_bytes
+            FROM mime_parts part
+            JOIN blobs blob
+              ON blob.tenant_id = part.tenant_id
+             AND blob.domain_id = part.domain_id
+             AND blob.id = part.blob_id
+             AND blob.blob_kind = part.blob_kind
+            WHERE part.tenant_id = $1
+              AND part.message_id = ANY($2)
+              AND lower(part.content_type) LIKE 'text/calendar%'
+            ORDER BY part.message_id ASC, part.ordinal ASC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(ids)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut calendar_responses = HashMap::new();
+        for part in calendar_parts {
+            let message_id: Uuid = part.try_get("message_id")?;
+            if calendar_responses.contains_key(&message_id) {
+                continue;
+            }
+            let content_type: String = part.try_get("content_type")?;
+            let blob_bytes: Option<Vec<u8>> = part.try_get("blob_bytes")?;
+            let Some(blob_bytes) = blob_bytes else {
+                continue;
+            };
+            if let Some(response) = parse_calendar_meeting_response(&[AttachmentUploadInput {
+                file_name: String::new(),
+                media_type: content_type,
+                disposition: None,
+                content_id: None,
+                blob_bytes,
+            }]) {
+                calendar_responses.insert(message_id, response);
+            }
+        }
+
         let mut emails = Vec::with_capacity(ids.len());
         for id in ids {
             if let Some(row) = rows.iter().find(|row| row.id == *id) {
@@ -1071,6 +1115,7 @@ impl Storage {
                     categories: row.categories.clone(),
                     has_attachments: row.has_attachments,
                     calendar_invitation: row.calendar_invitation,
+                    calendar_meeting_response: calendar_responses.remove(&row.id),
                     size_octets: row.size_octets,
                     internet_message_id: row.internet_message_id.clone(),
                     mime_blob_ref: row.mime_blob_ref.clone(),

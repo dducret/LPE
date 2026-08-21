@@ -23,6 +23,27 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_MESSAGE_CLASS_W | PID_TAG_ORIGINAL_MESSAGE_CLASS_W => Some(MapiValue::String(
             message_class_for_email(email).to_string(),
         )),
+        PID_LID_APPOINTMENT_COUNTER_PROPOSAL_TAG => Some(MapiValue::Bool(
+            email
+                .calendar_meeting_response
+                .as_ref()
+                .is_some_and(|response| response.method == "COUNTER"),
+        )),
+        PID_LID_APPOINTMENT_PROPOSED_START_WHOLE_TAG => email
+            .calendar_meeting_response
+            .as_ref()
+            .filter(|response| response.method == "COUNTER")
+            .and_then(|response| response.proposed_start.as_deref())
+            .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
+        PID_LID_APPOINTMENT_PROPOSED_END_WHOLE_TAG => email
+            .calendar_meeting_response
+            .as_ref()
+            .filter(|response| response.method == "COUNTER")
+            .and_then(|response| response.proposed_end.as_deref())
+            .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
+        PID_LID_GLOBAL_OBJECT_ID_TAG | PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG => {
+            calendar_response_global_object_id(email).map(MapiValue::Binary)
+        }
         PID_TAG_CREATION_TIME
         | PID_TAG_MESSAGE_DELIVERY_TIME
         | PID_TAG_LAST_MODIFICATION_TIME
@@ -269,7 +290,18 @@ pub(in crate::mapi) fn conversation_index_for_uuid(conversation_id: Uuid) -> Vec
 }
 
 pub(crate) fn message_class_for_email(email: &JmapEmail) -> &'static str {
-    if email.calendar_invitation {
+    if let Some(response) = email.calendar_meeting_response.as_ref() {
+        match response.method.as_str() {
+            "COUNTER" => "IPM.Schedule.Meeting.Resp.Tent",
+            "REPLY" => match response.partstat.as_str() {
+                "accepted" => "IPM.Schedule.Meeting.Resp.Pos",
+                "tentative" => "IPM.Schedule.Meeting.Resp.Tent",
+                "declined" => "IPM.Schedule.Meeting.Resp.Neg",
+                _ => "IPM.Note",
+            },
+            _ => "IPM.Note",
+        }
+    } else if email.calendar_invitation {
         "IPM.Schedule.Meeting.Request"
     } else if email.mailbox_role == "rss_feeds" {
         "IPM.Post.RSS"
@@ -279,11 +311,35 @@ pub(crate) fn message_class_for_email(email: &JmapEmail) -> &'static str {
 }
 
 pub(crate) fn content_class_for_email(email: &JmapEmail) -> &'static str {
-    if email.calendar_invitation {
+    if email.calendar_invitation || email.calendar_meeting_response.is_some() {
         "urn:content-classes:calendarmessage"
     } else {
         "urn:content-classes:message"
     }
+}
+
+fn calendar_response_global_object_id(email: &JmapEmail) -> Option<Vec<u8>> {
+    let encoded = email
+        .calendar_meeting_response
+        .as_ref()?
+        .uid
+        .strip_prefix("mapi-goid:")?;
+    if encoded.len() % 2 != 0 {
+        return None;
+    }
+    encoded
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let nibble = |value: u8| match value {
+                b'0'..=b'9' => Some(value - b'0'),
+                b'a'..=b'f' => Some(value - b'a' + 10),
+                b'A'..=b'F' => Some(value - b'A' + 10),
+                _ => None,
+            };
+            Some((nibble(pair[0])? << 4) | nibble(pair[1])?)
+        })
+        .collect()
 }
 
 pub(in crate::mapi) fn native_body_format(email: &JmapEmail) -> u32 {

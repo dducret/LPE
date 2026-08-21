@@ -149,6 +149,11 @@ async fn run_runtime_drift_validation(pool: &PgPool) -> Result<()> {
         );
         collect(
             &mut failures,
+            "inbound calendar meeting response correlation path",
+            exercise_inbound_calendar_meeting_response_path(&storage, pool, &fixture).await,
+        );
+        collect(
+            &mut failures,
             "mailbox canonical name storage guards",
             exercise_mailbox_name_policy_storage_guards(&storage, pool, &fixture).await,
         );
@@ -1331,6 +1336,184 @@ async fn exercise_inbound_mime_canonical_body_path(
     anyhow::ensure!(
         stored_body == "Test réussi 10:58",
         "core trusted the edge body projection instead of raw MIME: {stored_body:?}"
+    );
+    Ok(())
+}
+
+async fn exercise_inbound_calendar_meeting_response_path(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    storage
+        .fetch_accessible_calendar_collections(fixture.account_id)
+        .await
+        .context("ensure organizer default calendar")?;
+    let uid = "mapi-goid:040000008200e00074c5b7101a82e008000000000000000010000000";
+    let mut input = runtime_calendar_event_input(
+        fixture.account_id,
+        None,
+        "Inbound meeting response correlation",
+    );
+    input.uid = uid.to_string();
+    input.date = "2026-08-24".to_string();
+    input.time = "06:30".to_string();
+    input.duration_minutes = 30;
+    input.attendees = "Denis Ducret".to_string();
+    input.attendees_json = r#"{
+        "organizer":{"email":"alice@example.test","common_name":"Alice Drift"},
+        "attendees":[{
+            "email":"denis.ducret@sdic.ch",
+            "common_name":"Denis Ducret",
+            "role":"REQ-PARTICIPANT",
+            "partstat":"needs-action",
+            "rsvp":true
+        }]
+    }"#
+    .to_string();
+    let event = storage
+        .create_accessible_event(fixture.account_id, None, input)
+        .await
+        .context("create organizer event for inbound meeting response")?;
+
+    let trace_id = format!("runtime-counter-{}", Uuid::new_v4());
+    let raw_message = format!(
+        concat!(
+            "From: Denis Ducret <denis.ducret@sdic.ch>\r\n",
+            "To: {}\r\n",
+            "Subject: New Time Proposed: Inbound meeting response correlation\r\n",
+            "Message-ID: <{}@sdic.ch>\r\n",
+            "MIME-Version: 1.0\r\n",
+            "Content-Type: multipart/mixed; boundary=counter-boundary\r\n",
+            "\r\n",
+            "--counter-boundary\r\n",
+            "Content-Type: text/plain; charset=UTF-8\r\n",
+            "\r\n",
+            "Denis proposes a new time.\r\n",
+            "--counter-boundary\r\n",
+            "Content-Type: text/calendar; method=COUNTER; charset=UTF-8\r\n",
+            "Content-Disposition: attachment; filename=calendar-2.ics\r\n",
+            "\r\n",
+            "BEGIN:VCALENDAR\r\n",
+            "METHOD:COUNTER\r\n",
+            "VERSION:2.0\r\n",
+            "BEGIN:VTIMEZONE\r\n",
+            "TZID:Greenwich Standard Time\r\n",
+            "BEGIN:STANDARD\r\n",
+            "TZOFFSETTO:+0000\r\n",
+            "END:STANDARD\r\n",
+            "END:VTIMEZONE\r\n",
+            "BEGIN:VEVENT\r\n",
+            "ATTENDEE;PARTSTAT=TENTATIVE;CN=Denis Ducret:mailto:denis.ducret@sdic.ch\r\n",
+            "DTSTART;TZID=Greenwich Standard Time:20260824T063000\r\n",
+            "DTEND;TZID=Greenwich Standard Time:20260824T073000\r\n",
+            "UID:{}\r\n",
+            "END:VEVENT\r\n",
+            "END:VCALENDAR\r\n",
+            "--counter-boundary--\r\n"
+        ),
+        fixture.account_email, trace_id, uid
+    )
+    .into_bytes();
+    storage
+        .deliver_inbound_message(InboundDeliveryRequest {
+            trace_id,
+            peer: "192.0.2.10:25".to_string(),
+            helo: "mx.example.test".to_string(),
+            mail_from: "denis.ducret@sdic.ch".to_string(),
+            rcpt_to: vec![fixture.account_email.clone()],
+            subject: "New Time Proposed: Inbound meeting response correlation".to_string(),
+            body_text: "Denis proposes a new time.".to_string(),
+            internet_message_id: None,
+            raw_message,
+        })
+        .await
+        .context("deliver inbound COUNTER response")?;
+
+    let row = sqlx::query(
+        r#"
+        SELECT
+            to_char(starts_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS starts_at,
+            to_char(ends_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS ends_at,
+            attendees_json #>> '{attendees,0,partstat}' AS partstat,
+            attendees_json #>> '{attendees,0,counter_proposal}' AS counter_proposal,
+            attendees_json #>> '{attendees,0,proposed_start}' AS proposed_start,
+            attendees_json #>> '{attendees,0,proposed_end}' AS proposed_end
+        FROM calendar_events
+        WHERE id = $1
+        "#,
+    )
+    .bind(event.id)
+    .fetch_one(pool)
+    .await
+    .context("load correlated organizer event")?;
+    anyhow::ensure!(
+        row.try_get::<String, _>("starts_at")? == "2026-08-24T06:30:00Z"
+            && row.try_get::<String, _>("ends_at")? == "2026-08-24T07:00:00Z",
+        "counter response must not change the organizer's scheduled time"
+    );
+    anyhow::ensure!(
+        row.try_get::<String, _>("partstat")? == "tentative"
+            && row.try_get::<String, _>("counter_proposal")? == "true"
+            && row.try_get::<String, _>("proposed_start")? == "2026-08-24T06:30:00Z"
+            && row.try_get::<String, _>("proposed_end")? == "2026-08-24T07:30:00Z",
+        "counter response was not persisted against the matching attendee"
+    );
+
+    let reply_trace_id = format!("runtime-reply-{}", Uuid::new_v4());
+    let raw_reply = format!(
+        concat!(
+            "From: Denis Ducret <denis.ducret@sdic.ch>\r\n",
+            "To: {}\r\n",
+            "Subject: Accepted: Inbound meeting response correlation\r\n",
+            "Content-Type: text/calendar; method=REPLY; charset=UTF-8\r\n",
+            "\r\n",
+            "BEGIN:VCALENDAR\r\n",
+            "METHOD:REPLY\r\n",
+            "BEGIN:VEVENT\r\n",
+            "ATTENDEE;PARTSTAT=ACCEPTED:mailto:denis.ducret@sdic.ch\r\n",
+            "UID:{}\r\n",
+            "END:VEVENT\r\n",
+            "END:VCALENDAR\r\n"
+        ),
+        fixture.account_email, uid
+    )
+    .into_bytes();
+    storage
+        .deliver_inbound_message(InboundDeliveryRequest {
+            trace_id: reply_trace_id,
+            peer: "192.0.2.10:25".to_string(),
+            helo: "mx.example.test".to_string(),
+            mail_from: "denis.ducret@sdic.ch".to_string(),
+            rcpt_to: vec![fixture.account_email.clone()],
+            subject: "Accepted: Inbound meeting response correlation".to_string(),
+            body_text: String::new(),
+            internet_message_id: None,
+            raw_message: raw_reply,
+        })
+        .await
+        .context("deliver inbound REPLY response")?;
+    let reply = sqlx::query(
+        r#"
+        SELECT
+            attendees_json #>> '{attendees,0,partstat}' AS partstat,
+            attendees_json #>> '{attendees,0,counter_proposal}' AS counter_proposal,
+            attendees_json #>> '{attendees,0,proposed_start}' AS proposed_start,
+            attendees_json #>> '{attendees,0,proposed_end}' AS proposed_end
+        FROM calendar_events
+        WHERE id = $1
+        "#,
+    )
+    .bind(event.id)
+    .fetch_one(pool)
+    .await
+    .context("load organizer event after reply")?;
+    anyhow::ensure!(
+        reply.try_get::<String, _>("partstat")? == "accepted"
+            && reply.try_get::<String, _>("counter_proposal")? == "false"
+            && reply.try_get::<Option<String>, _>("proposed_start")?.is_none()
+            && reply.try_get::<Option<String>, _>("proposed_end")?.is_none(),
+        "ordinary reply must clear the attendee's prior counter proposal"
     );
     Ok(())
 }
