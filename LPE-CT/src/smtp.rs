@@ -46,18 +46,16 @@ mod audit;
 mod auth;
 mod bayes;
 mod inbound_policy;
-use anti_abuse::{evaluate_greylisting, query_dnsbl, DnsblOutcome};
 #[cfg(test)]
 use anti_abuse::{dnsbl_query_name, GreylistEntry};
+use anti_abuse::{evaluate_greylisting, query_dnsbl, DnsblOutcome};
 use antivirus::{
     classify_inbound_message, evaluate_antivirus_policy, load_antivirus_providers,
     AntivirusProviderConfig, InboundMagikaOutcome,
 };
 #[cfg(test)]
 use antivirus::{parse_antivirus_output, AntivirusProviderDecision};
-use audit::{
-    append_transport_audit, quarantine_search_text,
-};
+use audit::{append_transport_audit, quarantine_search_text};
 #[cfg(test)]
 use audit::{postfix_style_mail_log_line, TransportAuditEvent};
 use auth::{
@@ -70,12 +68,12 @@ use auth::{
     DkimDisposition,
 };
 use bayes::train_bayespam;
-pub(crate) use bayes::{score_bayespam, BayesLabel};
 #[cfg(test)]
 pub(crate) use bayes::{load_bayespam_corpus, BAYESPAM_MIN_SCORING_TOKENS};
-use inbound_policy::{apply_filter_verdict, evaluate_inbound_policy};
+pub(crate) use bayes::{score_bayespam, BayesLabel};
 #[cfg(test)]
 use inbound_policy::finalize_policy_decision;
+use inbound_policy::{apply_filter_verdict, evaluate_inbound_policy};
 mod delivery_bridge;
 use delivery_bridge::deliver_inbound_message;
 mod dns;
@@ -736,17 +734,17 @@ pub(crate) async fn process_outbound_handoff(
     let internet_message_id = payload.internet_message_id.clone();
     let route = resolve_outbound_route(config, &payload);
     if payload.raw_message.is_empty() {
-        return Err(anyhow!("outbound handoff is missing its canonical RFC 822 message"));
+        return Err(anyhow!(
+            "outbound handoff is missing its canonical RFC 822 message"
+        ));
     }
-    if payload.raw_message.len() as u64 > max_smtp_message_size_bytes(config.max_message_size_mb)
-    {
-        return Err(anyhow!("outbound handoff RFC 822 message exceeds the configured size limit"));
+    if payload.raw_message.len() as u64 > max_smtp_message_size_bytes(config.max_message_size_mb) {
+        return Err(anyhow!(
+            "outbound handoff RFC 822 message exceeds the configured size limit"
+        ));
     }
-    let dkim = dkim_signing::maybe_sign_outbound_message(
-        &config.dkim,
-        &payload,
-        &payload.raw_message,
-    )?;
+    let dkim =
+        dkim_signing::maybe_sign_outbound_message(&config.dkim, &payload, &payload.raw_message)?;
     let mut message = QueuedMessage {
         id: trace_id,
         direction: "outbound".to_string(),

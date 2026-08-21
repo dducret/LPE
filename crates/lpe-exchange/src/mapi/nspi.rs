@@ -15,6 +15,7 @@ mod property_values;
 mod query_rows;
 mod resolve_names;
 mod special_tables;
+mod template_info;
 
 #[cfg(test)]
 use diagnostics::{
@@ -51,6 +52,7 @@ use resolve_names::parse_nspi_resolve_names_request;
 #[cfg(test)]
 use special_tables::NSPI_UNICODE_STRINGS_FLAG;
 use special_tables::{nspi_hierarchy_info_response, nspi_special_table_response};
+use template_info::parse_nspi_template_info_request;
 
 const NSPI_ROWSET_DEBUG_SCHEMA: &str = "nspi-rowset-explicit-table-v2";
 const NSPI_ERRORS_RETURNED: u32 = 0x0004_0380;
@@ -96,7 +98,7 @@ where
             nspi_special_table_response(principal, request, request_id)
         }
         MapiRequestType::GetTemplateInfo => {
-            nspi_template_info_response(store, principal, request_id).await
+            nspi_template_info_response(store, principal, request, request_id).await
         }
         MapiRequestType::ModLinkAtt => nspi_disabled_mutation_response(
             "ModLinkAtt",
@@ -985,11 +987,20 @@ where
 pub(in crate::mapi) async fn nspi_template_info_response<S>(
     store: &S,
     principal: &AccountPrincipal,
+    request: &[u8],
     request_id: &str,
 ) -> Response
 where
     S: ExchangeStore,
 {
+    if parse_nspi_template_info_request(request).is_none() {
+        return mapi_diagnostic_response(
+            "GetTemplateInfo",
+            request_id,
+            5,
+            "invalid GetTemplateInfo request",
+        );
+    }
     if let Err(error) = allocate_principal_nspi_identity(store, principal).await {
         return mapi_diagnostic_response(
             "GetTemplateInfo",

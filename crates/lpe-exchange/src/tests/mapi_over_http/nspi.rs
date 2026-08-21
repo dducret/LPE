@@ -66,6 +66,23 @@ fn nspi_get_prop_list_request(flags: u32, minimal_id: u32, code_page: u32) -> Ve
     request
 }
 
+fn nspi_template_info_request(flags: u32, display_type: u32, template_dn: Option<&str>) -> Vec<u8> {
+    let mut request = Vec::new();
+    request.extend_from_slice(&flags.to_le_bytes());
+    request.extend_from_slice(&display_type.to_le_bytes());
+    if let Some(template_dn) = template_dn {
+        request.push(1);
+        request.extend_from_slice(template_dn.as_bytes());
+        request.push(0);
+    } else {
+        request.push(0);
+    }
+    request.extend_from_slice(&1200u32.to_le_bytes());
+    request.extend_from_slice(&0x0409u32.to_le_bytes());
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request
+}
+
 fn nspi_get_prop_list_response_tags(body: &[u8]) -> Vec<u32> {
     let count = u32::from_le_bytes(body[9..13].try_into().unwrap()) as usize;
     (0..count)
@@ -996,6 +1013,42 @@ async fn mapi_over_http_resolve_names_rejects_trailing_input_without_directory_s
     let body = String::from_utf8(response_bytes(response).await).unwrap();
     assert!(body.contains("invalid ResolveNames request"));
     assert!(!body.contains("alice@example.test"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_nspi_template_info_validates_complete_request_before_projection() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let headers = nspi_bound_headers(&service, "GetTemplateInfo").await;
+    let request = nspi_template_info_request(0x0000_0005, 0, Some("/o=LPE/cn=Template"));
+
+    // [MS-OXCMAPIHTTP] section 2.2.5.9.1 and [MS-OXNSPI] section 3.1.4.1.18
+    // order flags, type, optional template DN, code page, locale, and the
+    // exact auxiliary-buffer length.
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
+        .await
+        .unwrap();
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1200);
+    assert_eq!(body[12], 1);
+    assert!(contains_bytes(&body, &utf16z("Alice")));
+
+    let mut malformed = request;
+    malformed.push(1);
+    let malformed_headers = nspi_bound_headers(&service, "GetTemplateInfo").await;
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &malformed_headers, &malformed)
+        .await
+        .unwrap();
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "5");
+    let body = String::from_utf8(response_bytes(response).await).unwrap();
+    assert!(body.contains("invalid GetTemplateInfo request"));
+    assert!(!body.contains("Alice"));
 }
 
 #[tokio::test]
@@ -2304,6 +2357,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
         let headers = nspi_bound_headers(&service, request_type).await;
         let request = match request_type {
             "DNToEPH" | "DNToMId" => vec![0; 9],
+            "GetTemplateInfo" => nspi_template_info_request(0, 0, None),
             _ => vec![0; 32],
         };
         let response = service

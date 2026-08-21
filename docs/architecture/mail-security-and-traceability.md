@@ -10,10 +10,12 @@
 - Keep canonical mailbox state in `LPE`.
 - Authenticated client SMTP terminates only at LPE-CT's TLS submission listener.
   It supports the bounded `AUTH PLAIN LOGIN` surface ([MS-OXSMTP] sections
-  2.2.1 and 3.2.5.1; [MS-XLOGIN] section 2.2), calls the signed core
-  submission bridge, and returns success only after canonical `Sent` and the
-  outbound handoff record exist. Public port 25 neither advertises nor accepts
-  `AUTH`; the internal `LPE -> LPE-CT` relay is never a client endpoint.
+  2.2.1 and 3.2.5.1; [MS-XLOGIN] section 2.2). It accepts only the exact
+  `AUTH PLAIN` and `AUTH LOGIN` forms, with at most one initial response
+  ([MS-XLOGIN] section 2.2.2), before calling the signed core submission
+  bridge. It returns success only after canonical `Sent` and the outbound
+  handoff record exist. Public port 25 neither advertises nor accepts `AUTH`;
+  the internal `LPE -> LPE-CT` relay is never a client endpoint.
 - Maintain separate scores for:
   - spam
   - malware
@@ -32,9 +34,12 @@
 - For an accepted inbound delivery, the signed `LPE-CT -> LPE` bridge owns the
   sole mailbox-safe perimeter projection: the `x-lpe-ct-trace-id` provenance
   link. The bridge strips an Internet-supplied header of that reserved name
-  before handoff, and core appends the bridge trace id atomically with the
-  canonical mailbox message. This link supports trace correlation only; it is
-  not a score, phishing stamp, quarantine state, or client-mutable policy.
+  before handoff, including malformed messages that omit a header/body
+  separator, and core appends the bridge trace id atomically with the canonical
+  mailbox message. The LPE-CT source is the durable queue item/audit trace with
+  the same id; signed bridge retries reuse that evidence instead of creating a
+  new filtering result. This link supports trace correlation only; it is not a
+  score, phishing stamp, quarantine state, or client-mutable policy.
   `PidTagContentFilterSpamConfidenceLevel` and `PidNamePhishingStamp` remain
   absent from canonical messages ([MS-OXCSPAM] section 2.2.1.3;
   [MS-OXPHISH] section 2.2.1.1). The canonical search and AI paths continue to

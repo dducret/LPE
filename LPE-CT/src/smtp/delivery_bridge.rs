@@ -82,17 +82,15 @@ pub(in crate::smtp) async fn deliver_inbound_message(
 }
 
 fn strip_spoofed_core_trace_header(raw: &[u8]) -> Vec<u8> {
-    let Some(header_end) = raw
+    let header_end = raw
         .windows(4)
         .position(|window| window == b"\r\n\r\n")
-        .or_else(|| raw.windows(2).position(|window| window == b"\n\n"))
-    else {
-        return raw.to_vec();
-    };
+        .or_else(|| raw.windows(2).position(|window| window == b"\n\n"));
+    let header_bytes = &raw[..header_end.unwrap_or(raw.len())];
 
     let mut sanitized = Vec::with_capacity(raw.len());
     let mut skipping = false;
-    for line in raw[..header_end].split_inclusive(|byte| *byte == b'\n') {
+    for line in header_bytes.split_inclusive(|byte| *byte == b'\n') {
         let line_without_eol = line.strip_suffix(b"\n").unwrap_or(line);
         let line_without_eol = line_without_eol
             .strip_suffix(b"\r")
@@ -112,7 +110,9 @@ fn strip_spoofed_core_trace_header(raw: &[u8]) -> Vec<u8> {
             sanitized.extend_from_slice(line);
         }
     }
-    sanitized.extend_from_slice(&raw[header_end..]);
+    if let Some(header_end) = header_end {
+        sanitized.extend_from_slice(&raw[header_end..]);
+    }
     sanitized
 }
 
@@ -136,9 +136,12 @@ mod tests {
     }
 
     #[test]
-    fn bridge_leaves_malformed_message_bytes_untouched() {
+    fn bridge_removes_spoofed_trace_header_from_malformed_message() {
+        // [MS-OXCSPAM] §2.2.1.3; [MS-OXPHISH] §2.2.1.1: core parsing treats
+        // a missing header/body separator as all-header input, so the reserved
+        // header must still be removed before the signed bridge projects it.
         let raw = b"X-LPE-CT-Trace-Id: stale-user-value\r\nno-header-separator";
 
-        assert_eq!(strip_spoofed_core_trace_header(raw), raw);
+        assert_eq!(strip_spoofed_core_trace_header(raw), b"no-header-separator");
     }
 }

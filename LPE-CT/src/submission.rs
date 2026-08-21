@@ -138,6 +138,8 @@ async fn handle_submission_session(
             transaction.reset_message();
             transaction.helo = command[5.min(command.len())..].trim().to_string();
             write_line(&mut writer, "250-LPE-CT").await?;
+            // [MS-OXSMTP] §2.2.1; [MS-XLOGIN] §2.2.2: advertise only the
+            // exact AUTH mechanisms accepted below.
             write_line(&mut writer, "250-AUTH PLAIN LOGIN").await?;
             write_line(
                 &mut writer,
@@ -354,8 +356,13 @@ where
     R: AsyncBufRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    let credentials = if command.to_ascii_uppercase().starts_with("AUTH PLAIN") {
-        let initial = command.split_whitespace().nth(2).map(str::to_string);
+    let (mechanism, initial) = parse_auth_command(command).map_err(|error| {
+        (
+            SmtpAuthFailureKind::Permanent,
+            sanitize_smtp_text(&error.to_string()),
+        )
+    })?;
+    let credentials = if mechanism.eq_ignore_ascii_case("PLAIN") {
         parse_auth_plain(reader, writer, initial)
             .await
             .map_err(|error| {
@@ -364,8 +371,7 @@ where
                     sanitize_smtp_text(&error.to_string()),
                 )
             })?
-    } else if command.to_ascii_uppercase().starts_with("AUTH LOGIN") {
-        let initial = command.split_whitespace().nth(2).map(str::to_string);
+    } else if mechanism.eq_ignore_ascii_case("LOGIN") {
         parse_auth_login(reader, writer, initial)
             .await
             .map_err(|error| {
@@ -468,6 +474,26 @@ where
         classify_auth_failure_status(status),
         sanitize_smtp_text(&detail),
     ))
+}
+
+fn parse_auth_command(command: &str) -> Result<(&str, Option<String>)> {
+    // [MS-XLOGIN] §2.2.2: AUTH LOGIN has an optional single initial response.
+    // Do not let a prefix such as LOGINX or trailing data reach core auth.
+    let mut parts = command.split_whitespace();
+    if !parts
+        .next()
+        .is_some_and(|verb| verb.eq_ignore_ascii_case("AUTH"))
+    {
+        bail!("invalid AUTH command");
+    }
+    let mechanism = parts
+        .next()
+        .ok_or_else(|| anyhow!("missing auth mechanism"))?;
+    let initial_response = parts.next().map(str::to_string);
+    if parts.next().is_some() {
+        bail!("invalid AUTH command");
+    }
+    Ok((mechanism, initial_response))
 }
 
 async fn submit_message(
@@ -886,6 +912,40 @@ mod tests {
         assert_eq!(error.0, SmtpAuthFailureKind::Permanent);
         assert_eq!(error.1, "unsupported auth mechanism");
         assert!(writer.is_empty());
+    }
+
+    #[tokio::test]
+    async fn malformed_auth_commands_are_rejected_before_core_auth_request() {
+        // [MS-OXSMTP] §2.2.1; [MS-XLOGIN] §2.2.2: only AUTH PLAIN and AUTH
+        // LOGIN with at most one initial response are accepted at submission.
+        let client = reqwest::Client::builder().build().unwrap();
+        for (command, follow_up) in [
+            ("AUTH PLAINX AGFsaWNlQGV4YW1wbGUudGVzdABzZWNyZXQ=", ""),
+            ("AUTH LOGINX YWxpY2VAZXhhbXBsZS50ZXN0", "c2VjcmV0\r\n"),
+            (
+                "AUTH PLAIN AGFsaWNlQGV4YW1wbGUudGVzdABzZWNyZXQ= trailing",
+                "",
+            ),
+            (
+                "AUTH LOGIN YWxpY2VAZXhhbXBsZS50ZXN0 trailing",
+                "c2VjcmV0\r\n",
+            ),
+        ] {
+            let mut reader = tokio::io::BufReader::new(follow_up.as_bytes());
+            let mut writer = Vec::new();
+            let error = authenticate_smtp_client(
+                &client,
+                "http://127.0.0.1:9",
+                &mut reader,
+                &mut writer,
+                command,
+            )
+            .await
+            .unwrap_err();
+
+            assert_eq!(error.0, SmtpAuthFailureKind::Permanent);
+            assert!(writer.is_empty());
+        }
     }
 
     #[tokio::test]

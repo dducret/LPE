@@ -37,6 +37,11 @@ published version available from Microsoft Learn on that date.
   from the same legacy DN identity.
 - `GetMailboxUrl` and `GetAddressBookUrl` return the real public MAPI/HTTP
   endpoint URLs derived from request host/proxy headers.
+- The legacy RPC proxy handles authenticated `RfrGetNewDSA` and
+  `RfrGetFQDNFromServerDN` compatibility probes only, returning the configured
+  mailbox host. This is the bounded referral behavior in [MS-OXABREF] sections
+  3.1.4.1 and 3.1.4.2, not an LPE directory service, multi-DSA router, or a
+  reason to publish a separate referral endpoint.
 
 ## Reference Table/List
 
@@ -52,7 +57,7 @@ published version available from Microsoft Learn on that date.
 | `GetPropList` / `QueryColumns` | Returns the bounded bootstrap property set used by Outlook profile/address-book probes. | No storage mutation. | Supported |
 | `SeekEntries` | Returns matching row data over the tenant-visible projection. | Canonical accounts and readable contacts. | Supported |
 | `GetSpecialTable` | Returns the bounded static address-book hierarchy rows for Global Address List, All Users, All Groups, and All Contacts. MAPI/HTTP rows are encoded directly as `AddressBookPropertyValueList` values whose tagged properties contain no RPC alignment field and whose binary and string values include the required `HasValue` byte. The documented properties are returned in order: entry ID, container flags, depth, container ID, display name, and master flag. Permanent entry IDs use the `MS-OXOABK` address-list DN forms: `/` for the GAL and `/guid=<32 hex digits>` for other containers. | Static compatibility projection. | Supported |
-| `GetTemplateInfo` | Returns bounded principal properties for compatibility probes using the same MAPI/HTTP `AddressBookPropertyValueList` encoding as `GetProps`. | Authenticated principal projection. | Bounded |
+| `GetTemplateInfo` | Validates the complete MAPI/HTTP flags, display type, optional ASCII template DN, code page, locale, and exact auxiliary buffer before returning bounded principal properties for compatibility probes using the same `AddressBookPropertyValueList` encoding as `GetProps`. The response is not a claim of a general UI-template catalog. | Authenticated principal projection. | Bounded |
 | `GetAddressBookUrl` | Returns `/mapi/nspi/` public URL. | Request headers only. | Supported |
 | `GetMailboxUrl` | Returns `/mapi/emsmdb/` public URL. | Request headers only. | Supported |
 | `ModLinkAtt` / `ModProps` | Returns parseable disabled responses. Address-book mutation must use canonical account/contact APIs. | No mutation. | Deferred |
@@ -70,6 +75,12 @@ allocation, so malformed or foreign input cannot create a projection or expose
 a row. This follows [MS-OXNSPI] section 3.1.4.1.16. The retained all-zero
 RCA bootstrap request is an interoperability compatibility exception, not a
 second request format.
+
+`GetTemplateInfo` applies the same no-projection-on-malformed-input rule to its
+complete MAPI/HTTP request body, following [MS-OXCMAPIHTTP] section 2.2.5.9.1
+and [MS-OXNSPI] section 3.1.4.1.18. The full template lookup and rendering
+contract in [MS-OXOABKT] section 3.2.5.2 remains explicitly unsupported: LPE
+does not create an Exchange-only template catalog or permit NSPI mutations.
 
 ## Validation
 

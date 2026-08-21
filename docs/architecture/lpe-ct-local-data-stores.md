@@ -62,7 +62,7 @@
 | quarantine metadata | `LPE-CT` technical store |
 | greylisting | `LPE-CT` technical store |
 | reputation | `LPE-CT` technical store |
-| trace provenance for delivered message | core `LPE` `x-lpe-ct-trace-id`, signed bridge only |
+| trace provenance for delivered message | core `LPE` `x-lpe-ct-trace-id`, signed bridge only; the id links to the matching LPE-CT spool/audit record, never to score, reputation, or quarantine metadata |
 | canonical delivery | core `LPE` PostgreSQL |
 | canonical mailbox search | core `LPE` PostgreSQL |
 

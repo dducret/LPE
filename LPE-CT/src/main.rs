@@ -61,36 +61,35 @@ pub(crate) use dashboard_config::{
     default_reputation_reject_threshold, default_spam_quarantine_threshold,
     default_spam_reject_threshold, default_spool_queues, default_state, default_true,
     ensure_management_bootstrap, normalize_accepted_domains, normalize_local_data_stores,
-    normalize_policy_settings,
-    normalize_public_tls_settings, normalize_relay_settings, probe_lpe_core_delivery,
-    probe_lpe_recipient_bridge, submission_listener_is_configured, validate_relay_settings,
+    normalize_policy_settings, normalize_public_tls_settings, normalize_relay_settings,
+    probe_lpe_core_delivery, probe_lpe_recipient_bridge, submission_listener_is_configured,
+    validate_relay_settings,
 };
 #[cfg(test)]
 pub(crate) use dashboard_config::{lpe_bridge_probe_url, lpe_health_probe_url};
+#[cfg(test)]
+pub(crate) use http_routes::mark_accepted_domain_verified;
 pub(crate) use http_routes::{
     accepted_domains, connect_lpe_support, create_accepted_domain, dashboard,
     delete_accepted_domain, delete_host_log, delete_public_tls_profile, delete_trace,
     digest_report_details, digest_reports, download_host_log, flush_mail_queue, health,
     health_live, health_ready, host_log_content, host_logs_list, import_accepted_domains, login,
     logout, mail_history, me, outbound_handoff, policy_status, quarantine_items, release_trace,
-    reporting_snapshot, retry_trace, route_diagnostics, run_apt_update_upgrade,
-    run_digest_reports, run_spam_test, run_system_power_action, run_system_tool,
-    select_public_tls_profile, sync_system_ntp, system_diagnostic_report,
-    system_diagnostic_service_action, system_diagnostic_services, system_health_check,
-    test_accepted_domain, trace_details, trace_history, update_accepted_domain,
-    update_network, update_policies, update_relay, update_reporting, update_site,
-    update_system_ntp, update_updates, upload_public_tls_profile,
+    reporting_snapshot, retry_trace, route_diagnostics, run_apt_update_upgrade, run_digest_reports,
+    run_spam_test, run_system_power_action, run_system_tool, select_public_tls_profile,
+    sync_system_ntp, system_diagnostic_report, system_diagnostic_service_action,
+    system_diagnostic_services, system_health_check, test_accepted_domain, trace_details,
+    trace_history, update_accepted_domain, update_network, update_policies, update_relay,
+    update_reporting, update_site, update_system_ntp, update_updates, upload_public_tls_profile,
 };
-#[cfg(test)]
-pub(crate) use http_routes::mark_accepted_domain_verified;
 use management_auth::{
     bearer_token, hash_password, is_known_weak_secret, require_management_admin, verify_password,
     ApiError,
 };
 pub(crate) use management_auth::{integration_shared_secret, require_integration_request};
-pub(crate) use readiness::ha_non_active_role_for_traffic;
 #[cfg(test)]
 pub(crate) use readiness::address_binds_publicly;
+pub(crate) use readiness::ha_non_active_role_for_traffic;
 use readiness::{
     check_dashboard_state_store, check_local_data_store_policy, check_non_empty_value,
     check_optional_http_dependency, check_optional_tcp_dependency, check_quarantine_backlog,
@@ -1183,11 +1182,15 @@ mod tests {
         address_binds_publicly, apply_env_overrides, default_state, env_test_lock,
         ha_activation_check, ha_non_active_role_for_traffic, integration_shared_secret,
         lpe_bridge_probe_url, lpe_health_probe_url, mark_accepted_domain_verified,
-        normalize_local_data_stores, outbound_handoff_body_limit, persist_state, require_integration_request,
-        submission_listener_is_configured, AcceptedDomain, DashboardResponse,
-        OUTBOUND_HANDOFF_PATH,
+        normalize_local_data_stores, outbound_handoff_body_limit, persist_state,
+        require_integration_request, submission_listener_is_configured, AcceptedDomain, AppState,
+        DashboardResponse, OUTBOUND_HANDOFF_PATH,
     };
-    use axum::http::HeaderMap;
+    use axum::{
+        extract::{Path, Query, State},
+        http::{HeaderMap, StatusCode},
+        response::IntoResponse,
+    };
     use lpe_domain::{
         current_unix_timestamp, OutboundMessageHandoffRequest, SignedIntegrationHeaders,
         TransportRecipient, INTEGRATION_KEY_HEADER, INTEGRATION_NONCE_HEADER,
@@ -1196,6 +1199,7 @@ mod tests {
     use std::{
         fs,
         path::PathBuf,
+        sync::{Arc, Mutex},
         time::{SystemTime, UNIX_EPOCH},
     };
     use uuid::Uuid;
@@ -1273,6 +1277,47 @@ mod tests {
         assert_eq!(metrics.inbound_messages, 2);
         assert_eq!(metrics.delivery_attempts_last_hour, 2);
         assert!(!metrics.upstream_reachable);
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_requests_cannot_read_or_mutate_quarantine() {
+        // [MS-OXCSPAM] §2.2.1.3; [MS-OXPHISH] §2.2.1.1: filtering evidence
+        // stays in LPE-CT custody and is not mutable through public clients.
+        let spool = temp_dir("quarantine-management-auth");
+        crate::smtp::initialize_spool(&spool).unwrap();
+        let quarantined = spool.join("quarantine").join("trace-private.json");
+        fs::write(&quarantined, "{}").unwrap();
+        let state = AppState {
+            store: Arc::new(Mutex::new(default_state())),
+            sessions: Arc::new(Mutex::new(std::collections::BTreeMap::new())),
+            state_file: Arc::new(spool.join("state.json")),
+            spool_dir: Arc::new(spool),
+        };
+
+        let read_error = crate::http_routes::quarantine_items(
+            State(state.clone()),
+            HeaderMap::new(),
+            Query(crate::smtp::QuarantineQuery::default()),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            read_error.into_response().status(),
+            StatusCode::UNAUTHORIZED
+        );
+
+        let release_error = crate::http_routes::release_trace(
+            State(state),
+            HeaderMap::new(),
+            Path("trace-private".to_string()),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            release_error.into_response().status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert!(quarantined.exists());
     }
 
     #[test]
