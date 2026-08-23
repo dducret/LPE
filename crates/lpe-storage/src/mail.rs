@@ -77,6 +77,50 @@ pub fn parse_calendar_meeting_response(
     })
 }
 
+pub(crate) fn contains_calendar_meeting_request(attachments: &[AttachmentUploadInput]) -> bool {
+    // [MS-OXCMAIL] section 2.2.3.3.2 and [MS-OXCICAL] section 2.1.3.1.1.1:
+    // the decoded text/calendar METHOD, not a legacy outer Content-Class, owns classification.
+    attachments.iter().any(|attachment| {
+        if !attachment
+            .media_type
+            .trim()
+            .to_ascii_lowercase()
+            .starts_with("text/calendar")
+        {
+            return false;
+        }
+        let declared_method = attachment
+            .media_type
+            .split(';')
+            .skip(1)
+            .find_map(|parameter| {
+                let (name, value) = parameter.split_once('=')?;
+                name.trim()
+                    .eq_ignore_ascii_case("method")
+                    .then(|| value.trim().trim_matches('"').to_ascii_uppercase())
+            });
+        if declared_method
+            .as_deref()
+            .is_some_and(|method| method != "REQUEST")
+        {
+            return false;
+        }
+        let lines = unfold_icalendar_lines(&String::from_utf8_lossy(&attachment.blob_bytes));
+        icalendar_value(&lines, "METHOD")
+            .is_some_and(|method| method.eq_ignore_ascii_case("REQUEST"))
+            && lines
+                .iter()
+                .filter(|line| line.eq_ignore_ascii_case("BEGIN:VEVENT"))
+                .count()
+                == 1
+            && lines
+                .iter()
+                .filter(|line| line.eq_ignore_ascii_case("END:VEVENT"))
+                .count()
+                == 1
+    })
+}
+
 fn parse_icalendar_meeting_response(bytes: &[u8]) -> Option<CalendarMeetingResponse> {
     let lines = unfold_icalendar_lines(&String::from_utf8_lossy(bytes));
     let method = icalendar_value(&lines, "METHOD")?.to_ascii_uppercase();
@@ -685,7 +729,12 @@ mod tests {
             "Content-Type: text/calendar; method=REQUEST; charset=UTF-8\r\n",
             "Content-Disposition: inline; filename=\"invite.ics\"\r\n",
             "\r\n",
-            "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nEND:VCALENDAR\r\n",
+            "BEGIN:VCALENDAR\r\n",
+            "METHOD:REQUEST\r\n",
+            "BEGIN:VEVENT\r\n",
+            "UID:probe-7@example.test\r\n",
+            "END:VEVENT\r\n",
+            "END:VCALENDAR\r\n",
             "--invite--\r\n"
         );
 
@@ -697,6 +746,26 @@ mod tests {
             attachments[0].media_type,
             "text/calendar; method=REQUEST; charset=UTF-8"
         );
+        assert!(super::contains_calendar_meeting_request(&attachments));
+    }
+
+    #[test]
+    fn calendar_meeting_request_requires_matching_body_method_and_one_event() {
+        let attachment = |media_type: &str, body: &str| crate::AttachmentUploadInput {
+            file_name: "invite.ics".to_string(),
+            media_type: media_type.to_string(),
+            disposition: Some("inline".to_string()),
+            content_id: None,
+            blob_bytes: body.as_bytes().to_vec(),
+        };
+        assert!(!super::contains_calendar_meeting_request(&[attachment(
+            "text/calendar; method=REQUEST",
+            "BEGIN:VCALENDAR\r\nMETHOD:PUBLISH\r\nBEGIN:VEVENT\r\nUID:x\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+        )]));
+        assert!(!super::contains_calendar_meeting_request(&[attachment(
+            "text/calendar; method=PUBLISH",
+            "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:x\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+        )]));
     }
 
     #[test]

@@ -6,13 +6,13 @@ use serde_json::Value;
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::mail::{contains_calendar_meeting_request, parse_calendar_meeting_response};
 use crate::{
     submission,
     submission::{AttachmentUploadInput, SubmittedRecipientInput},
-    AuditEntryInput, CalendarMeetingResponse, JmapEmailRecipientRow, JmapEmailRow, JmapEmailSubmissionRow,
-    MessageBccRecipientRecordRow, Storage, DEFAULT_TASK_LIST_ROLE,
+    AuditEntryInput, CalendarMeetingResponse, JmapEmailRecipientRow, JmapEmailRow,
+    JmapEmailSubmissionRow, MessageBccRecipientRecordRow, Storage, DEFAULT_TASK_LIST_ROLE,
 };
-use crate::mail::parse_calendar_meeting_response;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct JmapEmailAddress {
@@ -837,23 +837,6 @@ impl Storage {
                 rollup.swapped_todo_data,
                 rollup.categories,
                 m.has_attachments,
-                EXISTS (
-                    SELECT 1
-                    FROM message_headers header
-                    WHERE header.tenant_id = m.tenant_id
-                      AND header.message_id = m.id
-                      AND lower(btrim(header.header_name)) = 'content-class'
-                      AND lower(btrim(header.header_value)) = 'urn:content-classes:calendarmessage'
-                )
-                AND EXISTS (
-                    SELECT 1
-                    FROM mime_parts part
-                    WHERE part.tenant_id = m.tenant_id
-                      AND part.message_id = m.id
-                      AND lower(part.content_type) LIKE 'text/calendar%'
-                      AND lower(part.content_type) ~
-                          '(^|;)[[:space:]]*method[[:space:]]*=[[:space:]]*"?request"?([;]|$)'
-                ) AS calendar_invitation,
                 m.size_octets,
                 m.internet_message_id,
                 ('message:' || m.id::text) AS mime_blob_ref,
@@ -949,25 +932,31 @@ impl Storage {
         .bind(ids)
         .fetch_all(&self.pool)
         .await?;
+        let mut calendar_invitations = HashMap::new();
         let mut calendar_responses = HashMap::new();
         for part in calendar_parts {
             let message_id: Uuid = part.try_get("message_id")?;
-            if calendar_responses.contains_key(&message_id) {
-                continue;
-            }
             let content_type: String = part.try_get("content_type")?;
             let blob_bytes: Option<Vec<u8>> = part.try_get("blob_bytes")?;
             let Some(blob_bytes) = blob_bytes else {
                 continue;
             };
-            if let Some(response) = parse_calendar_meeting_response(&[AttachmentUploadInput {
+            let attachment = AttachmentUploadInput {
                 file_name: String::new(),
                 media_type: content_type,
                 disposition: None,
                 content_id: None,
                 blob_bytes,
-            }]) {
-                calendar_responses.insert(message_id, response);
+            };
+            if contains_calendar_meeting_request(std::slice::from_ref(&attachment)) {
+                calendar_invitations.insert(message_id, ());
+            }
+            if !calendar_responses.contains_key(&message_id) {
+                if let Some(response) =
+                    parse_calendar_meeting_response(std::slice::from_ref(&attachment))
+                {
+                    calendar_responses.insert(message_id, response);
+                }
             }
         }
 
@@ -1114,7 +1103,7 @@ impl Storage {
                     swapped_todo_data: row.swapped_todo_data.clone(),
                     categories: row.categories.clone(),
                     has_attachments: row.has_attachments,
-                    calendar_invitation: row.calendar_invitation,
+                    calendar_invitation: calendar_invitations.remove(&row.id).is_some(),
                     calendar_meeting_response: calendar_responses.remove(&row.id),
                     size_octets: row.size_octets,
                     internet_message_id: row.internet_message_id.clone(),

@@ -1714,6 +1714,7 @@ local_cache = "docs/microsoft/cache/MS-OXCMAIL.pdf"
 sha256 = "e60151f56a6a48dce36cd7244357fc713c51ce8fe49680efc6dca548ef029b40"
 used_for = [
   "MIME generation and canonical mail object projection across ActiveSync, MAPI submission, and IMAP fetch",
+  "Inbound text/calendar body recognition without a legacy top-level Content-Class prerequisite",
 ]
 sections = [
   "2.1 MIME Generation Algorithm Details",
@@ -1721,6 +1722,7 @@ sections = [
   "2.1.3.2 Envelope Elements",
   "2.1.3.3 Body Text",
   "2.1.3.4 Attachments",
+  "2.2.3.3.2 Calendaring and vCard Body Parts",
 ]
 
 [[protocol]]
@@ -1733,6 +1735,7 @@ local_cache = "docs/microsoft/cache/MS-OXCICAL.pdf"
 sha256 = "27029ae5f860e29e283e2d88cf40bf82bb304c611fe7af8ce387f010612e104d"
 used_for = [
   "Internet calendar projection across DAV, ActiveSync, and MAPI calendar views",
+  "Inbound METHOD:REQUEST classification as an Outlook Meeting Request",
   "Zero-length Calendar subject semantics after PidTagSubject is deleted",
   "Calendar organizer and attendee recipient-row identity and response-status mapping",
   "Calendar RSVP agreement and the distinct delegated X-MS-OLK-SENDER identity case",
@@ -1742,6 +1745,7 @@ sections = [
   "2.1 Common Algorithm Details",
   "2.1.3.1 Hierarchy of Components, Properties, and Parameters",
   "2.1.3.1.1 Component: VCALENDAR",
+  "2.1.3.1.1.1 Property: METHOD",
   "2.1.3.1.1.19 Component: VTIMEZONE",
   "2.1.3.1.1.20 Component: VEVENT",
   "2.1.3.1.1.20.2 Property: ATTENDEE",

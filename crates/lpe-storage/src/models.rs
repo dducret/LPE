@@ -120,7 +120,6 @@ pub(crate) struct JmapEmailRow {
     pub(crate) swapped_todo_data: Option<Vec<u8>>,
     pub(crate) categories: Vec<String>,
     pub(crate) has_attachments: bool,
-    pub(crate) calendar_invitation: bool,
     pub(crate) size_octets: i64,
     pub(crate) internet_message_id: Option<String>,
     pub(crate) mime_blob_ref: Option<String>,

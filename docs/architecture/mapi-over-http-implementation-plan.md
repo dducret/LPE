@@ -2614,7 +2614,12 @@ FastTransfer/ICS calendar sync can project the bounded recurrence blob back
 from canonical event state. Appointment-like `IPM.Schedule.Meeting.Request`
 payloads that contain only the bounded event property subset are canonicalized
 as `calendar_events`; bounded meeting responses update canonical attendee
-participation status on the existing event. Inbound iCalendar `REPLY` and
+participation status on the existing event. An inbound `text/calendar`
+`METHOD:REQUEST` with exactly one `VEVENT` is projected as
+`IPM.Schedule.Meeting.Request` even when the RFC 5322 message omits the legacy
+top-level `Content-Class` header. A conflicting MIME `method` parameter is
+rejected rather than overriding the decoded VCALENDAR method. Inbound
+iCalendar `REPLY` and
 `COUNTER` messages are accepted only when they contain exactly one `VEVENT` and
 one attendee whose address matches the envelope sender and whose UID resolves
 to an active event owned by the delivery recipient. A `COUNTER` keeps the
