@@ -383,6 +383,11 @@ pub(in crate::mapi) fn default_event_for_mapping(
     }
 }
 
+// [MS-OXOCAL] section 2.2.1.29: Outlook uses whole minutes since 1601-01-01.
+pub(in crate::mapi) fn owner_appointment_id_from_filetime(filetime: u64) -> u32 {
+    u32::try_from(filetime / 600_000_000).unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -3188,6 +3188,7 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
         attendee_name: "Denis Ducret".to_string(),
         partstat: "tentative".to_string(),
         uid: "mapi-goid:001122".to_string(),
+        response_sent_at: Some("2026-08-21T17:00:00Z".to_string()),
         meeting_start: Some("2026-08-24T06:30:00Z".to_string()),
         meeting_end: Some("2026-08-24T07:00:00Z".to_string()),
         meeting_location: Some("Les Planches".to_string()),
@@ -3209,7 +3210,7 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
         .partstat = "declined".to_string();
     assert_eq!(
         email_property_value(&declined_counter, PID_TAG_MESSAGE_CLASS_W),
-        Some(MapiValue::String("IPM.Schedule.Meeting.Resp.Neg".to_string()))
+        Some(MapiValue::String("IPM.Schedule.Meeting.Resp.Tent".to_string()))
     );
     assert_eq!(
         email_property_value(&counter, PID_LID_APPOINTMENT_COUNTER_PROPOSAL_TAG),
@@ -3246,12 +3247,33 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
         Some(MapiValue::String("Les Planches".to_string()))
     );
     assert_eq!(
+        email_property_value(&counter, PID_LID_WHERE_W_TAG),
+        Some(MapiValue::String("Les Planches".to_string()))
+    );
+    assert_eq!(
+        email_property_value(&counter, PID_LID_ATTENDEE_CRITICAL_CHANGE_TAG),
+        Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+            "2026-08-21T17:00:00Z"
+        )))
+    );
+    assert_eq!(
+        email_property_value(&counter, PID_LID_IS_SILENT_TAG),
+        Some(MapiValue::Bool(counter.body_text.trim().is_empty()))
+    );
+    assert_eq!(
         email_property_value(&counter, PID_LID_APPOINTMENT_SEQUENCE_TAG),
         Some(MapiValue::I32(0))
     );
     assert_eq!(
         email_property_value(&counter, PID_LID_GLOBAL_OBJECT_ID_TAG),
         Some(MapiValue::Binary(vec![0x00, 0x11, 0x22]))
+    );
+    assert_eq!(
+        email_property_value(&counter, PID_TAG_OWNER_APPOINTMENT_ID),
+        Some(MapiValue::U32(
+            (mapi_mailstore::filetime_from_rfc3339_utc("2026-08-24T06:30:00Z")
+                / 600_000_000) as u32,
+        ))
     );
     assert_eq!(
         email_property_value(&email, PID_TAG_ACCESS_LEVEL),
@@ -4318,6 +4340,21 @@ fn calendar_fallback_global_object_id_uses_zero_creation_time() {
     let global_object_id = super::calendar::calendar_global_object_id(&event);
 
     assert_eq!(&global_object_id[20..28], &[0; 8]);
+}
+
+#[test]
+fn calendar_owner_appointment_id_uses_its_start_time() {
+    let mut event = default_event_for_mapping(Uuid::nil(), "default");
+    event.date = "2026-08-24".to_string();
+    event.time = "06:30".to_string();
+
+    assert_eq!(
+        event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_OWNER_APPOINTMENT_ID),
+        Some(MapiValue::U32(
+            (mapi_mailstore::filetime_from_rfc3339_utc("2026-08-24T06:30:00Z")
+                / 600_000_000) as u32,
+        ))
+    );
 }
 
 #[test]
@@ -7243,6 +7280,27 @@ fn overlapping_named_property_ids_have_one_round_trip_definition() {
             MapiNamedProperty {
                 guid: PSETID_MEETING_GUID,
                 kind: MapiNamedPropertyKind::Lid(PID_LID_CLEAN_GLOBAL_OBJECT_ID),
+            },
+        ),
+        (
+            0x81b5,
+            MapiNamedProperty {
+                guid: PSETID_MEETING_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_ATTENDEE_CRITICAL_CHANGE),
+            },
+        ),
+        (
+            0x8219,
+            MapiNamedProperty {
+                guid: PSETID_MEETING_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_WHERE),
+            },
+        ),
+        (
+            0x81e6,
+            MapiNamedProperty {
+                guid: PSETID_MEETING_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_IS_SILENT),
             },
         ),
         (

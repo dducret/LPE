@@ -36,6 +36,7 @@ pub struct CalendarMeetingResponse {
     pub attendee_name: String,
     pub partstat: String,
     pub uid: String,
+    pub response_sent_at: Option<String>,
     pub meeting_start: Option<String>,
     pub meeting_end: Option<String>,
     pub meeting_location: Option<String>,
@@ -128,6 +129,14 @@ fn parse_icalendar_meeting_response(bytes: &[u8]) -> Option<CalendarMeetingRespo
         .and_then(|value| value.parse::<u32>().ok())
         .and_then(|value| i32::try_from(value).ok());
     let timezone_offsets = icalendar_timezone_offsets(&lines);
+    // [MS-OXCICAL] section 2.1.3.1.1.20.9 maps a REPLY or COUNTER DTSTAMP
+    // to PidLidAttendeeCriticalChange.
+    let response_sent_at = match icalendar_value_with_parameters(event, "DTSTAMP") {
+        Some((parameters, value)) => {
+            Some(parse_icalendar_datetime(parameters, value, &timezone_offsets)?)
+        }
+        None => None,
+    };
     let (meeting_start, meeting_end, proposed_start, proposed_end, original_start, original_end) =
         if method == "COUNTER" {
         let start = icalendar_value_with_parameters(event, "DTSTART")?;
@@ -186,6 +195,7 @@ fn parse_icalendar_meeting_response(bytes: &[u8]) -> Option<CalendarMeetingRespo
         attendee_name,
         partstat,
         uid: normalize_calendar_meeting_uid(&uid),
+        response_sent_at,
         meeting_start,
         meeting_end,
         meeting_location,
@@ -738,6 +748,7 @@ mod tests {
                 "ATTENDEE;PARTSTAT=TENTATIVE;CN=Denis Ducret:mailto:denis.ducret@sdic.ch\r\n",
                 "DTSTART;TZID=Greenwich Standard Time:20260824T063000\r\n",
                 "DTEND;TZID=Greenwich Standard Time:20260824T073000\r\n",
+                "DTSTAMP:20260821T170000Z\r\n",
                 "UID:mapi-goid:001122\r\n",
                 "END:VEVENT\r\n",
                 "END:VCALENDAR\r\n"
@@ -754,6 +765,7 @@ mod tests {
                 attendee_name: "Denis Ducret".to_string(),
                 partstat: "tentative".to_string(),
                 uid: "mapi-goid:001122".to_string(),
+                response_sent_at: Some("2026-08-21T17:00:00Z".to_string()),
                 meeting_start: Some("2026-08-24T06:30:00Z".to_string()),
                 meeting_end: Some("2026-08-24T07:30:00Z".to_string()),
                 meeting_location: None,
@@ -809,6 +821,7 @@ mod tests {
                 attendee_name: "Denis Ducret".to_string(),
                 partstat: "declined".to_string(),
                 uid: "mapi-goid:040000008200e00074c5b7101a82e00800000000c08470cd9e31dd01000000000000000010000000ecff8aec00ce584390f914bf6a87f955".to_string(),
+                response_sent_at: None,
                 meeting_start: Some("2026-08-24T09:00:00Z".to_string()),
                 meeting_end: Some("2026-08-24T09:30:00Z".to_string()),
                 meeting_location: Some("Les Planches".to_string()),
@@ -906,6 +919,7 @@ mod tests {
                 attendee_name: String::new(),
                 partstat: "accepted".to_string(),
                 uid: "mapi-goid:001122".to_string(),
+                response_sent_at: None,
                 meeting_start: Some("2026-08-25T08:00:00Z".to_string()),
                 meeting_end: Some("2026-08-25T08:30:00Z".to_string()),
                 meeting_location: None,

@@ -127,6 +127,9 @@ fn event_property_value_with_optional_version(
         | PID_LID_COMMON_END_TAG
         | PID_LID_APPOINTMENT_END_WHOLE_TAG
         | PID_LID_CLIP_END_TAG => Some(MapiValue::I64(event_end_filetime(event) as i64)),
+        PID_TAG_OWNER_APPOINTMENT_ID => Some(MapiValue::U32(
+            owner_appointment_id_from_filetime(event_start_filetime(event)),
+        )),
         PID_LID_LOCATION_W_TAG => Some(MapiValue::String(event.location.clone())),
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Appointment".to_string())),
         PID_TAG_ACCESS => Some(MapiValue::U32(event_mapi_access(event))),

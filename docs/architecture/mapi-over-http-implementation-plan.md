@@ -2624,17 +2624,25 @@ start/end and projecting the Inbox item as a Meeting Response with
 meeting's start/end alongside its Global Object ID, rather than exposing zero
 time values that prevent Outlook from locating the organizer's Calendar item.
 It also projects the iCalendar location and appointment sequence carried by
-the response, plus its Outlook Meeting Response subject prefix.
+the response, plus the Meeting-set `PidLidWhere`,
+`PidLidAttendeeCriticalChange`, and `PidLidIsSilent` properties and its Outlook
+Meeting Response subject prefix.
+When the response contains `DTSTAMP`, LPE uses that iCalendar response time for
+`PidLidAttendeeCriticalChange`; durable message delivery time is the fallback
+only when older input omits `DTSTAMP`.
 The matching response icon is also projected for accepted, declined,
 tentative, and counter-proposal messages.
+The response and its canonical Calendar item derive the same
+`PidTagOwnerAppointmentId` from the meeting start time for Outlook's lookup.
 When a `COUNTER` supplies `X-MS-OLK-ORIGINALSTART` and
 `X-MS-OLK-ORIGINALEND`, both values must match the canonical scheduled interval
 before LPE updates attendee state; a stale response remains stored in Inbox but
 does not mutate the event. A counter with only one original-time field is
 rejected as ambiguous.
 The expected `COUNTER` status is `TENTATIVE`; LPE also preserves the observed
-Outlook `COUNTER` with `PARTSTAT=DECLINED` as a declined Meeting Response while
-retaining its proposal. The bounded import cancellation
+Outlook `COUNTER` with `PARTSTAT=DECLINED` as a declined attendee state while
+retaining its proposal and projecting the standard tentative Meeting Response
+class. The bounded import cancellation
 path deletes the existing canonical event. Cancellation submitted as a mutation
 on an already-open Event handle remains fail-closed at parent Save until
 deletion participates in the same staged atomic commit. Modified exceptions

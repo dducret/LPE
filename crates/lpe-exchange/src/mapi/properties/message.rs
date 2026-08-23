@@ -55,6 +55,26 @@ pub(in crate::mapi) fn email_property_value(
             .and_then(|response| response.meeting_location.as_ref())
             .cloned()
             .map(MapiValue::String),
+        // [MS-OXOCAL] section 3.1.4.8.4 requires a Meeting Response to carry
+        // the sent time, the copied Location, and whether it has a user body.
+        PID_LID_ATTENDEE_CRITICAL_CHANGE_TAG => email
+            .calendar_meeting_response
+            .as_ref()
+            .map(|response| {
+                MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+                    response.response_sent_at.as_deref().unwrap_or(&email.received_at),
+                ))
+            }),
+        PID_LID_WHERE_W_TAG => email
+            .calendar_meeting_response
+            .as_ref()
+            .and_then(|response| response.meeting_location.as_ref())
+            .cloned()
+            .map(MapiValue::String),
+        PID_LID_IS_SILENT_TAG => email
+            .calendar_meeting_response
+            .as_ref()
+            .map(|_| MapiValue::Bool(email.body_text.trim().is_empty())),
         PID_LID_APPOINTMENT_SEQUENCE_TAG => email
             .calendar_meeting_response
             .as_ref()
@@ -119,8 +139,10 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_INTERNET_MAIL_OVERRIDE_FORMAT
         | PID_TAG_BLOCK_STATUS
         | PID_TAG_LAST_VERB_EXECUTED
-        | PID_TAG_MESSAGE_EDITOR_FORMAT
-        | PID_TAG_OWNER_APPOINTMENT_ID => Some(MapiValue::U32(0)),
+        | PID_TAG_MESSAGE_EDITOR_FORMAT => Some(MapiValue::U32(0)),
+        PID_TAG_OWNER_APPOINTMENT_ID => Some(MapiValue::U32(
+            calendar_response_owner_appointment_id(email).unwrap_or(0),
+        )),
         PID_TAG_SUBJECT_PREFIX_W => Some(MapiValue::String(
             calendar_response_subject_prefix(email)
                 .unwrap_or_default()
@@ -313,10 +335,8 @@ pub(in crate::mapi) fn conversation_index_for_uuid(conversation_id: Uuid) -> Vec
 pub(crate) fn message_class_for_email(email: &JmapEmail) -> &'static str {
     if let Some(response) = email.calendar_meeting_response.as_ref() {
         match response.method.as_str() {
-            "COUNTER" => match response.partstat.as_str() {
-                "declined" => "IPM.Schedule.Meeting.Resp.Neg",
-                _ => "IPM.Schedule.Meeting.Resp.Tent",
-            },
+            // [MS-OXCICAL] section 2.1.3.1.1.1 maps every COUNTER to Tent.
+            "COUNTER" => "IPM.Schedule.Meeting.Resp.Tent",
             "REPLY" => match response.partstat.as_str() {
                 "accepted" => "IPM.Schedule.Meeting.Resp.Pos",
                 "tentative" => "IPM.Schedule.Meeting.Resp.Tent",
@@ -402,6 +422,17 @@ fn calendar_response_icon_index(email: &JmapEmail) -> Option<u32> {
         },
         _ => None,
     }
+}
+
+fn calendar_response_owner_appointment_id(email: &JmapEmail) -> Option<u32> {
+    let start = email
+        .calendar_meeting_response
+        .as_ref()?
+        .meeting_start
+        .as_deref()?;
+    Some(super::calendar::owner_appointment_id_from_filetime(
+        mapi_mailstore::filetime_from_rfc3339_utc(start),
+    ))
 }
 
 pub(in crate::mapi) fn native_body_format(email: &JmapEmail) -> u32 {

@@ -138,6 +138,13 @@ pub(super) fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
             PSETID_MEETING_GUID,
         ),
         (
+            0x81B5,
+            PID_LID_ATTENDEE_CRITICAL_CHANGE,
+            PSETID_MEETING_GUID,
+        ),
+        (0x8219, PID_LID_WHERE, PSETID_MEETING_GUID),
+        (0x81E6, PID_LID_IS_SILENT, PSETID_MEETING_GUID),
+        (
             0x8017,
             PID_LID_OUTLOOK_APPOINTMENT_8F07,
             OUTLOOK_VIEW_8F07_GUID,
