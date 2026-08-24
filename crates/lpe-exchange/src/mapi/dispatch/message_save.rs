@@ -522,10 +522,9 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
         Some(MapiObject::Message {
             folder_id,
             message_id,
-            saved_email,
+            mut saved_email,
             pending_properties,
         }) => {
-            let staged_property_write = !pending_properties.is_empty();
             let staged_recipient_replacement = session
                 .pending_message_recipient_replacements
                 .get(&handle)
@@ -543,10 +542,10 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                         .then_some(*attach_num)
                 })
                 .collect::<Vec<_>>();
-            let has_pending_changes = staged_property_write
-                || staged_recipient_replacement.is_some()
+            let has_other_staged_mutations = staged_recipient_replacement.is_some()
                 || !staged_property_deletions.is_empty()
                 || !pending.is_empty();
+            let has_pending_changes = !pending_properties.is_empty() || has_other_staged_mutations;
             let force_save = request.payload.first().copied().unwrap_or(0) & 0x04 != 0;
             let current_generation = session.message_save_generation(folder_id, message_id);
             let handle_generation = session
@@ -569,37 +568,26 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 );
                 return;
             }
-            if staged_property_write
-                && apply_staged_message_property_values(
-                    store,
-                    principal,
-                    folder_id,
-                    message_id,
-                    saved_email.clone(),
-                    pending_properties.clone(),
-                    mailboxes,
-                    emails,
-                    snapshot,
-                )
-                .await
-                .is_err()
-            {
-                responses.extend_from_slice(&rop_error_response(
-                    0x0C,
-                    request.response_handle_index(),
-                    0x8004_0102,
-                ));
-                session.handles.insert(
-                    handle,
-                    MapiObject::Message {
-                        folder_id,
-                        message_id,
-                        saved_email,
-                        pending_properties,
-                    },
-                );
+            let Some(staged_property_changed) = save_existing_message_property_values(
+                store,
+                principal,
+                session,
+                request,
+                handle,
+                folder_id,
+                message_id,
+                &mut saved_email,
+                &pending_properties,
+                has_other_staged_mutations,
+                mailboxes,
+                emails,
+                snapshot,
+                responses,
+            )
+            .await
+            else {
                 return;
-            }
+            };
             if let Some(recipients) = staged_recipient_replacement.as_deref() {
                 if apply_staged_message_recipient_replacement(
                     store, principal, folder_id, message_id, recipients, mailboxes, emails,
@@ -763,7 +751,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                     false,
                 );
             }
-            if staged_property_write {
+            if staged_property_changed {
                 session.record_notification(MapiNotificationEvent::content(
                     folder_id,
                     Some(message_id),
@@ -778,7 +766,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                     Some(message_id),
                 ));
             }
-            if has_pending_changes {
+            if staged_property_changed || has_other_staged_mutations {
                 session.record_message_saved(handle, folder_id, message_id);
             }
             session.handles.insert(

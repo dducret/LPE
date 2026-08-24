@@ -66,6 +66,7 @@ where
         }
         Some(RopId::FastTransferSourceCopyMessages) => {
             append_fast_transfer_source_copy_messages_response(
+                principal,
                 session,
                 handle_slots,
                 request,

@@ -421,6 +421,7 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
     let initial_state = mapi_mailstore::initial_sync_state_stream(sync_type);
     let transfer_buffer = mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions_and_commit_times_and_normal_message_facts(
         principal.account_id,
+        Some(principal),
         sync_type,
         sync_flags,
         sync_extra_flags,

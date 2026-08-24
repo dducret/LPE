@@ -487,6 +487,7 @@ fn read_recipients_success_response_includes_row_count() {
         &[],
         &[],
         &MapiMailStoreSnapshot::empty(),
+        &store_test_principal(Uuid::nil()),
     );
 
     assert_eq!(&response[..7], &[0x0F, 0x02, 0, 0, 0, 0, 2]);
@@ -542,6 +543,7 @@ fn read_recipients_uses_row_id_value_not_vector_index() {
         &[],
         &[],
         &MapiMailStoreSnapshot::empty(),
+        &store_test_principal(Uuid::nil()),
     );
 
     assert_eq!(&response[..7], &[0x0F, 0x02, 0, 0, 0, 0, 2]);
@@ -578,6 +580,7 @@ fn read_recipients_row_zero_on_empty_message_returns_not_found() {
         &[],
         &[],
         &MapiMailStoreSnapshot::empty(),
+        &store_test_principal(Uuid::nil()),
     );
 
     assert_eq!(response, vec![0x0F, 0x02, 0x0F, 0x01, 0x04, 0x80]);
@@ -3449,6 +3452,409 @@ fn unresolved_rfc_from_and_sender_project_distinct_one_off_mapi_identities() {
     );
 }
 
+fn recipient_delivery_test_email() -> JmapEmail {
+    let mailbox_id = Uuid::from_u128(0x3333);
+    JmapEmail {
+        id: Uuid::from_u128(0x1111),
+        thread_id: Uuid::from_u128(0x2222),
+        mailbox_ids: vec![mailbox_id],
+        mailbox_states: Vec::new(),
+        mailbox_id,
+        mailbox_role: "inbox".to_string(),
+        mailbox_name: "Inbox".to_string(),
+        modseq: 7,
+        received_at: "2026-08-24T17:27:50Z".to_string(),
+        sent_at: Some("2026-08-24T17:27:20Z".to_string()),
+        from_address: "denis.ducret@sdic.ch".to_string(),
+        from_display: Some("Denis Ducret".to_string()),
+        sender_address: None,
+        sender_display: None,
+        sender_authorization_kind: "external".to_string(),
+        submitted_by_account_id: Uuid::from_u128(0x4444),
+        to: Vec::new(),
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        subject: "Probe 2".to_string(),
+        preview: String::new(),
+        body_text: String::new(),
+        body_html_sanitized: None,
+        unread: true,
+        flagged: false,
+        followup_flag_status: "none".to_string(),
+        followup_icon: 0,
+        todo_item_flags: 0,
+        followup_request: String::new(),
+        followup_start_at: None,
+        followup_due_at: None,
+        followup_completed_at: None,
+        reminder_set: false,
+        reminder_at: None,
+        reminder_dismissed_at: None,
+        swapped_todo_store_id: None,
+        swapped_todo_data: None,
+        categories: Vec::new(),
+        has_attachments: true,
+        calendar_invitation: true,
+        calendar_meeting_request: Some(lpe_storage::CalendarMeetingRequest {
+            uid: "040000008200E00074C5B7101A82E00800000000".to_string(),
+            transport_attachment_id: None,
+            client_processed: false,
+            organizer: Some(lpe_storage::CalendarMeetingIdentity {
+                email: "denis.ducret@sdic.ch".to_string(),
+                display_name: "Denis Ducret".to_string(),
+            }),
+            attendees: vec![lpe_storage::CalendarMeetingAttendee {
+                email: "test@l-p-e.ch".to_string(),
+                display_name: "Test".to_string(),
+                cutype: "INDIVIDUAL".to_string(),
+                role: "REQ-PARTICIPANT".to_string(),
+                partstat: "needs-action".to_string(),
+                rsvp: true,
+            }],
+            response_requested: true,
+            sent_at: Some("2026-08-24T17:27:20Z".to_string()),
+            meeting_start: "2026-08-25T10:00:00Z".to_string(),
+            meeting_end: "2026-08-25T10:30:00Z".to_string(),
+            meeting_location: None,
+            meeting_sequence: 0,
+            intended_busy_status: 2,
+        }),
+        calendar_meeting_response: None,
+        size_octets: 512,
+        internet_message_id: Some("<probe-2@sdic.ch>".to_string()),
+        mime_blob_ref: None,
+        delivery_status: "delivered".to_string(),
+    }
+}
+
+#[test]
+fn meeting_request_receiver_projects_logged_on_attendee_not_external_organizer() {
+    let email = recipient_delivery_test_email();
+    let principal = store_test_principal(Uuid::from_u128(0x5555));
+    let entry = crate::mapi::nspi::principal_address_book_entry(&principal);
+    let legacy_dn = crate::mapi::nspi::nspi_entry_unprefixed_legacy_dn(&entry);
+    let entry_id = crate::mapi::nspi::nspi_entry_permanent_entry_id(&entry);
+    let search_key = crate::mapi::nspi::nspi_entry_search_key(&entry);
+
+    assert_eq!(
+        email_recipient_delivery_property_tags(&email, &principal).len(),
+        15
+    );
+    for tag in [
+        PID_TAG_RECEIVED_BY_ADDRESS_TYPE_W,
+        PID_TAG_RECEIVED_REPRESENTING_ADDRESS_TYPE_W,
+    ] {
+        assert_eq!(
+            email_property_value_for_principal(&email, &principal, tag),
+            Some(MapiValue::String("EX".to_string()))
+        );
+    }
+    for tag in [
+        PID_TAG_RECEIVED_BY_EMAIL_ADDRESS_W,
+        PID_TAG_RECEIVED_REPRESENTING_EMAIL_ADDRESS_W,
+    ] {
+        assert_eq!(
+            email_property_value_for_principal(&email, &principal, tag),
+            Some(MapiValue::String(legacy_dn.clone()))
+        );
+    }
+    for tag in [
+        PID_TAG_RECEIVED_BY_ENTRY_ID_ALT,
+        PID_TAG_RECEIVED_REPRESENTING_ENTRY_ID,
+    ] {
+        assert_eq!(
+            email_property_value_for_principal(&email, &principal, tag),
+            Some(MapiValue::Binary(entry_id.clone()))
+        );
+    }
+    for tag in [
+        PID_TAG_RECEIVED_BY_SEARCH_KEY,
+        PID_TAG_RECEIVED_REPRESENTING_SEARCH_KEY,
+    ] {
+        assert_eq!(
+            email_property_value_for_principal(&email, &principal, tag),
+            Some(MapiValue::Binary(search_key.clone()))
+        );
+    }
+    for tag in [
+        PID_TAG_RECEIVED_BY_NAME_W,
+        PID_TAG_RECEIVED_REPRESENTING_NAME_W,
+    ] {
+        assert_eq!(
+            email_property_value_for_principal(&email, &principal, tag),
+            Some(MapiValue::String("Test".to_string()))
+        );
+    }
+    for tag in [
+        PID_TAG_RECEIVED_BY_SMTP_ADDRESS_W,
+        PID_TAG_RECEIVED_REPRESENTING_SMTP_ADDRESS_W,
+    ] {
+        assert_eq!(
+            email_property_value_for_principal(&email, &principal, tag),
+            Some(MapiValue::String("test@l-p-e.ch".to_string()))
+        );
+    }
+    assert_eq!(
+        email_property_value_for_principal(&email, &principal, PID_TAG_MESSAGE_TO_ME),
+        Some(MapiValue::Bool(true))
+    );
+    assert_eq!(
+        email_property_value_for_principal(&email, &principal, PID_TAG_MESSAGE_CC_ME),
+        Some(MapiValue::Bool(false))
+    );
+    assert_eq!(
+        email_property_value_for_principal(&email, &principal, PID_TAG_MESSAGE_RECIPIENT_ME),
+        Some(MapiValue::Bool(true))
+    );
+
+    let organizer = AccountPrincipal {
+        email: "denis.ducret@sdic.ch".to_string(),
+        display_name: "Denis Ducret".to_string(),
+        ..principal.clone()
+    };
+    assert!(email_recipient_delivery_property_tags(&email, &organizer).is_empty());
+    assert_eq!(
+        email_property_value_for_principal(&email, &organizer, PID_TAG_RECEIVED_BY_ENTRY_ID_ALT),
+        None
+    );
+    let mut expected_receiver = Vec::new();
+    write_mapi_value(
+        &mut expected_receiver,
+        PID_TAG_RECEIVED_BY_SMTP_ADDRESS_W,
+        &MapiValue::String("test@l-p-e.ch".to_string()),
+    );
+    assert_eq!(
+        serialize_email_property_with_durable_identity_for_principal(
+            &email,
+            None,
+            &principal,
+            PID_TAG_RECEIVED_BY_SMTP_ADDRESS_W,
+        ),
+        expected_receiver
+    );
+    let mut expected_absent = Vec::new();
+    write_property_default(&mut expected_absent, PID_TAG_RECEIVED_BY_SMTP_ADDRESS_W);
+    assert_eq!(
+        serialize_email_property_with_durable_identity_for_principal(
+            &email,
+            None,
+            &organizer,
+            PID_TAG_RECEIVED_BY_SMTP_ADDRESS_W,
+        ),
+        expected_absent
+    );
+}
+
+#[test]
+fn principal_aware_serializer_preserves_durable_message_identity() {
+    let email = recipient_delivery_test_email();
+    let principal = store_test_principal(Uuid::from_u128(0x5555));
+    let durable_identity = crate::store::MapiIdentityRecord {
+        object_kind: crate::store::MapiIdentityObjectKind::Message,
+        canonical_id: email.id,
+        object_id: crate::mapi::identity::mapi_store_id(0x1234),
+        change_number: 0x42,
+        source_key: vec![0x11; 22],
+        change_key: vec![0x22; 22],
+        predecessor_change_list: vec![0x33; 44],
+        last_modification_time: 133_936_000_000_000_000,
+    };
+
+    for property_tag in [PID_TAG_MID, PID_TAG_INSTANCE_KEY] {
+        assert_eq!(
+            serialize_email_property_with_durable_identity_for_principal(
+                &email,
+                Some(&durable_identity),
+                &principal,
+                property_tag,
+            ),
+            serialize_message_row_with_durable_identity(
+                &email,
+                Some(&durable_identity),
+                &[property_tag],
+            )
+        );
+    }
+}
+
+#[test]
+fn meeting_receiver_role_and_response_organizer_control_me_flags() {
+    let principal = store_test_principal(Uuid::from_u128(0x5555));
+    let mut email = recipient_delivery_test_email();
+    email.calendar_meeting_request.as_mut().unwrap().attendees[0].role =
+        "OPT-PARTICIPANT".to_string();
+    assert_eq!(
+        email_property_value_for_principal(&email, &principal, PID_TAG_MESSAGE_TO_ME),
+        Some(MapiValue::Bool(false))
+    );
+    assert_eq!(
+        email_property_value_for_principal(&email, &principal, PID_TAG_MESSAGE_CC_ME),
+        Some(MapiValue::Bool(true))
+    );
+    assert_eq!(
+        email_property_value_for_principal(&email, &principal, PID_TAG_MESSAGE_RECIPIENT_ME),
+        Some(MapiValue::Bool(true))
+    );
+
+    email.calendar_invitation = false;
+    email.calendar_meeting_request = None;
+    email.calendar_meeting_response = Some(lpe_storage::CalendarMeetingResponse {
+        method: "REPLY".to_string(),
+        transport_attachment_id: None,
+        server_processed: true,
+        organizer: Some(lpe_storage::CalendarMeetingIdentity {
+            email: principal.email.clone(),
+            display_name: principal.display_name.clone(),
+        }),
+        attendee_email: "denis.ducret@sdic.ch".to_string(),
+        attendee_name: "Denis Ducret".to_string(),
+        partstat: "declined".to_string(),
+        uid: "040000008200E00074C5B7101A82E00800000000".to_string(),
+        response_sent_at: Some("2026-08-24T17:27:20Z".to_string()),
+        meeting_start: Some("2026-08-25T10:00:00Z".to_string()),
+        meeting_end: Some("2026-08-25T10:30:00Z".to_string()),
+        meeting_location: None,
+        meeting_sequence: Some(0),
+        proposed_start: None,
+        proposed_end: None,
+        original_start: None,
+        original_end: None,
+    });
+    assert_eq!(
+        email_property_value_for_principal(&email, &principal, PID_TAG_MESSAGE_TO_ME),
+        Some(MapiValue::Bool(true))
+    );
+    assert_eq!(
+        email_property_value_for_principal(&email, &principal, PID_TAG_MESSAGE_RECIPIENT_ME),
+        Some(MapiValue::Bool(true))
+    );
+}
+
+#[test]
+fn ordinary_bcc_delivery_projects_receiver_and_recipient_me_but_not_to_or_cc_me() {
+    let principal = store_test_principal(Uuid::from_u128(0x5555));
+    let mut email = recipient_delivery_test_email();
+    email.calendar_invitation = false;
+    email.calendar_meeting_request = None;
+    email.to = vec![lpe_storage::JmapEmailAddress {
+        address: "test@l-p-e.ch".to_string(),
+        display_name: None,
+    }];
+    assert_eq!(
+        (
+            email_property_value_for_principal(&email, &principal, PID_TAG_MESSAGE_TO_ME),
+            email_property_value_for_principal(&email, &principal, PID_TAG_MESSAGE_CC_ME),
+            email_property_value_for_principal(&email, &principal, PID_TAG_MESSAGE_RECIPIENT_ME),
+        ),
+        (
+            Some(MapiValue::Bool(true)),
+            Some(MapiValue::Bool(false)),
+            Some(MapiValue::Bool(true)),
+        )
+    );
+
+    email.to = vec![lpe_storage::JmapEmailAddress {
+        address: "another@example.test".to_string(),
+        display_name: None,
+    }];
+    email.cc = vec![lpe_storage::JmapEmailAddress {
+        address: "test@l-p-e.ch".to_string(),
+        display_name: None,
+    }];
+    assert_eq!(
+        (
+            email_property_value_for_principal(&email, &principal, PID_TAG_MESSAGE_TO_ME),
+            email_property_value_for_principal(&email, &principal, PID_TAG_MESSAGE_CC_ME),
+            email_property_value_for_principal(&email, &principal, PID_TAG_MESSAGE_RECIPIENT_ME),
+        ),
+        (
+            Some(MapiValue::Bool(false)),
+            Some(MapiValue::Bool(true)),
+            Some(MapiValue::Bool(true)),
+        )
+    );
+
+    email.cc.clear();
+    email.bcc = vec![lpe_storage::JmapEmailAddress {
+        address: "test@l-p-e.ch".to_string(),
+        display_name: None,
+    }];
+
+    assert_eq!(
+        email_property_value_for_principal(&email, &principal, PID_TAG_RECEIVED_BY_SMTP_ADDRESS_W),
+        Some(MapiValue::String("test@l-p-e.ch".to_string()))
+    );
+    // [MS-OXOMSG] sections 2.2.1.17-2.2.1.19: Bcc leaves ToMe and CcMe
+    // false, while RecipientMe includes explicit Bcc delivery.
+    for tag in [PID_TAG_MESSAGE_TO_ME, PID_TAG_MESSAGE_CC_ME] {
+        assert_eq!(
+            email_property_value_for_principal(&email, &principal, tag),
+            Some(MapiValue::Bool(false))
+        );
+    }
+    assert_eq!(
+        email_property_value_for_principal(&email, &principal, PID_TAG_MESSAGE_RECIPIENT_ME),
+        Some(MapiValue::Bool(true))
+    );
+
+    for role in ["sent", "drafts", "outbox"] {
+        email.mailbox_role = role.to_string();
+        assert!(email_recipient_delivery_property_tags(&email, &principal).is_empty());
+        assert_eq!(
+            email_property_value_for_principal(
+                &email,
+                &principal,
+                PID_TAG_RECEIVED_BY_SMTP_ADDRESS_W
+            ),
+            None
+        );
+    }
+}
+
+#[test]
+fn principal_receiver_wrapper_preserves_durable_message_version_identity() {
+    let email = recipient_delivery_test_email();
+    let principal = store_test_principal(Uuid::from_u128(0x5555));
+    let identity = crate::store::MapiIdentityRecord {
+        object_kind: crate::store::MapiIdentityObjectKind::Message,
+        canonical_id: email.id,
+        object_id: 0x1234,
+        change_number: 0x5678,
+        source_key: vec![1, 2, 3],
+        change_key: vec![4, 5, 6],
+        predecessor_change_list: vec![7, 8, 9],
+        last_modification_time: 0x1234_5678,
+    };
+
+    assert_eq!(
+        email_property_value_with_durable_identity_for_principal(
+            &email,
+            Some(&identity),
+            &principal,
+            PID_TAG_CHANGE_KEY,
+        ),
+        Some(MapiValue::Binary(vec![4, 5, 6]))
+    );
+    assert_eq!(
+        email_property_value_with_durable_identity_for_principal(
+            &email,
+            Some(&identity),
+            &principal,
+            PID_TAG_RECEIVED_BY_SMTP_ADDRESS_W,
+        ),
+        Some(MapiValue::String("test@l-p-e.ch".to_string()))
+    );
+    assert_eq!(
+        email_property_value_with_durable_identity_for_principal(
+            &email,
+            Some(&identity),
+            &principal,
+            PID_TAG_SUBJECT_W,
+        ),
+        Some(MapiValue::String("Probe 2".to_string()))
+    );
+}
+
 #[test]
 fn email_message_class_and_content_class_follow_canonical_projection() {
     assert_eq!(
@@ -3557,6 +3963,7 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
     invitation.calendar_meeting_request = Some(lpe_storage::CalendarMeetingRequest {
         uid: "probe-7@example.test".to_string(),
         transport_attachment_id: None,
+        client_processed: false,
         organizer: Some(lpe_storage::CalendarMeetingIdentity {
             email: "feed@example.test".to_string(),
             display_name: "Feed".to_string(),
@@ -3703,6 +4110,17 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
         Some(MapiValue::String("Optional Room".to_string()))
     );
     assert_eq!(email_property_value(&invitation, PID_TAG_PROCESSED), None);
+    assert!(!email_meeting_property_tags(&invitation).contains(&PID_TAG_PROCESSED));
+    invitation
+        .calendar_meeting_request
+        .as_mut()
+        .expect("meeting request")
+        .client_processed = true;
+    assert_eq!(
+        email_property_value(&invitation, PID_TAG_PROCESSED),
+        Some(MapiValue::Bool(true))
+    );
+    assert!(email_meeting_property_tags(&invitation).contains(&PID_TAG_PROCESSED));
     assert_eq!(
         email_property_value(&invitation, PID_TAG_ICON_INDEX),
         Some(MapiValue::U32(u32::MAX))

@@ -211,6 +211,18 @@ macro_rules! store_impl_messages {
         })
     }
 
+    fn mark_mapi_calendar_meeting_request_processed<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, (JmapEmail, bool)> {
+        Box::pin(async move {
+            self.mark_mapi_calendar_meeting_request_processed(account_id, message_id, audit)
+                .await
+        })
+    }
+
     fn fetch_message_attachments<'a>(
         &'a self,
         account_id: Uuid,

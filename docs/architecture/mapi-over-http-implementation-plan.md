@@ -2651,11 +2651,20 @@ permits Outlook to suppress the response action. A single-instance request
 also projects the tentative/request state, not-responded status, invitation
 flag, meeting type, side effects, organizer critical time, attendee strings,
 location, sequence, request icon, and correlated Global Object IDs described
-by `[MS-OXOCAL]` section 4.2.2.2. `PidTagProcessed` remains absent until actual
-request processing, and recurrence-only `PidLidCalendarType` remains absent on
-the single-instance path. These values use the same property projection for
-direct reads, Message CopyTo, and cached-mode contents synchronization;
-FastTransfer named properties carry their GUID and LID metadata as required by
+by `[MS-OXOCAL]` section 4.2.2.2. Per `[MS-OXOCAL]` sections 2.2.5.7 and
+3.1.4.7.2, `PidTagProcessed` remains absent until Outlook stages Boolean TRUE
+on an existing actionable Meeting Request and commits `SaveChangesMessage`.
+That one-way, idempotent transition is durable per account, applies to every
+visible membership of the message, survives copy/move/recoverable restore,
+and rotates the active MAPI ChangeKey/PCL/LMT only on its first commit. A real
+calendar-classification payload generation change resets visible and retained
+memberships. Restore prefers the account's locked visible membership state and
+otherwise copies the locked retained source, so a parser-only repair of
+unchanged payload does not reset it. Recurrence-only `PidLidCalendarType`
+remains absent on the single-instance path. These values use the same property
+projection for direct reads, property enumeration, Message CopyTo, and
+cached-mode contents synchronization; FastTransfer named properties carry
+their GUID and LID metadata as required by
 `[MS-OXCFXICS]` section 2.2.4.1. A hexadecimal EncodedGlobalId UID is decoded
 only when it has the complete `[MS-OXOCAL]` section 2.2.1.27 header and minimum
 shape, its reserved `X` field is zero, and its little-endian `Size` exactly
@@ -2842,14 +2851,23 @@ The MAPI projection derives Sender and SentRepresenting fields from their
 corresponding RFC roles. Until a specific address is resolved to a GAL object,
 the complete name, SMTP address, one-off EntryID, and SMTP search-key cluster is
 used consistently; submission authorization alone never aliases Sender and
-SentRepresenting to the submitting mailbox's NSPI identity. That same cluster
+SentRepresenting to the submitting mailbox's NSPI identity. That sender cluster
 is available through direct properties, message tables, property enumeration,
 and both FastTransfer writers. Meeting recipient rows derive organizer and
 attendee identity, recipient type, flags, and tracking status from the retained
 iCalendar values rather than from the RFC To/Cc envelope view. OpenMessage,
 ReadRecipients, and cached-mode `StartRecip` use the same recipient projection;
-the organizer carries flags `0x00000003`, while each attendee carries its
+the exact logged-on delivered mailbox recipient resolves as EX/NSPI with its
+legacy DN, permanent EntryID, search key, and `PidTagDisplayTypeEx`, while
+unresolved external organizers and attendees remain SMTP One-Off recipients.
+The organizer carries flags `0x00000003`, while each attendee carries its
 ordered ROLE-before-CUTYPE recipient type and PARTSTAT tracking status.
+Principal-aware direct property reads, `RopGetPropertiesAll`,
+`RopGetPropertiesList`, and FastTransfer project `PidTagReceivedBy*`,
+`PidTagReceivedRepresenting*`, `PidTagMessageToMe`, `PidTagMessageCcMe`, and
+`PidTagMessageRecipientMe` from the logged-on account's delivery role. Normal
+ContentsTable rows remain canonical and do not claim per-session receiver
+columns.
 
 Opened actionable meeting request and response messages advertise
 `HasNamedProperties`. Their effective well-known Meeting and Appointment tags

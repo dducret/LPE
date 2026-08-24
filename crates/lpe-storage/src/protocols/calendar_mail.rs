@@ -16,6 +16,14 @@ const CALENDAR_PARTS_QUERY: &str = r#"
             part.id AS mime_part_id,
             message.authorized_calendar_response_content_sha256,
             message.calendar_response_processed,
+            COALESCE((
+                SELECT bool_and(membership.calendar_request_processed)
+                FROM mailbox_messages membership
+                WHERE membership.tenant_id = part.tenant_id
+                  AND membership.account_id = $2
+                  AND membership.message_id = part.message_id
+                  AND membership.visibility = 'visible'
+            ), FALSE) AS calendar_request_processed,
             part.domain_id,
             part.content_type,
             part.is_scheduling_body,
@@ -94,6 +102,7 @@ pub(super) async fn fetch_calendar_mail_metadata(
         let authorized_calendar_response_content_sha256: Option<String> =
             part.try_get("authorized_calendar_response_content_sha256")?;
         let calendar_response_processed: bool = part.try_get("calendar_response_processed")?;
+        let calendar_request_processed: bool = part.try_get("calendar_request_processed")?;
         let domain_id: Uuid = part.try_get("domain_id")?;
         let content_type: String = part.try_get("content_type")?;
         let is_scheduling_body: bool = part.try_get("is_scheduling_body")?;
@@ -143,6 +152,7 @@ pub(super) async fn fetch_calendar_mail_metadata(
                 parse_calendar_meeting_request(std::slice::from_ref(&attachment))
             {
                 request.transport_attachment_id = attachment_id.filter(|_| is_scheduling_body);
+                request.client_processed = calendar_request_processed;
                 requests.insert(message_id, request);
             }
         }

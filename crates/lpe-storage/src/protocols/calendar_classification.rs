@@ -301,6 +301,28 @@ impl Storage {
                                 None => (1, classification != "none"),
                             };
 
+                        if requires_rotation {
+                            // Reset retained memberships for every account in
+                            // the same generation transaction. Recoverable
+                            // restore takes the canonical message lock before
+                            // locking its source membership, matching this
+                            // message-then-membership order.
+                            sqlx::query(
+                                r#"
+                                UPDATE mailbox_messages
+                                SET calendar_request_processed = FALSE,
+                                    updated_at = NOW()
+                                WHERE tenant_id = $1
+                                  AND message_id = $2
+                                  AND visibility <> 'visible'
+                                "#,
+                            )
+                            .bind(tenant_id)
+                            .bind(message_id)
+                            .execute(&mut *tx)
+                            .await?;
+                        }
+
                         sqlx::query(
                             r#"
                         INSERT INTO calendar_mail_classifications (
@@ -658,7 +680,9 @@ async fn version_calendar_classification_repair_in_tx(
     let memberships = sqlx::query(
         r#"
         UPDATE mailbox_messages
-        SET modseq = $4, updated_at = NOW()
+        SET calendar_request_processed = FALSE,
+            modseq = $4,
+            updated_at = NOW()
         WHERE tenant_id = $1
           AND account_id = $2
           AND message_id = $3
@@ -692,7 +716,8 @@ async fn version_calendar_classification_repair_in_tx(
             "messageId": message_id,
             "calendarClassification": classification,
             "parserRevision": CALENDAR_MAIL_PARSER_REVISION,
-            "classificationGeneration": generation
+            "classificationGeneration": generation,
+            "calendarRequestProcessedReset": true
         }),
     )
     .await?;
@@ -713,7 +738,8 @@ async fn version_calendar_classification_repair_in_tx(
                 "imapUid": membership.try_get::<i64, _>("imap_uid")?,
                 "calendarClassification": classification,
                 "parserRevision": CALENDAR_MAIL_PARSER_REVISION,
-                "classificationGeneration": generation
+                "classificationGeneration": generation,
+                "calendarRequestProcessedReset": true
             }),
         )
         .await?;
@@ -765,12 +791,16 @@ async fn load_durable_calendar_mail_metadata(
     let rows = sqlx::query(
         r#"
         WITH requested_messages AS (
-            SELECT DISTINCT membership.tenant_id, membership.message_id
+            SELECT
+                membership.tenant_id,
+                membership.message_id,
+                bool_and(membership.calendar_request_processed) AS calendar_request_processed
             FROM mailbox_messages membership
             WHERE membership.tenant_id = $1
               AND membership.account_id = $2
               AND membership.message_id = ANY($3)
               AND membership.visibility = 'visible'
+            GROUP BY membership.tenant_id, membership.message_id
         )
         SELECT
             requested.message_id,
@@ -778,6 +808,7 @@ async fn load_durable_calendar_mail_metadata(
             classification.metadata_json,
             canonical_message.authorized_calendar_response_content_sha256,
             canonical_message.calendar_response_processed,
+            requested.calendar_request_processed,
             scheduling_blob.content_sha256 AS scheduling_content_sha256,
             transport_attachment.id AS transport_attachment_id,
             COALESCE(
@@ -848,6 +879,7 @@ async fn load_durable_calendar_mail_metadata(
             DurableCalendarMailMetadata::None => {}
             DurableCalendarMailMetadata::Request { mut request } => {
                 request.transport_attachment_id = transport_attachment_id;
+                request.client_processed = row.try_get("calendar_request_processed")?;
                 requests.insert(message_id, request);
             }
             DurableCalendarMailMetadata::Response { mut response } => {
@@ -977,11 +1009,12 @@ mod tests {
     }
 
     #[test]
-    fn durable_metadata_omits_account_scoped_transport_attachment_id() {
+    fn durable_metadata_omits_account_scoped_request_projection_state() {
         let metadata = DurableCalendarMailMetadata::Request {
             request: CalendarMeetingRequest {
                 uid: "probe".to_string(),
                 transport_attachment_id: Some(Uuid::new_v4()),
+                client_processed: true,
                 organizer: None,
                 attendees: Vec::new(),
                 response_requested: false,
@@ -998,5 +1031,6 @@ mod tests {
         assert!(serialized["request"]
             .get("transport_attachment_id")
             .is_none());
+        assert!(serialized["request"].get("client_processed").is_none());
     }
 }

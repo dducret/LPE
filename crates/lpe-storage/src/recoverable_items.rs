@@ -150,6 +150,38 @@ impl Storage {
         let source_mailbox_message_id: Uuid = item.try_get("source_mailbox_message_id")?;
         let source_imap_uid: i64 = item.try_get("source_imap_uid")?;
         let recoverable_folder: String = item.try_get("recoverable_folder")?;
+        self.lock_message_for_mime_graph_in_tx(&mut tx, &tenant_id, message_id)
+            .await?;
+        let membership_rows = sqlx::query(
+            r#"
+            SELECT id, visibility, calendar_request_processed
+            FROM mailbox_messages
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND message_id = $3
+            ORDER BY id
+            FOR UPDATE
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(message_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut source_processed = None;
+        let mut visible_processed = None;
+        for row in membership_rows {
+            let processed = row.try_get::<bool, _>("calendar_request_processed")?;
+            if row.try_get::<Uuid, _>("id")? == source_mailbox_message_id {
+                source_processed = Some(processed);
+            }
+            if row.try_get::<String, _>("visibility")? == "visible" {
+                visible_processed = Some(visible_processed.unwrap_or(true) && processed);
+            }
+        }
+        let source_processed =
+            source_processed.ok_or_else(|| anyhow!("recoverable source membership not found"))?;
+        let calendar_request_processed = visible_processed.unwrap_or(source_processed);
         let target_mailbox_id = target_mailbox_id.unwrap_or(item.try_get("source_mailbox_id")?);
         let target_role = sqlx::query_scalar::<_, String>(
             r#"
@@ -203,6 +235,19 @@ impl Storage {
                 "created",
             )
             .await?;
+        sqlx::query(
+            r#"
+            UPDATE mailbox_messages
+            SET calendar_request_processed = $4
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(membership_id)
+        .bind(calendar_request_processed)
+        .execute(&mut *tx)
+        .await?;
 
         self.rebuild_mail_search_document_in_tx(
             &mut tx,

@@ -1,5 +1,7 @@
 use super::*;
-use crate::mapi::{message_recipients, MapiRecipient};
+use crate::mapi::properties::MapiValue;
+use crate::mapi::{message_recipients, message_recipients_for_principal, MapiRecipient};
+use lpe_mail_auth::AccountPrincipal;
 
 pub(super) fn write_visible_recipient_facts(buffer: &mut Vec<u8>, email: &JmapEmail) {
     let recipients = message_recipients(email);
@@ -20,42 +22,47 @@ pub(super) fn write_fast_transfer_visible_recipients(buffer: &mut Vec<u8>, email
     }
 }
 
+pub(super) fn write_fast_transfer_visible_recipients_for_principal(
+    buffer: &mut Vec<u8>,
+    email: &JmapEmail,
+    principal: &AccountPrincipal,
+) {
+    for recipient in message_recipients_for_principal(email, principal) {
+        write_fast_transfer_recipient(buffer, &recipient);
+    }
+}
+
 fn write_fast_transfer_recipient(buffer: &mut Vec<u8>, recipient: &MapiRecipient) {
-    let entry_id = recipient.entry_id();
     write_u32(buffer, START_RECIP);
     // [MS-OXCFXICS] section 2.2.4.3.23 fixes PidTagRowid in the first
     // position of each recipient element.
-    write_i32_property(buffer, PID_TAG_ROWID, recipient.order as i32);
-    write_i32_property(
-        buffer,
+    for property_tag in [
+        PID_TAG_ROWID,
         PID_TAG_RECIPIENT_TYPE,
-        i32::from(recipient.recipient_type),
-    );
-    write_i32_property(
-        buffer,
         PID_TAG_RECIPIENT_FLAGS,
-        recipient.recipient_flags as i32,
-    );
-    write_i32_property(buffer, PID_TAG_RECIPIENT_ORDER, recipient.order as i32);
-    write_i32_property(
-        buffer,
+        PID_TAG_RECIPIENT_ORDER,
         PID_TAG_RECIPIENT_TRACK_STATUS,
-        recipient.track_status as i32,
-    );
-    write_i32_property(buffer, PID_TAG_OBJECT_TYPE, 6);
-    write_i32_property(buffer, PID_TAG_DISPLAY_TYPE, 0);
-    write_i32_property(buffer, PID_TAG_DISPLAY_TYPE_EX, 0);
-    write_utf16_property(buffer, PID_TAG_ADDRESS_TYPE_W, "SMTP");
-    write_utf16_property(buffer, PID_TAG_EMAIL_ADDRESS_W, &recipient.address.address);
-    write_utf16_property(buffer, PID_TAG_SMTP_ADDRESS_W, &recipient.address.address);
-    write_utf16_property(buffer, PID_TAG_DISPLAY_NAME_W, recipient.display_name());
-    write_utf16_property(
-        buffer,
+        PID_TAG_OBJECT_TYPE,
+        PID_TAG_DISPLAY_TYPE,
+        PID_TAG_DISPLAY_TYPE_EX,
+        PID_TAG_ADDRESS_TYPE_W,
+        PID_TAG_EMAIL_ADDRESS_W,
+        PID_TAG_SMTP_ADDRESS_W,
+        PID_TAG_DISPLAY_NAME_W,
         PID_TAG_RECIPIENT_DISPLAY_NAME_W,
-        recipient.display_name(),
-    );
-    write_binary_property(buffer, PID_TAG_SEARCH_KEY, &recipient.search_key());
-    write_binary_property(buffer, PID_TAG_ENTRY_ID, &entry_id);
-    write_binary_property(buffer, PID_TAG_RECIPIENT_ENTRY_ID, &entry_id);
+        PID_TAG_SEARCH_KEY,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_RECIPIENT_ENTRY_ID,
+    ] {
+        match recipient
+            .property_value(property_tag)
+            .expect("the fixed FastTransfer recipient set has a projected value")
+        {
+            MapiValue::U32(value) => write_i32_property(buffer, property_tag, value as i32),
+            MapiValue::String(value) => write_utf16_property(buffer, property_tag, &value),
+            MapiValue::Binary(value) => write_binary_property(buffer, property_tag, &value),
+            value => unreachable!("unexpected FastTransfer recipient value {value:?}"),
+        }
+    }
     write_u32(buffer, END_TO_RECIP);
 }

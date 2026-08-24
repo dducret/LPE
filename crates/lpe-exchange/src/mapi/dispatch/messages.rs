@@ -391,11 +391,29 @@ pub(super) fn stage_message_property_values(
         .get_mut(&handle)
         .ok_or_else(|| anyhow!("missing message object"))?;
     let MapiObject::Message {
-        pending_properties, ..
+        saved_email,
+        pending_properties,
+        ..
     } = object
     else {
         return Err(anyhow!("MAPI object is not a message"));
     };
+    if let Some((_, value)) = values
+        .iter()
+        .find(|(tag, _)| canonical_property_storage_tag(*tag) == PID_TAG_PROCESSED)
+    {
+        if values.len() != 1
+            || !matches!(value, MapiValue::Bool(true))
+            || saved_email
+                .as_ref()
+                .and_then(|saved| saved.email.calendar_meeting_request.as_ref())
+                .is_none()
+        {
+            return Err(anyhow!(
+                "PidTagProcessed only accepts TRUE on an actionable Meeting Request"
+            ));
+        }
+    }
     let (canonical_values, _custom_values) = split_custom_property_values(values.clone());
     let followup_values = canonical_values
         .into_iter()
@@ -458,17 +476,51 @@ pub(super) async fn apply_staged_message_property_values<S>(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
-) -> Result<()>
+) -> Result<(Option<MapiSavedEmail>, bool)>
 where
     S: ExchangeStore,
 {
     let values = pending_properties.into_iter().collect::<Vec<_>>();
-    let (canonical_values, custom_values) = split_custom_property_values(values);
+    let (mut canonical_values, custom_values) = split_custom_property_values(values);
     let object = MapiObject::Message {
         folder_id,
         message_id,
         saved_email: saved_email.clone(),
         pending_properties: HashMap::new(),
+    };
+    let processed = canonical_values
+        .iter()
+        .position(|(tag, _)| canonical_property_storage_tag(*tag) == PID_TAG_PROCESSED)
+        .map(|index| canonical_values.remove(index));
+    let processed_result = match processed {
+        Some((_, MapiValue::Bool(true))) => {
+            if !canonical_values.is_empty() || !custom_values.is_empty() {
+                return Err(anyhow!(
+                    "PidTagProcessed cannot be combined with other saved Message mutations"
+                ));
+            }
+            let canonical_id = saved_email
+                .as_ref()
+                .map(|saved| saved.email.id)
+                .or_else(|| {
+                    message_for_id(folder_id, message_id, mailboxes, emails).map(|email| email.id)
+                })
+                .ok_or_else(|| anyhow!("canonical Meeting Request was not found"))?;
+            let (email, changed) = store
+                .mark_mapi_calendar_meeting_request_processed(
+                    principal.account_id,
+                    canonical_id,
+                    AuditEntryInput {
+                        actor: principal.email.clone(),
+                        action: "mapi-process-meeting-request".to_string(),
+                        subject: format!("message:{canonical_id}"),
+                    },
+                )
+                .await?;
+            Some((canonical_id, email, changed))
+        }
+        Some(_) => return Err(anyhow!("invalid PidTagProcessed value")),
+        None => None,
     };
     if !canonical_values.is_empty() {
         apply_supported_object_property_values(
@@ -500,7 +552,30 @@ where
         )
         .await?;
     }
-    Ok(())
+    let Some((canonical_id, email, changed)) = processed_result else {
+        return Ok((None, true));
+    };
+    let identity_request = [MapiIdentityRequest {
+        object_kind: MapiIdentityObjectKind::Message,
+        canonical_id,
+        reserved_global_counter: None,
+        source_key: None,
+    }];
+    let mut identities = store
+        .fetch_or_allocate_mapi_identities(principal.account_id, &identity_request)
+        .await?;
+    if identities.len() != 1 {
+        return Err(anyhow!(
+            "processed Meeting Request identity could not be refreshed"
+        ));
+    }
+    Ok((
+        Some(MapiSavedEmail {
+            email,
+            durable_identity: identities.pop(),
+        }),
+        changed,
+    ))
 }
 
 pub(super) async fn apply_staged_message_recipient_replacement<S>(
@@ -787,13 +862,26 @@ pub(super) async fn append_set_message_read_flag_response<S>(
     // [MS-OXCMSG] 2.2.3.10.1 and 2.2.3.11.1: rfDefault (0x00)
     // marks the message read and is valid for RopSetMessageReadFlag.
     // Outlook 16 also combines rfClearNotifyRead and rfClearNotifyUnread
-    // (0x60) on an open Calendar Event. MS-OXCMSG lists those alternatives
-    // as mutually exclusive, so keep this observed interoperability no-op
-    // scoped to Event objects rather than widening general Message handling.
+    // (0x60) on an open Calendar Event and on an opened
+    // IPM.Schedule.Meeting.Request message. MS-OXCMSG lists those alternatives
+    // as mutually exclusive, so keep these observed interoperability no-ops
+    // scoped to calendar objects rather than widening general Message handling.
     let event_notification_cleanup = matches!(&object, MapiObject::Event { .. })
         && matches!(read_flags, Some(0x20 | 0x40 | 0x60));
     let outlook_event_notification_cleanup = event_notification_cleanup && read_flags == Some(0x60);
-    if !read_flags_are_valid(read_flags, true) && !outlook_event_notification_cleanup {
+    let outlook_meeting_request_notification_cleanup = read_flags == Some(0x60)
+        && matches!(
+            &object,
+            MapiObject::Message {
+                saved_email: Some(saved_email),
+                ..
+            } if message_class_for_email(&saved_email.email)
+                .eq_ignore_ascii_case("IPM.Schedule.Meeting.Request")
+        );
+    if !read_flags_are_valid(read_flags, true)
+        && !outlook_event_notification_cleanup
+        && !outlook_meeting_request_notification_cleanup
+    {
         responses.extend_from_slice(&rop_error_response(
             0x11,
             request.response_handle_index(),
@@ -801,7 +889,7 @@ pub(super) async fn append_set_message_read_flag_response<S>(
         ));
         return;
     }
-    if event_notification_cleanup {
+    if event_notification_cleanup || outlook_meeting_request_notification_cleanup {
         responses.extend_from_slice(&rop_set_message_read_flag_response(request, false));
         return;
     }

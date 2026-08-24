@@ -237,6 +237,7 @@ where
 }
 
 pub(super) fn append_fast_transfer_source_copy_messages_response(
+    principal: &AccountPrincipal,
     session: &mut MapiSession,
     handle_slots: &mut Vec<u32>,
     request: &RopRequest,
@@ -267,6 +268,7 @@ pub(super) fn append_fast_transfer_source_copy_messages_response(
     let transfer_buffer = mapi_mailstore::fast_transfer_message_list_buffer_with_attachments(
         &selected,
         &sync_attachment_facts,
+        Some(principal),
     );
     let handle = session.allocate_output_handle(
         request.output_handle_index,

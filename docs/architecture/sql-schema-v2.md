@@ -99,6 +99,9 @@ for hierarchy sync and folder-list projections.
 - `imap_uid`
 - `modseq`
 - flags and keywords, including Outlook category names projected through MAPI `PidNameKeywords`
+- per-account Meeting Request client-processing state projected through MAPI
+  `PidTagProcessed`; every visible membership for that account and message shares
+  the value
 - visibility and deletion state
 - membership timestamps
 - soft-delete / expunge state while visible to sync logic
@@ -109,7 +112,12 @@ canonical `Trash` expunge the addressed `mailbox_messages` row for normal
 protocol visibility, write the existing mailbox-message tombstone, and insert a
 `recoverable_items` row that preserves the source mailbox membership id,
 source mailbox id, source IMAP UID, message id, retention deadline, and
-legal-hold flag. Recoverable items are not normal `mailboxes` rows and are not
+legal-hold flag. Restoring the referenced membership also preserves its
+Meeting Request client-processing state, preferring the locked current visible
+account state when another copy remains. Actual request-payload generation
+changes reset both visible and retained membership state before a later restore.
+Recoverable items are not normal
+`mailboxes` rows and are not
 listed by JMAP `Mailbox/*` or IMAP folder discovery. MAPI and EWS may project
 Recoverable Items Root, Deletions, Versions, and Purges as virtual
 compatibility folders only when their protocol behavior is wired to this

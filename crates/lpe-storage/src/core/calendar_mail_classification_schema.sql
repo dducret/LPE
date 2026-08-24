@@ -43,6 +43,16 @@ SELECT
     )
     AND EXISTS (
         SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = $1
+          AND table_name = 'mailbox_messages'
+          AND column_name = 'calendar_request_processed'
+          AND data_type = 'boolean'
+          AND is_nullable = 'NO'
+          AND column_default = 'false'
+    )
+    AND EXISTS (
+        SELECT 1
         FROM pg_constraint constraint_row
         WHERE constraint_row.conrelid = (SELECT oid FROM message_table)
           AND constraint_row.conname = 'messages_authorized_calendar_response_content_sha256_check'

@@ -267,6 +267,7 @@ pub(super) fn saved_submission_property_upsert_is_supported(tag: u32) -> bool {
         // [MS-OXCPRPT] section 2.2.6 gives NoReplicate the same Message
         // semantics as RopSetProperties.
         || canonical_property_storage_tag(tag) == PID_TAG_PREDECESSOR_CHANGE_LIST
+        || canonical_property_storage_tag(tag) == PID_TAG_PROCESSED
         || is_custom_property_tag(tag)
         || copyable_message_followup_property_tag(tag)
 }

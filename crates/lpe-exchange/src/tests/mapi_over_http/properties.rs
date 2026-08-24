@@ -3426,6 +3426,512 @@ async fn mapi_over_http_message_notification_cleanup_preserves_unread_without_no
         assert_eq!(response_rops, [0x11, 0x00, 0, 0, 0, 0, 0]);
         assert!(emails.lock().unwrap()[0].unread);
     }
+
+    let combined_cleanup_rops = [0x11, 0x00, 0x00, 0x01, 0x60];
+    renew_mapi_request_id(&mut execute_headers);
+    let request = execute_body(&rop_buffer(
+        &combined_cleanup_rops,
+        &[open_handles[1], open_handles[3]],
+    ));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(response_rops, [0x11, 0x00, 0x57, 0x00, 0x07, 0x80]);
+    assert!(emails.lock().unwrap()[0].unread);
+}
+
+#[tokio::test]
+async fn mapi_over_http_outlook_combined_notification_cleanup_on_meeting_request_is_noop() {
+    let account = FakeStore::account();
+    let message_id = "37373737-3737-3737-3737-373737373760";
+    let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    inbox.total_emails = 1;
+    inbox.unread_emails = 1;
+    let mut email = FakeStore::email(
+        message_id,
+        "55555555-5555-5555-5555-555555555555",
+        "inbox",
+        "Probe 2",
+    );
+    email.from_address = "denis.ducret@sdic.ch".to_string();
+    email.from_display = Some("Denis Ducret".to_string());
+    email.to = vec![JmapEmailAddress {
+        address: account.email.clone(),
+        display_name: Some(account.display_name.clone()),
+    }];
+    email.unread = true;
+    email.calendar_invitation = true;
+    email.calendar_meeting_request = Some(lpe_storage::CalendarMeetingRequest {
+        uid: "probe-2-20260824@sdic.ch".to_string(),
+        transport_attachment_id: None,
+        client_processed: false,
+        organizer: Some(lpe_storage::CalendarMeetingIdentity {
+            email: "denis.ducret@sdic.ch".to_string(),
+            display_name: "Denis Ducret".to_string(),
+        }),
+        attendees: vec![lpe_storage::CalendarMeetingAttendee {
+            email: account.email.clone(),
+            display_name: account.display_name.clone(),
+            cutype: "INDIVIDUAL".to_string(),
+            role: "REQ-PARTICIPANT".to_string(),
+            partstat: "NEEDS-ACTION".to_string(),
+            rsvp: true,
+        }],
+        response_requested: true,
+        sent_at: Some("2026-08-24T17:27:50Z".to_string()),
+        meeting_start: "2026-08-25T10:00:00Z".to_string(),
+        meeting_end: "2026-08-25T10:30:00Z".to_string(),
+        meeting_location: None,
+        meeting_sequence: 0,
+        intended_busy_status: 2,
+    });
+    let emails = Arc::new(Mutex::new(vec![email]));
+    let store = FakeStore {
+        session: Some(account),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: emails.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let (mut execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
+
+    let mut open_rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    append_mapi_wire_id(&mut open_rops, test_mapi_folder_id(5));
+    open_rops.push(0);
+    open_rops.extend_from_slice(&[
+        0x03, 0x00, 0x01, 0x02, // RopOpenMessage
+    ]);
+    open_rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
+    append_mapi_wire_id(&mut open_rops, test_mapi_folder_id(5));
+    open_rops.push(0);
+    append_mapi_wire_id(&mut open_rops, test_mapi_message_id(message_id));
+
+    let request = execute_body(&rop_buffer(&open_rops, &[logon_handle, u32::MAX, u32::MAX]));
+    let open_response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+    let open_cookie = mapi_cookie_header(&open_response);
+    let open_body = response_bytes(open_response).await;
+    let (_, open_handles) = response_rops_and_handles_from_execute_body(&open_body);
+    execute_headers.insert("cookie", HeaderValue::from_str(&open_cookie).unwrap());
+
+    // Outlook 16 Probe 1930 request :164 sent this exact [MS-OXCROPS]
+    // section 2.2.6.11.1 shape on the opened IPM.Schedule.Meeting.Request:
+    // response handle 0, input handle 1, and the combined cleanup value 0x60.
+    let cleanup_rops = [0x11, 0x00, 0x00, 0x01, 0x60];
+    renew_mapi_request_id(&mut execute_headers);
+    let request = execute_body(&rop_buffer(
+        &cleanup_rops,
+        &[open_handles[1], open_handles[2]],
+    ));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(response_rops, [0x11, 0x00, 0, 0, 0, 0, 0]);
+    assert!(emails.lock().unwrap()[0].unread);
+}
+
+#[tokio::test]
+async fn mapi_over_http_meeting_request_processed_save_rotates_identity_and_reopens_true() {
+    const PROCESSED_TAG: u32 = 0x7D01_000B;
+    const CHANGE_KEY_TAG: u32 = 0x65E2_0102;
+    const PREDECESSOR_CHANGE_LIST_TAG: u32 = 0x65E3_0102;
+    const LAST_MODIFICATION_TIME_TAG: u32 = 0x3008_0040;
+    let account = FakeStore::account();
+    let message_id = "37373737-3737-3737-3737-373737373761";
+    let message_uuid = Uuid::parse_str(message_id).unwrap();
+    let mailbox_id = "55555555-5555-5555-5555-555555555555";
+    let mut email = FakeStore::email(message_id, mailbox_id, "inbox", "Probe 1930");
+    email.calendar_invitation = true;
+    email.calendar_meeting_request = Some(lpe_storage::CalendarMeetingRequest {
+        uid: "probe-1930-20260824@sdic.ch".to_string(),
+        transport_attachment_id: None,
+        client_processed: false,
+        organizer: Some(lpe_storage::CalendarMeetingIdentity {
+            email: "denis.ducret@sdic.ch".to_string(),
+            display_name: "Denis Ducret".to_string(),
+        }),
+        attendees: vec![lpe_storage::CalendarMeetingAttendee {
+            email: account.email.clone(),
+            display_name: account.display_name.clone(),
+            cutype: "INDIVIDUAL".to_string(),
+            role: "REQ-PARTICIPANT".to_string(),
+            partstat: "NEEDS-ACTION".to_string(),
+            rsvp: true,
+        }],
+        response_requested: true,
+        sent_at: Some("2026-08-24T17:27:50Z".to_string()),
+        meeting_start: "2026-08-25T10:00:00Z".to_string(),
+        meeting_end: "2026-08-25T10:30:00Z".to_string(),
+        meeting_location: None,
+        meeting_sequence: 0,
+        intended_busy_status: 2,
+    });
+    let emails = Arc::new(Mutex::new(vec![email]));
+    let store = FakeStore {
+        session: Some(account),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            mailbox_id, "inbox", "Inbox",
+        )])),
+        emails: emails.clone(),
+        ..Default::default()
+    };
+    let change_numbers = store.mapi_identity_change_numbers.clone();
+    let change_keys = store.mapi_identity_change_keys.clone();
+    let predecessor_change_lists = store.mapi_identity_predecessor_change_lists.clone();
+    let last_modification_times = store.mapi_identity_last_modification_times.clone();
+    let service = ExchangeService::new(store);
+    let (mut execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
+    let folder_id = test_mapi_folder_id(5);
+
+    let mut open_rops = Vec::new();
+    append_rop_open_folder(&mut open_rops, 0, 1, folder_id);
+    append_rop_open_message_with_flags(
+        &mut open_rops,
+        1,
+        2,
+        folder_id,
+        test_mapi_message_id(message_id),
+        0x01,
+    );
+    open_rops.extend_from_slice(&[0x09, 0x00, 0x02]); // RopGetPropertiesList.
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&open_rops, &[logon_handle, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&response);
+    let body = response_bytes(response).await;
+    let (open_response_rops, open_handles) = response_rops_and_handles_from_execute_body(&body);
+    let list_marker = [0x09, 0x02, 0, 0, 0, 0];
+    let list_start = open_response_rops
+        .windows(list_marker.len())
+        .position(|window| window == list_marker)
+        .unwrap();
+    let list_count = u16::from_le_bytes(
+        open_response_rops[list_start + 6..list_start + 8]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    let list_tags = open_response_rops[list_start + 8..list_start + 8 + list_count * 4]
+        .chunks_exact(4)
+        .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+        .collect::<Vec<_>>();
+    assert!(!list_tags.contains(&PROCESSED_TAG));
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let initial_change_number = change_numbers.lock().unwrap()[&message_uuid];
+    let initial_change_key = change_keys.lock().unwrap()[&message_uuid].clone();
+    let initial_predecessors = predecessor_change_lists.lock().unwrap()[&message_uuid].clone();
+    let initial_last_modification_time = last_modification_times.lock().unwrap()[&message_uuid];
+
+    // [MS-OXOCAL] sections 2.2.5.7 and 3.1.4.7.2: Outlook marks the
+    // actionable request processed only after completing client processing.
+    let mut values = Vec::new();
+    append_mapi_bool_property(&mut values, PROCESSED_TAG, true);
+    let mut save_rops = Vec::new();
+    append_rop_set_properties(&mut save_rops, 1, 1, &values);
+    append_rop_save_changes_message(&mut save_rops, 1, 1);
+    append_rop_get_properties_specific(
+        &mut save_rops,
+        1,
+        &[
+            PROCESSED_TAG,
+            CHANGE_KEY_TAG,
+            PREDECESSOR_CHANGE_LIST_TAG,
+            LAST_MODIFICATION_TIME_TAG,
+        ],
+    );
+    save_rops.extend_from_slice(&[0x09, 0x00, 0x01]); // RopGetPropertiesList.
+    save_rops.extend_from_slice(&[0x08, 0x00, 0x01]); // RopGetPropertiesAll.
+    save_rops.extend_from_slice(&0u16.to_le_bytes());
+    save_rops.extend_from_slice(&1u16.to_le_bytes());
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&save_rops, &[open_handles[1], open_handles[2]])),
+        )
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&response);
+    let body = response_bytes(response).await;
+    let (response_rops, _) = response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
+    let row = mapi_get_properties_specific_standard_row_offset(&response_rops, 1).unwrap();
+    assert_eq!(response_rops[row], 0);
+    let mut offset = row + 1;
+    assert_eq!(response_rops[offset], 1);
+    offset += 1;
+    let saved_change_key = read_rop_binary_u16(&response_rops, &mut offset).unwrap();
+    let saved_predecessors = read_rop_binary_u16(&response_rops, &mut offset).unwrap();
+    let saved_last_modification_time =
+        u64::from_le_bytes(response_rops[offset..offset + 8].try_into().unwrap());
+    let rotated_change_number = change_numbers.lock().unwrap()[&message_uuid];
+    assert!(rotated_change_number > initial_change_number);
+    assert_ne!(saved_change_key, initial_change_key);
+    assert_ne!(saved_predecessors, initial_predecessors);
+    assert_ne!(saved_last_modification_time, initial_last_modification_time);
+    assert_eq!(saved_change_key, change_keys.lock().unwrap()[&message_uuid]);
+    assert_eq!(
+        saved_predecessors,
+        predecessor_change_lists.lock().unwrap()[&message_uuid]
+    );
+    assert_eq!(
+        saved_last_modification_time,
+        last_modification_times.lock().unwrap()[&message_uuid]
+    );
+    let list_marker = [0x09, 0x01, 0, 0, 0, 0];
+    let list_start = response_rops
+        .windows(list_marker.len())
+        .position(|window| window == list_marker)
+        .unwrap();
+    let list_count = u16::from_le_bytes(
+        response_rops[list_start + 6..list_start + 8]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    let list_tags = response_rops[list_start + 8..list_start + 8 + list_count * 4]
+        .chunks_exact(4)
+        .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+        .collect::<Vec<_>>();
+    assert!(list_tags.contains(&PROCESSED_TAG));
+    let all_marker = [0x08, 0x01, 0, 0, 0, 0];
+    let all_start = response_rops
+        .windows(all_marker.len())
+        .position(|window| window == all_marker)
+        .unwrap();
+    let processed_value_offset = response_rops[all_start + 8..]
+        .windows(4)
+        .position(|window| window == PROCESSED_TAG.to_le_bytes())
+        .map(|offset| all_start + 8 + offset + 4)
+        .unwrap();
+    assert_eq!(response_rops[processed_value_offset], 1);
+    assert!(
+        emails.lock().unwrap()[0]
+            .calendar_meeting_request
+            .as_ref()
+            .unwrap()
+            .client_processed
+    );
+
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let mut repeated_rops = Vec::new();
+    append_rop_open_folder(&mut repeated_rops, 0, 1, folder_id);
+    append_rop_open_message_with_flags(
+        &mut repeated_rops,
+        1,
+        2,
+        folder_id,
+        test_mapi_message_id(message_id),
+        0x01,
+    );
+    append_rop_open_message_with_flags(
+        &mut repeated_rops,
+        1,
+        3,
+        folder_id,
+        test_mapi_message_id(message_id),
+        0x01,
+    );
+    append_rop_set_properties(&mut repeated_rops, 2, 1, &values);
+    append_rop_save_changes_message(&mut repeated_rops, 2, 2);
+    append_rop_set_properties(&mut repeated_rops, 3, 1, &values);
+    append_rop_save_changes_message(&mut repeated_rops, 3, 3);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &repeated_rops,
+                &[logon_handle, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&response);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x0A, 0x02, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x0A, 0x03, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(
+        contains_bytes(&response_rops, &[0x0C, 0x03, 0, 0, 0, 0]),
+        "the first idempotent Save must not stale a concurrently opened handle"
+    );
+    assert_eq!(
+        change_numbers.lock().unwrap()[&message_uuid],
+        rotated_change_number
+    );
+
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let mut reopen_rops = Vec::new();
+    append_rop_open_folder(&mut reopen_rops, 0, 1, folder_id);
+    append_rop_open_message(
+        &mut reopen_rops,
+        1,
+        2,
+        folder_id,
+        test_mapi_message_id(message_id),
+    );
+    append_rop_get_properties_specific(&mut reopen_rops, 2, &[PROCESSED_TAG, CHANGE_KEY_TAG]);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &reopen_rops,
+                &[logon_handle, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    let row = mapi_get_properties_specific_standard_row_offset(&response_rops, 2).unwrap();
+    assert_eq!(response_rops[row], 0);
+    let mut offset = row + 1;
+    assert_eq!(response_rops[offset], 1);
+    offset += 1;
+    assert_eq!(
+        read_rop_binary_u16(&response_rops, &mut offset).unwrap(),
+        saved_change_key
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_meeting_request_processed_rejects_false_wrong_type_and_nonrequest() {
+    const PROCESSED_TAG: u32 = 0x7D01_000B;
+    let account = FakeStore::account();
+    let mailbox_id = "55555555-5555-5555-5555-555555555555";
+    let request_id = "37373737-3737-3737-3737-373737373762";
+    let ordinary_id = "38383838-3838-3838-3838-383838383863";
+    let mut request_email = FakeStore::email(request_id, mailbox_id, "inbox", "Probe invalid");
+    request_email.calendar_invitation = true;
+    request_email.calendar_meeting_request = Some(lpe_storage::CalendarMeetingRequest {
+        uid: "probe-invalid-20260824@sdic.ch".to_string(),
+        transport_attachment_id: None,
+        client_processed: false,
+        organizer: None,
+        attendees: Vec::new(),
+        response_requested: true,
+        sent_at: None,
+        meeting_start: "2026-08-25T10:00:00Z".to_string(),
+        meeting_end: "2026-08-25T10:30:00Z".to_string(),
+        meeting_location: None,
+        meeting_sequence: 0,
+        intended_busy_status: 2,
+    });
+    let emails = Arc::new(Mutex::new(vec![
+        request_email,
+        FakeStore::email(ordinary_id, mailbox_id, "inbox", "Ordinary message"),
+    ]));
+    let service = ExchangeService::new(FakeStore {
+        session: Some(account),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            mailbox_id, "inbox", "Inbox",
+        )])),
+        emails: emails.clone(),
+        ..Default::default()
+    });
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
+    let folder_id = test_mapi_folder_id(5);
+    let mut false_value = Vec::new();
+    append_mapi_bool_property(&mut false_value, PROCESSED_TAG, false);
+    let mut wrong_type = Vec::new();
+    append_mapi_i32_property(&mut wrong_type, 0x7D01_0003, 1);
+    let mut true_value = Vec::new();
+    append_mapi_bool_property(&mut true_value, PROCESSED_TAG, true);
+    let mut subject_value = Vec::new();
+    append_mapi_string8_property(&mut subject_value, 0x0037_001E, "co-staged subject");
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, folder_id);
+    append_rop_open_message_with_flags(
+        &mut rops,
+        1,
+        2,
+        folder_id,
+        test_mapi_message_id(request_id),
+        0x01,
+    );
+    append_rop_set_properties(&mut rops, 2, 1, &false_value);
+    append_rop_set_properties(&mut rops, 2, 1, &wrong_type);
+    append_rop_open_message_with_flags(
+        &mut rops,
+        1,
+        3,
+        folder_id,
+        test_mapi_message_id(ordinary_id),
+        0x01,
+    );
+    append_rop_set_properties(&mut rops, 3, 1, &true_value);
+    append_rop_set_properties(&mut rops, 2, 1, &true_value);
+    append_rop_set_properties(&mut rops, 2, 1, &subject_value);
+    append_rop_save_changes_message(&mut rops, 2, 2);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &rops,
+                &[logon_handle, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    let request_errors = response_rops
+        .windows(6)
+        .filter(|window| *window == [0x0A, 0x02, 0x02, 0x01, 0x04, 0x80])
+        .count();
+    assert_eq!(request_errors, 2, "{response_rops:02x?}");
+    assert!(
+        contains_bytes(&response_rops, &[0x0A, 0x03, 0x02, 0x01, 0x04, 0x80]),
+        "{response_rops:02x?}"
+    );
+    assert_eq!(
+        response_rops
+            .windows(8)
+            .filter(|window| *window == [0x0A, 0x02, 0, 0, 0, 0, 0, 0])
+            .count(),
+        2,
+        "the independently staged Processed and subject values should succeed before Save"
+    );
+    assert!(
+        contains_bytes(&response_rops, &[0x0C, 0x02, 0x02, 0x01, 0x04, 0x80]),
+        "Save must reject a Processed transition before committing any co-staged mutation"
+    );
+    assert!(
+        !emails.lock().unwrap()[0]
+            .calendar_meeting_request
+            .as_ref()
+            .unwrap()
+            .client_processed
+    );
 }
 
 #[tokio::test]

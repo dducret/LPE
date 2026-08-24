@@ -9,6 +9,14 @@ pub(crate) struct MapiRecipient {
     pub(crate) track_status: u32,
     pub(crate) order: u32,
     pub(crate) address: JmapEmailAddress,
+    principal_identity: Option<PrincipalRecipientIdentity>,
+}
+
+#[derive(Clone, Debug)]
+struct PrincipalRecipientIdentity {
+    legacy_dn: String,
+    entry_id: Vec<u8>,
+    search_key: Vec<u8>,
 }
 
 pub(crate) const MESSAGE_RECIPIENT_COLUMNS: [u32; 16] = [
@@ -44,6 +52,7 @@ pub(crate) fn message_recipients(email: &JmapEmail) -> Vec<MapiRecipient> {
                     display_name: (!organizer.display_name.is_empty())
                         .then(|| organizer.display_name.clone()),
                 },
+                principal_identity: None,
             });
         }
         recipients.extend(request.attendees.iter().map(|attendee| MapiRecipient {
@@ -56,6 +65,7 @@ pub(crate) fn message_recipients(email: &JmapEmail) -> Vec<MapiRecipient> {
                 display_name:
                     (!attendee.display_name.is_empty()).then(|| attendee.display_name.clone()),
             },
+            principal_identity: None,
         }));
         recipients
     } else if let Some(response) = email.calendar_meeting_response.as_ref() {
@@ -73,6 +83,7 @@ pub(crate) fn message_recipients(email: &JmapEmail) -> Vec<MapiRecipient> {
                     display_name: (!organizer.display_name.is_empty())
                         .then(|| organizer.display_name.clone()),
                 },
+                principal_identity: None,
             });
         } else {
             recipients.extend(ordinary_message_recipients(email));
@@ -88,6 +99,7 @@ pub(crate) fn message_recipients(email: &JmapEmail) -> Vec<MapiRecipient> {
                     display_name: (!response.attendee_name.is_empty())
                         .then(|| response.attendee_name.clone()),
                 },
+                principal_identity: None,
             });
         }
         recipients
@@ -104,6 +116,35 @@ pub(crate) fn message_recipients(email: &JmapEmail) -> Vec<MapiRecipient> {
         .collect()
 }
 
+pub(crate) fn message_recipients_for_principal(
+    email: &JmapEmail,
+    principal: &AccountPrincipal,
+) -> Vec<MapiRecipient> {
+    let mut recipients = message_recipients(email);
+    let principal_email = principal.email.trim();
+    if principal_email.is_empty() {
+        return recipients;
+    }
+
+    let entry = crate::mapi::nspi::principal_address_book_entry(principal);
+    let identity = PrincipalRecipientIdentity {
+        legacy_dn: crate::mapi::nspi::nspi_entry_unprefixed_legacy_dn(&entry),
+        entry_id: crate::mapi::nspi::nspi_entry_permanent_entry_id(&entry),
+        search_key: crate::mapi::nspi::nspi_entry_search_key(&entry),
+    };
+    for recipient in &mut recipients {
+        if recipient
+            .address
+            .address
+            .trim()
+            .eq_ignore_ascii_case(principal_email)
+        {
+            recipient.principal_identity = Some(identity.clone());
+        }
+    }
+    recipients
+}
+
 fn ordinary_message_recipients(email: &JmapEmail) -> Vec<MapiRecipient> {
     email
         .to
@@ -114,6 +155,7 @@ fn ordinary_message_recipients(email: &JmapEmail) -> Vec<MapiRecipient> {
             track_status: 0,
             order: 0,
             address: address.clone(),
+            principal_identity: None,
         })
         .chain(email.cc.iter().map(|address| MapiRecipient {
             recipient_type: 0x02,
@@ -121,6 +163,7 @@ fn ordinary_message_recipients(email: &JmapEmail) -> Vec<MapiRecipient> {
             track_status: 0,
             order: 0,
             address: address.clone(),
+            principal_identity: None,
         }))
         .chain(
             message_can_expose_bcc(email)
@@ -133,6 +176,7 @@ fn ordinary_message_recipients(email: &JmapEmail) -> Vec<MapiRecipient> {
                     track_status: 0,
                     order: 0,
                     address: address.clone(),
+                    principal_identity: None,
                 }),
         )
         .collect()
@@ -156,10 +200,22 @@ pub(in crate::mapi) fn serialize_recipient_row(
     columns: &[u32],
 ) -> Vec<u8> {
     let mut row = Vec::new();
-    let recipient_flags = 0x0200u16 | 0x0010 | 0x0008 | 0x0003;
-    row.extend_from_slice(&recipient_flags.to_le_bytes());
-    write_utf16z(&mut row, &recipient.address.address);
-    write_utf16z(&mut row, recipient.display_name());
+    if let Some(identity) = recipient.principal_identity.as_ref() {
+        // [MS-OXCDATA] sections 2.8.3.1 and 2.8.3.2: a resolved
+        // Address Book recipient uses the compact X500DN framing.
+        let recipient_flags = 0x0200u16 | 0x0010 | 0x0001;
+        row.extend_from_slice(&recipient_flags.to_le_bytes());
+        row.push(0); // No MetaTagDnPrefix bytes are reused.
+        row.push(0); // Messaging user.
+        row.extend_from_slice(identity.legacy_dn.as_bytes());
+        row.push(0);
+        write_utf16z(&mut row, recipient.display_name());
+    } else {
+        let recipient_flags = 0x0200u16 | 0x0010 | 0x0008 | 0x0003;
+        row.extend_from_slice(&recipient_flags.to_le_bytes());
+        write_utf16z(&mut row, &recipient.address.address);
+        write_utf16z(&mut row, recipient.display_name());
+    }
     row.extend_from_slice(&(columns.len().min(u16::MAX as usize) as u16).to_le_bytes());
     write_standard_property_row(&mut row, &recipient_property_row(recipient, columns));
     row
@@ -201,27 +257,50 @@ impl MapiRecipient {
     }
 
     pub(crate) fn entry_id(&self) -> Vec<u8> {
+        if let Some(identity) = self.principal_identity.as_ref() {
+            return identity.entry_id.clone();
+        }
         // [MS-OXCICAL] sections 2.1.3.1.1.20.2 and 2.1.3.1.1.20.16:
         // unresolved SMTP attendees and organizers use a One-Off EntryID.
         calendar_one_off_entry_id(self.display_name(), &self.address.address)
     }
 
     pub(crate) fn search_key(&self) -> Vec<u8> {
-        smtp_search_key(&self.address.address)
+        self.principal_identity
+            .as_ref()
+            .map(|identity| identity.search_key.clone())
+            .unwrap_or_else(|| smtp_search_key(&self.address.address))
     }
 
-    pub(in crate::mapi) fn property_value(&self, property_tag: u32) -> Option<MapiValue> {
+    pub(crate) fn property_value(&self, property_tag: u32) -> Option<MapiValue> {
         match property_tag {
             PID_TAG_RECIPIENT_ROW_ID | PID_TAG_RECIPIENT_ORDER => Some(MapiValue::U32(self.order)),
             PID_TAG_RECIPIENT_TYPE => Some(MapiValue::U32(u32::from(self.recipient_type))),
             PID_TAG_RECIPIENT_FLAGS => Some(MapiValue::U32(self.recipient_flags)),
             PID_TAG_RECIPIENT_TRACK_STATUS => Some(MapiValue::U32(self.track_status)),
             PID_TAG_OBJECT_TYPE => Some(MapiValue::U32(6)),
-            PID_TAG_DISPLAY_TYPE | PID_TAG_DISPLAY_TYPE_EX => Some(MapiValue::U32(0)),
-            PID_TAG_ADDRESS_TYPE_W => Some(MapiValue::String("SMTP".to_string())),
-            PID_TAG_EMAIL_ADDRESS_W | PID_TAG_SMTP_ADDRESS_W => {
-                Some(MapiValue::String(self.address.address.clone()))
-            }
+            PID_TAG_DISPLAY_TYPE => Some(MapiValue::U32(0)),
+            PID_TAG_DISPLAY_TYPE_EX => Some(MapiValue::U32(
+                self.principal_identity
+                    .as_ref()
+                    .map(|_| 0x4000_0000)
+                    .unwrap_or_default(),
+            )),
+            PID_TAG_ADDRESS_TYPE_W => Some(MapiValue::String(
+                if self.principal_identity.is_some() {
+                    "EX"
+                } else {
+                    "SMTP"
+                }
+                .to_string(),
+            )),
+            PID_TAG_EMAIL_ADDRESS_W => Some(MapiValue::String(
+                self.principal_identity
+                    .as_ref()
+                    .map(|identity| identity.legacy_dn.clone())
+                    .unwrap_or_else(|| self.address.address.clone()),
+            )),
+            PID_TAG_SMTP_ADDRESS_W => Some(MapiValue::String(self.address.address.clone())),
             PID_TAG_DISPLAY_NAME_W
             | PID_TAG_RECIPIENT_DISPLAY_NAME_W
             | PID_TAG_ADDRESS_BOOK_DISPLAY_NAME_PRINTABLE_W => {

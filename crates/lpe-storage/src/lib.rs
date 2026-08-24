@@ -4,6 +4,7 @@ pub mod attachments;
 pub mod auth;
 mod blob_store;
 pub mod calendar;
+mod calendar_request_processing;
 pub mod change;
 pub mod collaboration;
 pub mod conversation_actions;

@@ -17,6 +17,7 @@ mod calendar_classification;
 mod calendar_mail;
 mod email_types;
 
+pub(crate) use calendar_classification::CALENDAR_MAIL_PARSER_REVISION;
 pub use email_types::{JmapEmail, JmapEmailAddress, JmapEmailMailboxState};
 
 #[derive(Debug, Clone, Default)]

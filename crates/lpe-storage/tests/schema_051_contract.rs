@@ -208,6 +208,7 @@ fn canonical_schema_guard_rejects_incomplete_calendar_mail_classification_state(
             "'calendar_mail_classifications'",
             "'calendar_mail_classification_projections'",
             "'is_scheduling_body'",
+            "'calendar_request_processed'",
             "'classification_generation'",
             "'requires_projection_rotation'",
             "'needs_reclassification'",

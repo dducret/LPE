@@ -340,11 +340,21 @@ impl Storage {
             r#"
             INSERT INTO mailbox_messages (
                 id, tenant_id, account_id, mailbox_id, message_id, thread_id,
-                imap_uid, modseq, is_seen, is_flagged, is_draft, received_at
+                imap_uid, modseq, is_seen, is_flagged, is_draft,
+                calendar_request_processed, received_at
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6,
-                $7, $8, $9, $10, $11, COALESCE($12::timestamptz, NOW())
+                $7, $8, $9, $10, $11,
+                COALESCE((
+                    SELECT bool_and(existing.calendar_request_processed)
+                    FROM mailbox_messages existing
+                    WHERE existing.tenant_id = $2
+                      AND existing.account_id = $3
+                      AND existing.message_id = $5
+                      AND existing.visibility = 'visible'
+                ), FALSE),
+                COALESCE($12::timestamptz, NOW())
             )
             "#,
         )

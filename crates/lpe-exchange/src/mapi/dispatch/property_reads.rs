@@ -51,6 +51,7 @@ pub(super) async fn append_get_properties_all_response<S>(
 }
 
 pub(super) fn append_get_properties_list_response(
+    principal: &AccountPrincipal,
     session: &MapiSession,
     handle_slots: &[u32],
     request: &RopRequest,
@@ -66,6 +67,7 @@ pub(super) fn append_get_properties_list_response(
         session,
         object,
         snapshot,
+        Some(principal),
         &custom_property_tags,
     ));
 }

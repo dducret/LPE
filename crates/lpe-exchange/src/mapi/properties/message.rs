@@ -253,6 +253,12 @@ pub(crate) fn email_property_value(email: &JmapEmail, property_tag: u32) -> Opti
             .or_else(|| {
                 email
                     .calendar_meeting_request
+                    .as_ref()
+                    .and_then(|request| request.client_processed.then_some(MapiValue::Bool(true)))
+            })
+            .or_else(|| {
+                email
+                    .calendar_meeting_request
                     .is_none()
                     .then_some(MapiValue::Bool(false))
             }),

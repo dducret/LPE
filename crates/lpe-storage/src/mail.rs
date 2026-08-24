@@ -87,6 +87,8 @@ pub struct CalendarMeetingRequest {
     pub uid: String,
     #[serde(skip, default)]
     pub transport_attachment_id: Option<Uuid>,
+    #[serde(skip, default)]
+    pub client_processed: bool,
     pub organizer: Option<CalendarMeetingIdentity>,
     pub attendees: Vec<CalendarMeetingAttendee>,
     pub response_requested: bool,
@@ -233,6 +235,7 @@ fn parse_icalendar_meeting_request(lines: &[String]) -> Option<CalendarMeetingRe
     Some(CalendarMeetingRequest {
         uid: normalize_calendar_meeting_uid(&uid),
         transport_attachment_id: None,
+        client_processed: false,
         organizer,
         attendees,
         response_requested,
@@ -1046,6 +1049,7 @@ mod tests {
             Some(super::CalendarMeetingRequest {
                 uid: "probe-7@example.test".to_string(),
                 transport_attachment_id: None,
+                client_processed: false,
                 organizer: Some(super::CalendarMeetingIdentity {
                     email: "denis.ducret@sdic.ch".to_string(),
                     display_name: "Denis Ducret".to_string(),

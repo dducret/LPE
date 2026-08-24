@@ -25,6 +25,7 @@ WITH relation_oids AS (
     VALUES
         ('messages'::text, 'authorized_calendar_response_content_sha256'::text, 'text'::text, 'YES'::text, 'none'::text),
         ('messages', 'calendar_response_processed', 'boolean', 'NO', 'false'),
+        ('mailbox_messages', 'calendar_request_processed', 'boolean', 'NO', 'false'),
         ('mime_parts'::text, 'is_scheduling_body'::text, 'boolean'::text, 'NO'::text, 'false'::text),
         ('calendar_mail_classifications', 'tenant_id', 'uuid', 'NO', 'none'),
         ('calendar_mail_classifications', 'message_id', 'uuid', 'NO', 'none'),

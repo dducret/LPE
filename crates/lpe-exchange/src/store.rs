@@ -1293,6 +1293,20 @@ pub trait ExchangeStore: AccountAuthStore {
         ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<JmapEmail>>;
 
+    fn mark_mapi_calendar_meeting_request_processed<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, (JmapEmail, bool)> {
+        Box::pin(async move {
+            let _ = (account_id, message_id, audit);
+            Err(anyhow::anyhow!(
+                "durable MAPI Meeting Request processing is not implemented"
+            ))
+        })
+    }
+
     fn fetch_message_attachments<'a>(
         &'a self,
         account_id: Uuid,

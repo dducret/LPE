@@ -314,6 +314,7 @@ impl Storage {
         let source = sqlx::query(
             r#"
             SELECT id, mailbox_id, thread_id, imap_uid, is_seen, is_flagged, keywords,
+                   calendar_request_processed,
                    received_at::text AS received_at
             FROM mailbox_messages
             WHERE tenant_id = $1
@@ -528,11 +529,12 @@ impl Storage {
             r#"
             INSERT INTO mailbox_messages (
                 id, tenant_id, account_id, mailbox_id, message_id, thread_id,
-                imap_uid, modseq, is_seen, is_flagged, is_draft, keywords, received_at
+                imap_uid, modseq, is_seen, is_flagged, is_draft, keywords,
+                calendar_request_processed, received_at
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6,
-                $7, $8, $9, $10, $11, $12, COALESCE($13::timestamptz, NOW())
+                $7, $8, $9, $10, $11, $12, $13, COALESCE($14::timestamptz, NOW())
             )
             "#,
         )
@@ -548,6 +550,7 @@ impl Storage {
         .bind(source.try_get::<bool, _>("is_flagged")?)
         .bind(target_role == "drafts")
         .bind(source.try_get::<Vec<String>, _>("keywords")?)
+        .bind(source.try_get::<bool, _>("calendar_request_processed")?)
         .bind(source.try_get::<String, _>("received_at")?)
         .execute(&mut *tx)
         .await?;

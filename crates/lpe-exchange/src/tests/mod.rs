@@ -12870,6 +12870,78 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(emails) })
     }
 
+    fn mark_mapi_calendar_meeting_request_processed<'a>(
+        &'a self,
+        _account_id: Uuid,
+        message_id: Uuid,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, (JmapEmail, bool)> {
+        let result = (|| {
+            let mut emails = self.emails.lock().unwrap();
+            let email = emails
+                .iter_mut()
+                .find(|email| email.id == message_id)
+                .ok_or_else(|| anyhow::anyhow!("meeting request message was not found"))?;
+            let request = email
+                .calendar_meeting_request
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("message is not a Meeting Request"))?;
+            let changed = !request.client_processed;
+            request.client_processed = true;
+            let email = email.clone();
+            drop(emails);
+
+            if changed
+                && self
+                    .mapi_identities
+                    .lock()
+                    .unwrap()
+                    .contains_key(&message_id)
+            {
+                let current_change_number = self
+                    .mapi_identity_change_numbers
+                    .lock()
+                    .unwrap()
+                    .get(&message_id)
+                    .copied()
+                    .unwrap_or_default();
+                let change_number = {
+                    let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
+                    *next_counter = (*next_counter)
+                        .max(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER)
+                        .max(current_change_number.saturating_add(1));
+                    let change_number = *next_counter;
+                    *next_counter = next_counter.saturating_add(1);
+                    change_number
+                };
+                self.mapi_identity_change_numbers
+                    .lock()
+                    .unwrap()
+                    .insert(message_id, change_number);
+                self.mapi_identity_change_keys.lock().unwrap().insert(
+                    message_id,
+                    crate::mapi::identity::change_key_for_change_number(change_number),
+                );
+                self.mapi_identity_predecessor_change_lists
+                    .lock()
+                    .unwrap()
+                    .insert(
+                        message_id,
+                        crate::mapi_mailstore::predecessor_change_list(change_number),
+                    );
+                self.mapi_identity_last_modification_times
+                    .lock()
+                    .unwrap()
+                    .insert(
+                        message_id,
+                        crate::mapi_mailstore::filetime_from_change_number(change_number),
+                    );
+            }
+            Ok((email, changed))
+        })();
+        Box::pin(async move { result })
+    }
+
     fn fetch_jmap_emails_with_protected_bcc<'a>(
         &'a self,
         _account_id: Uuid,

@@ -80,7 +80,7 @@ pub(crate) use notification_metrics::{
     record_mapi_new_mail_notification_deliveries, record_mapi_notification_wait_completion,
     MapiNotificationWaitOutcome,
 };
-pub(crate) use tables::{message_recipients, MapiRecipient};
+pub(crate) use tables::{message_recipients, message_recipients_for_principal, MapiRecipient};
 
 #[cfg(test)]
 pub(crate) use crate::mapi::session::begin_active_session_request_for_test;

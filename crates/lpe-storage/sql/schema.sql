@@ -1171,6 +1171,7 @@ CREATE TABLE mailbox_messages (
     is_answered BOOLEAN NOT NULL DEFAULT FALSE,
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     is_draft BOOLEAN NOT NULL DEFAULT FALSE,
+    calendar_request_processed BOOLEAN NOT NULL DEFAULT FALSE,
     followup_flag_status TEXT NOT NULL DEFAULT 'none'
         CHECK (followup_flag_status IN ('none', 'flagged', 'complete')),
     followup_icon INTEGER NOT NULL DEFAULT 0 CHECK (followup_icon >= 0),

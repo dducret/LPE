@@ -2307,6 +2307,7 @@ fn meeting_request_snapshot_hides_only_inline_calendar_transport_part() {
     email.calendar_meeting_request = Some(lpe_storage::CalendarMeetingRequest {
         uid: "probe-7@example.test".to_string(),
         transport_attachment_id: Some(inline_calendar_id),
+        client_processed: false,
         organizer: None,
         attendees: Vec::new(),
         response_requested: true,

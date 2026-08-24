@@ -2432,6 +2432,7 @@ async fn mapi_over_http_submit_saved_request_regenerates_pending_sequence() {
     draft.calendar_meeting_request = Some(lpe_storage::CalendarMeetingRequest {
         uid: "saved-request-sequence@example.test".to_string(),
         transport_attachment_id: None,
+        client_processed: false,
         organizer: Some(lpe_storage::CalendarMeetingIdentity {
             email: "alice@example.test".to_string(),
             display_name: "Alice".to_string(),
@@ -2519,6 +2520,7 @@ async fn mapi_over_http_submit_saved_request_regenerates_selected_ics_staged_for
     draft.calendar_meeting_request = Some(lpe_storage::CalendarMeetingRequest {
         uid: "saved-request-deleted-body@example.test".to_string(),
         transport_attachment_id: None,
+        client_processed: false,
         organizer: Some(lpe_storage::CalendarMeetingIdentity {
             email: "alice@example.test".to_string(),
             display_name: "Alice".to_string(),
@@ -2654,6 +2656,7 @@ async fn mapi_over_http_submit_saved_meeting_as_ordinary_deletes_stale_schedulin
     draft.calendar_meeting_request = Some(lpe_storage::CalendarMeetingRequest {
         uid: "meeting-converted-to-note@example.test".to_string(),
         transport_attachment_id: Some(transport_attachment_id),
+        client_processed: false,
         organizer: Some(lpe_storage::CalendarMeetingIdentity {
             email: "alice@example.test".to_string(),
             display_name: "Alice".to_string(),

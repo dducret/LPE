@@ -316,6 +316,7 @@ mod tests {
         CalendarMeetingRequest {
             uid: "request-correlation@example.test".to_string(),
             transport_attachment_id: None,
+            client_processed: false,
             organizer: Some(CalendarMeetingIdentity {
                 email: "organizer@example.test".to_string(),
                 display_name: "Organizer".to_string(),

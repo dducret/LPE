@@ -119,6 +119,11 @@ pub(in crate::mapi) fn rop_get_properties_all_response_with_custom(
         .as_ref()
         .map(|effective| effective.tags.clone())
         .unwrap_or_else(|| get_properties_all_tags(object, snapshot));
+    if let Some(email) = message_enumeration_email(object, snapshot) {
+        tags.extend(email_recipient_delivery_property_tags(email, principal));
+        tags.sort_unstable();
+        tags.dedup();
+    }
     if matches!(object, MapiObject::DelegateFreeBusyMessage { .. }) {
         tags.extend(custom_values.keys().copied());
         tags.sort_unstable();
@@ -196,7 +201,7 @@ pub(in crate::mapi) fn rop_get_properties_list_response(
     object: Option<&MapiObject>,
     snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<u8> {
-    rop_get_properties_list_response_with_custom_tags(request, session, object, snapshot, &[])
+    rop_get_properties_list_response_with_custom_tags(request, session, object, snapshot, None, &[])
 }
 
 pub(in crate::mapi) fn rop_get_properties_list_response_with_custom_tags(
@@ -204,6 +209,7 @@ pub(in crate::mapi) fn rop_get_properties_list_response_with_custom_tags(
     session: &MapiSession,
     object: Option<&MapiObject>,
     snapshot: &MapiMailStoreSnapshot,
+    principal: Option<&AccountPrincipal>,
     custom_property_tags: &[u32],
 ) -> Vec<u8> {
     let Some(object) = object else {
@@ -233,6 +239,12 @@ pub(in crate::mapi) fn rop_get_properties_list_response_with_custom_tags(
     let mut tags = effective_event_properties(object, snapshot)
         .map(|effective| effective.tags)
         .unwrap_or_else(|| get_properties_list_tags(object, snapshot));
+    if let (Some(principal), Some(email)) = (principal, message_enumeration_email(object, snapshot))
+    {
+        tags.extend(email_recipient_delivery_property_tags(email, principal));
+        tags.sort_unstable();
+        tags.dedup();
+    }
     if matches!(object, MapiObject::DelegateFreeBusyMessage { .. }) {
         tags.extend_from_slice(custom_property_tags);
         tags.sort_unstable();

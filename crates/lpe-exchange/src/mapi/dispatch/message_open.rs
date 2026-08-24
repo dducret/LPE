@@ -31,7 +31,8 @@ pub(super) fn append_open_message_response(
         );
         session.record_message_handle_generation(handle, folder_id, message_id);
         set_handle_slot(handle_slots, request.output_handle_index, handle);
-        let response = rop_open_message_response_with_recipients(request, &email.subject, email);
+        let response =
+            rop_open_message_response_with_recipients(request, &email.subject, email, principal);
         log_open_message_debug(
             principal,
             request,
@@ -74,6 +75,7 @@ pub(super) fn append_open_message_response(
             request,
             &message.email.subject,
             &message.email,
+            principal,
         );
         log_open_message_debug(
             principal,
@@ -121,7 +123,8 @@ pub(super) fn append_open_message_response(
         );
         session.record_message_handle_generation(handle, handle_folder_id, message_id);
         set_handle_slot(handle_slots, request.output_handle_index, handle);
-        let response = rop_open_message_response_with_recipients(request, &email.subject, email);
+        let response =
+            rop_open_message_response_with_recipients(request, &email.subject, email, principal);
         log_open_message_debug(
             principal,
             request,

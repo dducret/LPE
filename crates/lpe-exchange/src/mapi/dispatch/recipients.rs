@@ -203,6 +203,7 @@ pub(super) async fn append_read_recipients_response<S>(
         mailboxes,
         recipient_emails,
         snapshot,
+        principal,
     ));
 }
 

@@ -4,6 +4,7 @@ use lpe_domain::{
     crypto::hex_lower, days_from_civil, windows_filetime_from_signed_unix_seconds,
     WINDOWS_FILETIME_TICKS_PER_SECOND, WINDOWS_UNIX_EPOCH_OFFSET_SECONDS,
 };
+use lpe_mail_auth::AccountPrincipal;
 use lpe_storage::{JmapEmail, JmapMailbox};
 use uuid::Uuid;
 
@@ -804,6 +805,7 @@ pub(crate) fn fast_transfer_manifest_buffer_with_attachments(
 pub(crate) fn fast_transfer_message_list_buffer_with_attachments(
     emails: &[JmapEmail],
     attachment_facts: &[MessageAttachmentSyncFacts],
+    principal: Option<&AccountPrincipal>,
 ) -> Vec<u8> {
     let mut buffer = Vec::new();
     let mut messages = emails.iter().collect::<Vec<_>>();
@@ -821,6 +823,7 @@ pub(crate) fn fast_transfer_message_list_buffer_with_attachments(
             email,
             attachments,
             None,
+            principal,
             FastTransferDirectPropertyFilter::All,
             FastTransferMessageChildren::all(),
         );
@@ -833,6 +836,7 @@ pub(crate) fn fast_transfer_message_content_buffer_with_attachments(
     email: &JmapEmail,
     attachment_facts: &[MessageAttachmentSyncFacts],
     durable_identity: Option<&crate::store::MapiIdentityRecord>,
+    principal: Option<&AccountPrincipal>,
     property_filter: FastTransferDirectPropertyFilter<'_>,
     message_children: FastTransferMessageChildren,
 ) -> Vec<u8> {
@@ -842,6 +846,7 @@ pub(crate) fn fast_transfer_message_content_buffer_with_attachments(
         email,
         attachments_for_message(email.id, attachment_facts),
         durable_identity,
+        principal,
         property_filter,
         message_children,
     );
@@ -852,6 +857,7 @@ fn write_fast_transfer_message_children(
     buffer: &mut Vec<u8>,
     message_children: FastTransferMessageChildren,
     email: Option<&JmapEmail>,
+    principal: Option<&AccountPrincipal>,
     special_recipients: &[SpecialMessageRecipientSyncFact],
     attachments: &[AttachmentSyncFact],
 ) {
@@ -866,7 +872,13 @@ fn write_fast_transfer_message_children(
             PID_TAG_MESSAGE_RECIPIENTS as i32,
         );
         if let Some(email) = email {
-            recipient_projection::write_fast_transfer_visible_recipients(buffer, email);
+            if let Some(principal) = principal {
+                recipient_projection::write_fast_transfer_visible_recipients_for_principal(
+                    buffer, email, principal,
+                );
+            } else {
+                recipient_projection::write_fast_transfer_visible_recipients(buffer, email);
+            }
         } else {
             write_fast_transfer_special_recipients(buffer, special_recipients);
         }
@@ -934,6 +946,7 @@ pub(crate) fn fast_transfer_top_folder_buffer_with_attachments(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     attachment_facts: &[MessageAttachmentSyncFacts],
+    principal: Option<&AccountPrincipal>,
 ) -> Vec<u8> {
     let mut buffer = Vec::new();
     if let Some(mailbox) = mailboxes.iter().find(|mailbox| {
@@ -947,6 +960,7 @@ pub(crate) fn fast_transfer_top_folder_buffer_with_attachments(
             mailboxes,
             emails,
             attachment_facts,
+            principal,
             true,
         );
     } else {
@@ -963,6 +977,7 @@ fn write_fast_transfer_folder_content(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     attachment_facts: &[MessageAttachmentSyncFacts],
+    principal: Option<&AccountPrincipal>,
     top_folder: bool,
 ) {
     write_u32(
@@ -986,6 +1001,7 @@ fn write_fast_transfer_folder_content(
     buffer.extend_from_slice(&fast_transfer_message_list_buffer_with_attachments(
         &folder_messages,
         attachment_facts,
+        principal,
     ));
     for child in fast_transfer_child_mailboxes(folder_id, mailboxes) {
         let child_folder_id = mapi_folder_id_for_mailbox(
@@ -999,6 +1015,7 @@ fn write_fast_transfer_folder_content(
             mailboxes,
             emails,
             attachment_facts,
+            principal,
             false,
         );
     }

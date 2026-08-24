@@ -117,6 +117,7 @@ pub(super) fn write_fast_transfer_message_content(
     email: &JmapEmail,
     attachments: &[AttachmentSyncFact],
     durable_identity: Option<&crate::store::MapiIdentityRecord>,
+    principal: Option<&AccountPrincipal>,
     property_filter: FastTransferDirectPropertyFilter<'_>,
     message_children: FastTransferMessageChildren,
 ) {
@@ -144,7 +145,7 @@ pub(super) fn write_fast_transfer_message_content(
         write_u32(buffer, PID_TAG_MESSAGE_DELIVERY_TIME);
         write_i64(buffer, delivery_time as i64);
     }
-    write_fast_transfer_message_identity(buffer, email, |property_tag| {
+    write_fast_transfer_message_identity(buffer, email, principal, |property_tag| {
         property_filter.includes(property_tag)
     });
     if property_filter.includes(PID_TAG_MESSAGE_CLASS_W) {
@@ -170,7 +171,14 @@ pub(super) fn write_fast_transfer_message_content(
     write_email_generated_properties(buffer, email, |property_tag| {
         property_filter.includes(property_tag)
     });
-    write_fast_transfer_message_children(buffer, message_children, Some(email), &[], attachments);
+    write_fast_transfer_message_children(
+        buffer,
+        message_children,
+        Some(email),
+        principal,
+        &[],
+        attachments,
+    );
 }
 
 fn write_normalized_subject_property(buffer: &mut Vec<u8>, property_tag: u32, subject: &str) {
@@ -712,6 +720,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
 ) -> Vec<u8> {
     sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions_and_commit_times_and_normal_message_facts(
         mailbox_guid,
+        None,
         sync_type,
         sync_flags,
         sync_extra_flags,
@@ -741,6 +750,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions_and_commit_times_and_normal_message_facts(
     mailbox_guid: Uuid,
+    principal: Option<&AccountPrincipal>,
     sync_type: u8,
     sync_flags: u16,
     sync_extra_flags: u32,
@@ -1110,7 +1120,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             write_u32(&mut buffer, PID_TAG_MESSAGE_DELIVERY_TIME);
             write_i64(&mut buffer, delivery_time as i64);
         }
-        write_fast_transfer_message_identity(&mut buffer, email, |property_tag| {
+        write_fast_transfer_message_identity(&mut buffer, email, principal, |property_tag| {
             content_property_in_scope(sync_type, sync_flags, sync_property_tags, property_tag)
         });
         let subject_in_scope =
@@ -1155,6 +1165,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             &mut buffer,
             content_sync_message_children(sync_type, sync_flags, sync_property_tags),
             Some(email),
+            principal,
             &[],
             attachments,
         );
@@ -1370,6 +1381,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
         write_fast_transfer_message_children(
             &mut buffer,
             content_sync_message_children(sync_type, sync_flags, sync_property_tags),
+            None,
             None,
             &object.recipients,
             attachments,

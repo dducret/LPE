@@ -2595,6 +2595,7 @@ fn actionable_meeting_request_test_email() -> JmapEmail {
     email.calendar_meeting_request = Some(lpe_storage::CalendarMeetingRequest {
         uid: "probe-10-20260824@sdic.ch".to_string(),
         transport_attachment_id: None,
+        client_processed: false,
         organizer: Some(lpe_storage::CalendarMeetingIdentity {
             email: "denis.ducret@sdic.ch".to_string(),
             display_name: "Denis Ducret".to_string(),
@@ -2616,6 +2617,17 @@ fn actionable_meeting_request_test_email() -> JmapEmail {
         intended_busy_status: 2,
     });
     email
+}
+
+fn meeting_mail_test_principal() -> AccountPrincipal {
+    AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::from_u128(0xbc737006441349b9aefc3cb6e0088492),
+        email: "test@l-p-e.ch".to_string(),
+        display_name: "LPE Test".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    }
 }
 
 fn counter_meeting_response_test_email() -> JmapEmail {
@@ -2664,7 +2676,9 @@ fn reply_meeting_response_test_email(partstat: &str, prefix: &str) -> JmapEmail 
 struct DecodedSavedRecipientRow {
     row_id: Option<u32>,
     recipient_type: u8,
-    email_address: String,
+    intrinsic_flags: u16,
+    x500_dn: Option<String>,
+    email_address: Option<String>,
     display_name: String,
     properties: HashMap<u32, MapiValue>,
 }
@@ -2701,8 +2715,34 @@ fn decode_saved_recipient_row(
 ) -> DecodedSavedRecipientRow {
     let mut cursor = Cursor::new(row);
     let intrinsic_flags = cursor.read_u16().unwrap();
-    assert_eq!(intrinsic_flags, 0x021B, "Unicode SMTP address and name");
-    let email_address = cursor.read_utf16z().unwrap();
+    assert_ne!(
+        intrinsic_flags & 0x0200,
+        0,
+        "saved recipient strings are Unicode"
+    );
+    assert_ne!(
+        intrinsic_flags & 0x0010,
+        0,
+        "saved recipient includes DisplayName"
+    );
+    let x500_dn = match intrinsic_flags & 0x0007 {
+        0x01 => {
+            assert_eq!(
+                cursor.read_u8().unwrap(),
+                0,
+                "the complete X500 DN does not use a bulk-transfer prefix"
+            );
+            assert_eq!(
+                cursor.read_u8().unwrap(),
+                0,
+                "X500 recipient is a mail user"
+            );
+            Some(cursor.read_ascii_z().unwrap())
+        }
+        0x03 => None,
+        value => panic!("unexpected saved recipient address type {value:#04x}"),
+    };
+    let email_address = (intrinsic_flags & 0x0008 != 0).then(|| cursor.read_utf16z().unwrap());
     let display_name = cursor.read_utf16z().unwrap();
     assert_eq!(cursor.read_u16().unwrap() as usize, columns.len());
     assert_eq!(cursor.read_u8().unwrap(), 0, "StandardPropertyRow");
@@ -2717,6 +2757,8 @@ fn decode_saved_recipient_row(
     DecodedSavedRecipientRow {
         row_id,
         recipient_type,
+        intrinsic_flags,
+        x500_dn,
         email_address,
         display_name,
         properties,
@@ -2788,9 +2830,24 @@ fn recipient_u32(row: &DecodedSavedRecipientRow, property_tag: u32) -> u32 {
     }
 }
 
+fn recipient_string(row: &DecodedSavedRecipientRow, property_tag: u32) -> &str {
+    match row.properties.get(&property_tag) {
+        Some(MapiValue::String(value)) => value,
+        value => panic!("unexpected recipient property {property_tag:#010x}: {value:?}"),
+    }
+}
+
+fn recipient_binary(row: &DecodedSavedRecipientRow, property_tag: u32) -> &[u8] {
+    match row.properties.get(&property_tag) {
+        Some(MapiValue::Binary(value)) => value,
+        value => panic!("unexpected recipient property {property_tag:#010x}: {value:?}"),
+    }
+}
+
 #[test]
 fn meeting_response_open_and_read_recipients_share_complete_ics_projection() {
     let mut email = counter_meeting_response_test_email();
+    let principal = meeting_mail_test_principal();
     email.to = vec![JmapEmailAddress {
         address: "stale-rfc-recipient@example.test".to_string(),
         display_name: Some("Stale RFC recipient".to_string()),
@@ -2805,14 +2862,23 @@ fn meeting_response_open_and_read_recipients_share_complete_ics_projection() {
         output_handle_index: Some(2),
         payload: Vec::new(),
     };
-    let open = rop_open_message_response_with_recipients(&open_request, &email.subject, &email);
+    let open = rop_open_message_response_with_recipients(
+        &open_request,
+        &email.subject,
+        &email,
+        &principal,
+    );
     let (recipient_count, columns, open_rows) = decode_open_message_recipients(&open);
 
     assert_eq!(recipient_count, 2);
     assert_eq!(columns, MESSAGE_RECIPIENT_COLUMNS);
     assert_eq!(open_rows.len(), 2);
     let organizer = &open_rows[0];
-    assert_eq!(organizer.email_address, "test@l-p-e.ch");
+    let organizer_legacy_dn =
+        "/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=test-l-p-e-ch";
+    assert_eq!(organizer.intrinsic_flags, 0x0211);
+    assert_eq!(organizer.x500_dn.as_deref(), Some(organizer_legacy_dn));
+    assert_eq!(organizer.email_address, None);
     assert_eq!(organizer.display_name, "LPE Test");
     assert_eq!(organizer.recipient_type, 1);
     assert_eq!(recipient_u32(organizer, PID_TAG_RECIPIENT_FLAGS), 3);
@@ -2820,7 +2886,7 @@ fn meeting_response_open_and_read_recipients_share_complete_ics_projection() {
     assert_eq!(recipient_u32(organizer, PID_TAG_RECIPIENT_TRACK_STATUS), 0);
     assert_eq!(
         organizer.properties.get(&PID_TAG_ADDRESS_TYPE_W),
-        Some(&MapiValue::String("SMTP".to_string()))
+        Some(&MapiValue::String("EX".to_string()))
     );
     assert_eq!(
         organizer.properties.get(&PID_TAG_SMTP_ADDRESS_W),
@@ -2832,19 +2898,26 @@ fn meeting_response_open_and_read_recipients_share_complete_ics_projection() {
     );
     assert!(matches!(
         organizer.properties.get(&PID_TAG_SEARCH_KEY),
-        Some(MapiValue::Binary(value)) if value == b"SMTP:TEST@L-P-E.CH\0"
+        Some(MapiValue::Binary(value))
+            if value
+                == b"EX:/O=LPE/OU=EXCHANGE ADMINISTRATIVE GROUP/CN=RECIPIENTS/CN=TEST-L-P-E-CH\0"
     ));
 
     let responder = &open_rows[1];
-    assert_eq!(responder.email_address, "denis.ducret@sdic.ch");
+    assert_eq!(
+        responder.email_address.as_deref(),
+        Some("denis.ducret@sdic.ch")
+    );
     assert_eq!(responder.display_name, "Denis Ducret");
     assert_eq!(responder.recipient_type, 1);
     assert_eq!(recipient_u32(responder, PID_TAG_RECIPIENT_FLAGS), 1);
     assert_eq!(recipient_u32(responder, PID_TAG_RECIPIENT_ORDER), 1);
     assert_eq!(recipient_u32(responder, PID_TAG_RECIPIENT_TRACK_STATUS), 4);
-    assert!(open_rows
-        .iter()
-        .all(|row| !row.email_address.starts_with("stale-rfc-")));
+    assert!(open_rows.iter().all(|row| !row
+        .email_address
+        .as_deref()
+        .unwrap_or_default()
+        .starts_with("stale-rfc-")));
 
     let object = MapiObject::Message {
         folder_id: INBOX_FOLDER_ID,
@@ -2867,12 +2940,128 @@ fn meeting_response_open_and_read_recipients_share_complete_ics_projection() {
         &[],
         &[],
         &MapiMailStoreSnapshot::empty(),
+        &principal,
     );
     let read_rows = decode_read_recipients(&read, &columns);
     assert_eq!(read_rows.len(), open_rows.len());
     for (row_id, (read, open)) in read_rows.iter().zip(&open_rows).enumerate() {
         assert_eq!(read.row_id, Some(row_id as u32));
         assert_eq!(read.recipient_type, open.recipient_type);
+        assert_eq!(read.intrinsic_flags, open.intrinsic_flags);
+        assert_eq!(read.x500_dn, open.x500_dn);
+        assert_eq!(read.email_address, open.email_address);
+        assert_eq!(read.display_name, open.display_name);
+        assert_eq!(read.properties, open.properties);
+    }
+}
+
+#[test]
+fn meeting_request_open_and_read_recipients_resolve_current_mailbox_attendee() {
+    let email = actionable_meeting_request_test_email();
+    let principal = meeting_mail_test_principal();
+    let request = RopRequest {
+        rop_id: RopId::OpenMessage.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: Some(2),
+        payload: Vec::new(),
+    };
+
+    let open =
+        rop_open_message_response_with_recipients(&request, &email.subject, &email, &principal);
+    let (recipient_count, columns, open_rows) = decode_open_message_recipients(&open);
+
+    assert_eq!(recipient_count, 2);
+    assert_eq!(columns, MESSAGE_RECIPIENT_COLUMNS);
+    assert_eq!(open_rows.len(), 2);
+
+    let organizer = &open_rows[0];
+    assert_eq!(organizer.intrinsic_flags, 0x021B);
+    assert_eq!(organizer.x500_dn, None);
+    assert_eq!(
+        organizer.email_address.as_deref(),
+        Some("denis.ducret@sdic.ch")
+    );
+    assert_eq!(organizer.display_name, "Denis Ducret");
+    assert_eq!(organizer.recipient_type, 1);
+    assert_eq!(recipient_u32(organizer, PID_TAG_RECIPIENT_FLAGS), 3);
+    assert_eq!(recipient_u32(organizer, PID_TAG_RECIPIENT_ORDER), 0);
+    assert_eq!(recipient_u32(organizer, PID_TAG_RECIPIENT_TRACK_STATUS), 0);
+    assert_eq!(recipient_string(organizer, PID_TAG_ADDRESS_TYPE_W), "SMTP");
+    assert_eq!(recipient_u32(organizer, PID_TAG_DISPLAY_TYPE_EX), 0);
+    assert_eq!(
+        &recipient_binary(organizer, PID_TAG_ENTRY_ID)[4..20],
+        &[
+            0x81, 0x2B, 0x1F, 0xA4, 0xBE, 0xA3, 0x10, 0x19, 0x9D, 0x6E, 0x00, 0xDD, 0x01, 0x0F,
+            0x54, 0x02,
+        ]
+    );
+
+    let attendee = &open_rows[1];
+    let legacy_dn = "/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=test-l-p-e-ch";
+    assert_eq!(attendee.intrinsic_flags, 0x0211);
+    assert_eq!(attendee.x500_dn.as_deref(), Some(legacy_dn));
+    assert_eq!(attendee.email_address, None);
+    assert_eq!(attendee.display_name, "LPE Test");
+    assert_eq!(attendee.recipient_type, 1);
+    assert_eq!(recipient_u32(attendee, PID_TAG_RECIPIENT_FLAGS), 1);
+    assert_eq!(recipient_u32(attendee, PID_TAG_RECIPIENT_ORDER), 1);
+    assert_eq!(recipient_u32(attendee, PID_TAG_RECIPIENT_TRACK_STATUS), 0);
+    assert_eq!(recipient_string(attendee, PID_TAG_ADDRESS_TYPE_W), "EX");
+    assert_eq!(
+        recipient_string(attendee, PID_TAG_EMAIL_ADDRESS_W),
+        legacy_dn
+    );
+    assert_eq!(
+        recipient_string(attendee, PID_TAG_SMTP_ADDRESS_W),
+        "test@l-p-e.ch"
+    );
+    assert_eq!(
+        recipient_u32(attendee, PID_TAG_DISPLAY_TYPE_EX),
+        0x4000_0000
+    );
+    assert_eq!(
+        recipient_binary(attendee, PID_TAG_SEARCH_KEY),
+        b"EX:/O=LPE/OU=EXCHANGE ADMINISTRATIVE GROUP/CN=RECIPIENTS/CN=TEST-L-P-E-CH\0"
+    );
+    assert_eq!(
+        recipient_binary(attendee, PID_TAG_ENTRY_ID),
+        recipient_binary(attendee, PID_TAG_RECIPIENT_ENTRY_ID)
+    );
+    assert_eq!(
+        &recipient_binary(attendee, PID_TAG_ENTRY_ID)[4..20],
+        NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID.as_slice()
+    );
+
+    let object = MapiObject::Message {
+        folder_id: INBOX_FOLDER_ID,
+        message_id: crate::mapi::identity::mapi_store_id(0x2020),
+        saved_email: Some(MapiSavedEmail {
+            email,
+            durable_identity: None,
+        }),
+        pending_properties: HashMap::new(),
+    };
+    let request = RopRequest {
+        rop_id: RopId::ReadRecipients.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload: [0, 0, 0, 0, 0, 0].to_vec(),
+    };
+    let read = rop_read_recipients_response(
+        &request,
+        Some(&object),
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+        &principal,
+    );
+    let read_rows = decode_read_recipients(&read, &columns);
+    assert_eq!(read_rows.len(), open_rows.len());
+    for (row_id, (read, open)) in read_rows.iter().zip(&open_rows).enumerate() {
+        assert_eq!(read.row_id, Some(row_id as u32));
+        assert_eq!(read.recipient_type, open.recipient_type);
+        assert_eq!(read.intrinsic_flags, open.intrinsic_flags);
+        assert_eq!(read.x500_dn, open.x500_dn);
         assert_eq!(read.email_address, open.email_address);
         assert_eq!(read.display_name, open.display_name);
         assert_eq!(read.properties, open.properties);
@@ -2921,6 +3110,7 @@ fn meeting_request_recipient_projection_preserves_type_status_and_order() {
 
 #[test]
 fn open_message_advertises_named_properties_for_actionable_meeting_mail() {
+    let principal = meeting_mail_test_principal();
     let request = RopRequest {
         rop_id: RopId::OpenMessage.as_u8(),
         input_handle_index: Some(0),
@@ -2934,6 +3124,7 @@ fn open_message_advertises_named_properties_for_actionable_meeting_mail() {
             &request,
             &ordinary.subject,
             &ordinary,
+            &principal,
         )),
         (false, String::new(), ordinary.subject.clone())
     );
@@ -2944,6 +3135,7 @@ fn open_message_advertises_named_properties_for_actionable_meeting_mail() {
             &request,
             &categorized.subject,
             &categorized,
+            &principal,
         )),
         (true, String::new(), categorized.subject.clone())
     );
@@ -2952,6 +3144,7 @@ fn open_message_advertises_named_properties_for_actionable_meeting_mail() {
             &request,
             &meeting_request.subject,
             &meeting_request,
+            &principal,
         )),
         (true, String::new(), meeting_request.subject.clone())
     );
@@ -2971,6 +3164,7 @@ fn open_message_advertises_named_properties_for_actionable_meeting_mail() {
                 &request,
                 &email.subject,
                 &email,
+                &principal,
             )),
             (true, prefix.to_string(), "Probe 10".to_string())
         );

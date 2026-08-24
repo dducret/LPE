@@ -1,12 +1,16 @@
 use super::*;
 use crate::mapi::properties::{
+    email_property_value_for_principal, email_recipient_delivery_property_tags,
     email_sender_address, email_sender_name, email_sent_representing_address,
     email_sent_representing_name, sender_entry_id, sent_representing_entry_id, smtp_search_key,
+    MapiValue,
 };
+use lpe_mail_auth::AccountPrincipal;
 
 pub(super) fn write_fast_transfer_message_identity(
     buffer: &mut Vec<u8>,
     email: &JmapEmail,
+    principal: Option<&AccountPrincipal>,
     mut includes: impl FnMut(u32) -> bool,
 ) {
     let sender_name = email_sender_name(email);
@@ -40,6 +44,23 @@ pub(super) fn write_fast_transfer_message_identity(
         PID_TAG_SENT_REPRESENTING_SEARCH_KEY,
         &sent_representing_entry_id(email),
     );
+
+    let Some(principal) = principal else {
+        return;
+    };
+    for property_tag in email_recipient_delivery_property_tags(email, principal) {
+        if !includes(property_tag) {
+            continue;
+        }
+        match email_property_value_for_principal(email, principal, property_tag)
+            .expect("enumerated receiver property has a principal-aware value")
+        {
+            MapiValue::Bool(value) => write_bool_property(buffer, property_tag, value),
+            MapiValue::String(value) => write_utf16_property(buffer, property_tag, &value),
+            MapiValue::Binary(value) => write_binary_property(buffer, property_tag, &value),
+            value => unreachable!("unexpected FastTransfer receiver value {value:?}"),
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

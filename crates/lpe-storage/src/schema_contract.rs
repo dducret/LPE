@@ -30,6 +30,7 @@ const PROTOCOLS_STORAGE: &str = concat!(
 );
 const CALENDAR_CLASSIFICATION_STORAGE: &str = include_str!("protocols/calendar_classification.rs");
 const CALENDAR_MAIL_STORAGE: &str = include_str!("protocols/calendar_mail.rs");
+const CALENDAR_REQUEST_PROCESSING_STORAGE: &str = include_str!("calendar_request_processing.rs");
 const CALENDAR_CLASSIFICATION_SCHEMA_CHECK: &str =
     include_str!("core/calendar_mail_classification_schema.sql");
 const CALENDAR_REQUEST_CORRELATION_SCHEMA_CHECK: &str =
@@ -2449,6 +2450,11 @@ fn calendar_mail_classification_is_durable_versioned_and_mime_part_exact() {
             "messages must retain exact response authorization and processing state: {required}"
         );
     }
+    let mailbox_messages = table_definition("mailbox_messages");
+    assert!(
+        mailbox_messages.contains("calendar_request_processed BOOLEAN NOT NULL DEFAULT FALSE"),
+        "Meeting Request client processing must be durable per account membership"
+    );
     let mime_parts = table_definition("mime_parts");
     for required in [
         "is_scheduling_body BOOLEAN NOT NULL DEFAULT FALSE",
@@ -2544,6 +2550,9 @@ fn calendar_mail_classification_is_durable_versioned_and_mime_part_exact() {
         "needs_reclassification",
         "FOR UPDATE",
         "UPDATE mailbox_messages",
+        "SET calendar_request_processed = FALSE",
+        "visibility <> 'visible'",
+        "\"calendarRequestProcessedReset\": true",
         "rotate_active_mapi_message_identity_in_tx",
         "\"message\"",
         "\"mailbox_message\"",
@@ -2556,9 +2565,17 @@ fn calendar_mail_classification_is_durable_versioned_and_mime_part_exact() {
             "durable calendar-mail classification path is missing: {required}"
         );
     }
+    assert!(
+        CALENDAR_CLASSIFICATION_STORAGE.contains(
+            "WHERE tenant_id = $1\n                                  AND message_id = $2\n                                  AND visibility <> 'visible'"
+        ),
+        "classification generation changes must reset retained memberships across every account"
+    );
     for required in [
         "message.authorized_calendar_response_content_sha256",
         "message.calendar_response_processed",
+        "membership.calendar_request_processed",
+        "request.client_processed = calendar_request_processed",
         "blob.content_sha256 AS blob_content_sha256",
         "parse_calendar_meeting_response_with_content_sha256",
         "authorized_calendar_response_content_sha256.as_deref()",
@@ -2569,6 +2586,62 @@ fn calendar_mail_classification_is_durable_versioned_and_mime_part_exact() {
             "lazy response classification must require exact durable authorization: {required}"
         );
     }
+    for required in [
+        "pub async fn mark_mapi_calendar_meeting_request_processed",
+        "lock_visible_message_memberships_in_tx",
+        "classification.classification = 'request'",
+        "SET calendar_request_processed = TRUE",
+        "allocate_mail_modseq_in_tx",
+        "rotate_active_mapi_message_identity_in_tx",
+        "calendarRequestProcessedChanged",
+        "insert_mail_change_log_in_tx",
+        "insert_audit",
+        "emit_mail_change",
+    ] {
+        assert!(
+            CALENDAR_REQUEST_PROCESSING_STORAGE.contains(required),
+            "Meeting Request Processed mutation is missing: {required}"
+        );
+    }
+    assert!(
+        SHARED_STORAGE.contains("bool_and(existing.calendar_request_processed)"),
+        "new visible membership copies must inherit the account's Processed state"
+    );
+    for required in [
+        "FOR UPDATE OF ri",
+        "lock_message_for_mime_graph_in_tx",
+        "ORDER BY id",
+        "visible_processed",
+        "visible_processed.unwrap_or(source_processed)",
+        "SET calendar_request_processed = $4",
+    ] {
+        assert!(
+            RECOVERABLE_ITEMS_STORAGE.contains(required),
+            "recoverable Meeting Request restore must retain Processed state: {required}"
+        );
+    }
+    let restore_body = function_body(
+        RECOVERABLE_ITEMS_STORAGE,
+        "pub async fn restore_recoverable_item",
+    );
+    assert_contains_before(
+        restore_body,
+        "FOR UPDATE OF ri",
+        "lock_message_for_mime_graph_in_tx",
+        "recoverable restore must lock its lifecycle row before the canonical message",
+    );
+    assert_contains_before(
+        restore_body,
+        "lock_message_for_mime_graph_in_tx",
+        "ORDER BY id",
+        "recoverable restore must lock the canonical message before ordered memberships",
+    );
+    assert_contains_before(
+        restore_body,
+        "visible_processed.unwrap_or(source_processed)",
+        "allocate_mailbox_membership_in_tx",
+        "recoverable restore must resolve account-wide Processed before allocating membership",
+    );
     let deliver_body = function_body(INBOUND_STORAGE, "pub async fn deliver_inbound_message");
     assert_contains_before(
         deliver_body,

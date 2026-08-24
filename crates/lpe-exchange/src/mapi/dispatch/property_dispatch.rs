@@ -114,6 +114,7 @@ where
         }
         Some(RopId::GetPropertiesList) => {
             append_get_properties_list_response(
+                principal,
                 session,
                 handle_slots,
                 request,

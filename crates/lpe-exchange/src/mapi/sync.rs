@@ -1107,6 +1107,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         &copy_mailboxes,
                         emails,
                         &attachment_facts,
+                        Some(principal),
                     ),
                 ));
             }
@@ -1170,6 +1171,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                     &message,
                     &attachment_facts,
                     durable_identity,
+                    Some(principal),
                     direct_property_filter,
                     message_children,
                 ),

@@ -690,9 +690,10 @@ fn fallback_default_specific_property(
         return saved_email
             .as_ref()
             .map(|saved| {
-                email_property_value_with_durable_identity(
+                email_property_value_with_durable_identity_for_principal(
                     &saved.email,
                     saved.durable_identity.as_ref(),
+                    principal,
                     value_tag,
                 )
                 .is_none()
@@ -701,9 +702,10 @@ fn fallback_default_specific_property(
                 snapshot
                     .message_for_id(*folder_id, *message_id)
                     .map(|message| {
-                        email_property_value_with_durable_identity(
+                        email_property_value_with_durable_identity_for_principal(
                             &message.email,
                             message.durable_identity.as_ref(),
+                            principal,
                             value_tag,
                         )
                         .is_none()
@@ -715,7 +717,9 @@ fn fallback_default_specific_property(
                         search_folder_message_for_id(snapshot, *folder_id, *message_id)
                             .map(|message| &message.email)
                     })
-                    .map(|email| email_property_value(email, value_tag).is_none())
+                    .map(|email| {
+                        email_property_value_for_principal(email, principal, value_tag).is_none()
+                    })
             })
             .unwrap_or(false);
     }
@@ -1054,16 +1058,24 @@ pub(in crate::mapi) fn serialize_object_property(
                 saved_email
                     .as_ref()
                     .map(|saved| {
-                        serialize_message_row_with_durable_identity(
+                        serialize_email_property_with_durable_identity_for_principal(
                             &saved.email,
                             saved.durable_identity.as_ref(),
-                            &[tag],
+                            principal,
+                            tag,
                         )
                     })
                     .or_else(|| {
                         snapshot
                             .message_for_id(*folder_id, *message_id)
-                            .map(|message| serialize_mapi_message_row(message, &[tag]))
+                            .map(|message| {
+                                serialize_email_property_with_durable_identity_for_principal(
+                                    &message.email,
+                                    message.durable_identity.as_ref(),
+                                    principal,
+                                    tag,
+                                )
+                            })
                     })
                     .or_else(|| {
                         message_for_id(*folder_id, *message_id, mailboxes, emails)
@@ -1071,7 +1083,11 @@ pub(in crate::mapi) fn serialize_object_property(
                                 search_folder_message_for_id(snapshot, *folder_id, *message_id)
                                     .map(|message| &message.email)
                             })
-                            .map(|email| serialize_message_row(email, &[tag]))
+                            .map(|email| {
+                                serialize_email_property_with_durable_identity_for_principal(
+                                    email, None, principal, tag,
+                                )
+                            })
                     })
                     .unwrap_or_else(|| {
                         let mut value = Vec::new();

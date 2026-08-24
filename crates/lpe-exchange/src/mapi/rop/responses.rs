@@ -1,14 +1,15 @@
 use super::{message_for_id, pending_text_property, search_folder_message_for_id};
 use super::{
     rop_error_response, write_object_id, write_typed_string,
-    write_typed_string_reduced_unicode_when_lossless, write_u16, write_u32, write_u64, RopRequest,
+    write_typed_string_reduced_unicode_when_lossless, write_u16, write_u32, write_u64,
+    AccountPrincipal, RopRequest,
 };
 use crate::mapi::identity::OUTBOX_FOLDER_ID;
 use crate::mapi::properties::*;
 use crate::mapi::session::MapiObject;
 use crate::mapi::tables::{
-    message_recipients, serialize_recipient_row, write_standard_property_row,
-    MESSAGE_RECIPIENT_COLUMNS,
+    message_recipients, message_recipients_for_principal, serialize_recipient_row,
+    write_standard_property_row, MESSAGE_RECIPIENT_COLUMNS,
 };
 use crate::mapi::wire::RopId;
 use crate::mapi_store::MapiMailStoreSnapshot;
@@ -57,8 +58,9 @@ pub(in crate::mapi) fn rop_open_message_response_with_recipients(
     request: &RopRequest,
     subject: &str,
     email: &JmapEmail,
+    principal: &AccountPrincipal,
 ) -> Vec<u8> {
-    let recipients = message_recipients(email);
+    let recipients = message_recipients_for_principal(email, principal);
     let mut response = vec![0x03, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
     // [MS-OXCMSG] section 2.2.3.1.2 requires this byte to advertise named

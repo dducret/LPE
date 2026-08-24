@@ -155,6 +155,11 @@ async fn run_runtime_drift_validation(pool: &PgPool) -> Result<()> {
         );
         collect(
             &mut failures,
+            "durable MAPI meeting request Processed path",
+            exercise_mapi_meeting_request_processed_path(&storage, pool, &fixture).await,
+        );
+        collect(
+            &mut failures,
             "mailbox canonical name storage guards",
             exercise_mailbox_name_policy_storage_guards(&storage, pool, &fixture).await,
         );
@@ -2682,6 +2687,681 @@ async fn exercise_inbound_calendar_meeting_response_path(
             )),
         "interval-filtered response did not record the bounded no-candidate outcome"
     );
+    Ok(())
+}
+
+async fn exercise_mapi_meeting_request_processed_path(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    let trace_id = format!("runtime-request-processed-{}", Uuid::new_v4());
+    let uid = format!("probe-1930-{}@sdic.ch", Uuid::new_v4());
+    let raw_message = format!(
+        concat!(
+            "From: Denis Ducret <denis.ducret@sdic.ch>\r\n",
+            "To: LPE Test <{}>\r\n",
+            "Subject: Probe 1930 Processed\r\n",
+            "Message-ID: <{}@sdic.ch>\r\n",
+            "MIME-Version: 1.0\r\n",
+            "Content-Type: multipart/alternative; boundary=processed-boundary\r\n",
+            "\r\n",
+            "--processed-boundary\r\n",
+            "Content-Type: text/plain; charset=UTF-8\r\n",
+            "\r\n",
+            "Probe 1930\r\n",
+            "--processed-boundary\r\n",
+            "Content-Type: text/calendar; method=REQUEST; charset=UTF-8\r\n",
+            "\r\n",
+            "BEGIN:VCALENDAR\r\n",
+            "VERSION:2.0\r\n",
+            "METHOD:REQUEST\r\n",
+            "BEGIN:VEVENT\r\n",
+            "UID:{}\r\n",
+            "DTSTAMP:20260824T172750Z\r\n",
+            "DTSTART:20260825T100000Z\r\n",
+            "DTEND:20260825T103000Z\r\n",
+            "SEQUENCE:0\r\n",
+            "ORGANIZER;CN=Denis Ducret:mailto:denis.ducret@sdic.ch\r\n",
+            "ATTENDEE;CN=LPE Test;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:{}\r\n",
+            "SUMMARY:Probe 1930 Processed\r\n",
+            "END:VEVENT\r\n",
+            "END:VCALENDAR\r\n",
+            "--processed-boundary--\r\n"
+        ),
+        fixture.account_email, trace_id, uid, fixture.account_email
+    )
+    .into_bytes();
+    storage
+        .deliver_inbound_message(InboundDeliveryRequest {
+            trace_id: trace_id.clone(),
+            peer: "192.0.2.10:25".to_string(),
+            helo: "mx.sdic.ch".to_string(),
+            mail_from: "denis.ducret@sdic.ch".to_string(),
+            rcpt_to: vec![fixture.account_email.clone()],
+            subject: "Probe 1930 Processed".to_string(),
+            body_text: "Probe 1930".to_string(),
+            internet_message_id: None,
+            raw_message,
+        })
+        .await
+        .context("deliver inbound Meeting Request for Processed mutation")?;
+    let message_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT message_id
+        FROM message_headers
+        WHERE tenant_id = $1
+          AND lower(header_name) = 'x-lpe-ct-trace-id'
+          AND header_value = $2
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(&trace_id)
+    .fetch_one(pool)
+    .await
+    .context("load inbound Meeting Request id")?;
+    let initial_email = storage
+        .fetch_jmap_emails(fixture.account_id, &[message_id])
+        .await?
+        .into_iter()
+        .next()
+        .context("load inbound Meeting Request")?;
+    anyhow::ensure!(
+        initial_email
+            .calendar_meeting_request
+            .as_ref()
+            .is_some_and(|request| !request.client_processed),
+        "a new Meeting Request must omit the client Processed state"
+    );
+
+    let copy_before_mailbox_id = Uuid::new_v4();
+    let move_target_mailbox_id = Uuid::new_v4();
+    let copy_after_mailbox_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO mailboxes (
+            id, tenant_id, account_id, role, display_name, sort_order, uid_validity
+        )
+        VALUES
+            ($1, $4, $5, 'custom', $6, 7101, 7101),
+            ($2, $4, $5, 'custom', $7, 7102, 7102),
+            ($3, $4, $5, 'custom', $8, 7103, 7103)
+        "#,
+    )
+    .bind(copy_before_mailbox_id)
+    .bind(move_target_mailbox_id)
+    .bind(copy_after_mailbox_id)
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(format!("Processed copy before {trace_id}"))
+    .bind(format!("Processed move target {trace_id}"))
+    .bind(format!("Processed copy after {trace_id}"))
+    .execute(pool)
+    .await
+    .context("seed Meeting Request lifecycle mailboxes")?;
+    storage
+        .copy_jmap_email(
+            fixture.account_id,
+            message_id,
+            copy_before_mailbox_id,
+            audit(
+                &fixture.account_email,
+                "calendar-request-copy",
+                "copy request before Processed",
+            ),
+        )
+        .await
+        .context("copy unprocessed Meeting Request")?;
+
+    let before_memberships = sqlx::query(
+        r#"
+        SELECT COUNT(*) AS membership_count,
+               COALESCE(bool_or(calendar_request_processed), FALSE) AS any_processed,
+               MAX(modseq) AS max_modseq
+        FROM mailbox_messages
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND message_id = $3
+          AND visibility = 'visible'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(message_id)
+    .fetch_one(pool)
+    .await?;
+    anyhow::ensure!(
+        before_memberships.try_get::<i64, _>("membership_count")? == 2
+            && !before_memberships.try_get::<bool, _>("any_processed")?,
+        "a pre-Processed copy must retain false on both visible memberships"
+    );
+    let before_modseq = before_memberships.try_get::<i64, _>("max_modseq")?;
+
+    let store_identity = sqlx::query(
+        "SELECT replica_guid, next_global_counter FROM mapi_store_identity WHERE singleton = TRUE",
+    )
+    .fetch_one(pool)
+    .await?;
+    let replica_guid: Uuid = store_identity.try_get("replica_guid")?;
+    let identity_counter = u64::try_from(store_identity.try_get::<i64, _>("next_global_counter")?)?;
+    let source_key = mapi_xid(replica_guid, identity_counter);
+    let mut predecessor_change_list = Vec::with_capacity(source_key.len() + 1);
+    predecessor_change_list.push(source_key.len() as u8);
+    predecessor_change_list.extend_from_slice(&source_key);
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_mailbox_replicas (tenant_id, account_id, replica_guid)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (tenant_id, account_id) DO NOTHING
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(replica_guid)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_object_identities (
+            tenant_id, account_id, object_kind, canonical_id,
+            mapi_global_counter, mapi_object_id, source_key, change_key,
+            instance_key, mapi_change_number, predecessor_change_list, updated_at
+        )
+        VALUES ($1, $2, 'message', $3, $4, $5, $6, $6, $6, $4, $7,
+                NOW() - INTERVAL '1 minute')
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(message_id)
+    .bind(identity_counter as i64)
+    .bind(mapi_store_id(identity_counter) as i64)
+    .bind(&source_key)
+    .bind(&predecessor_change_list)
+    .execute(pool)
+    .await
+    .context("seed Meeting Request MAPI identity")?;
+    sqlx::query("UPDATE mapi_store_identity SET next_global_counter = $1 WHERE singleton = TRUE")
+        .bind((identity_counter + 1) as i64)
+        .execute(pool)
+        .await?;
+    let before_identity = sqlx::query(
+        r#"
+        SELECT mapi_change_number, change_key, predecessor_change_list,
+               updated_at::text AS updated_at
+        FROM mapi_object_identities
+        WHERE tenant_id = $1 AND account_id = $2
+          AND object_kind = 'message' AND canonical_id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(message_id)
+    .fetch_one(pool)
+    .await?;
+    let before_cursor = sqlx::query_scalar::<_, i64>(
+        "SELECT COALESCE(MAX(cursor), 0) FROM mail_change_log WHERE tenant_id = $1",
+    )
+    .bind(fixture.tenant_id)
+    .fetch_one(pool)
+    .await?;
+    let process_subject = format!("message:{message_id}");
+    let (processed_email, changed) = storage
+        .mark_mapi_calendar_meeting_request_processed(
+            fixture.account_id,
+            message_id,
+            audit(
+                &fixture.account_email,
+                "mapi-process-meeting-request",
+                &process_subject,
+            ),
+        )
+        .await
+        .context("mark Meeting Request Processed")?;
+    anyhow::ensure!(
+        changed
+            && processed_email
+                .calendar_meeting_request
+                .as_ref()
+                .is_some_and(|request| request.client_processed),
+        "the first Meeting Request Processed commit was not reported as changed"
+    );
+    let processed_memberships = sqlx::query(
+        r#"
+        SELECT COUNT(*) AS membership_count,
+               bool_and(calendar_request_processed) AS all_processed,
+               COUNT(DISTINCT modseq) AS distinct_modseq,
+               MIN(modseq) AS committed_modseq
+        FROM mailbox_messages
+        WHERE tenant_id = $1 AND account_id = $2 AND message_id = $3
+          AND visibility = 'visible'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(message_id)
+    .fetch_one(pool)
+    .await?;
+    let committed_modseq = processed_memberships.try_get::<i64, _>("committed_modseq")?;
+    anyhow::ensure!(
+        processed_memberships.try_get::<i64, _>("membership_count")? == 2
+            && processed_memberships.try_get::<bool, _>("all_processed")?
+            && processed_memberships.try_get::<i64, _>("distinct_modseq")? == 1
+            && committed_modseq > before_modseq,
+        "Processed must atomically update every visible membership at one new modseq"
+    );
+    let processed_replay_rows = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mail_change_log
+        WHERE tenant_id = $1 AND account_id = $2
+          AND object_kind = 'mailbox_message'
+          AND cursor > $3
+          AND modseq = $4
+          AND summary_json @> '{"calendarRequestProcessedChanged":true}'::jsonb
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(before_cursor)
+    .bind(committed_modseq)
+    .fetch_one(pool)
+    .await?;
+    let process_audits = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*) FROM audit_events
+        WHERE tenant_id = $1 AND action = 'mapi-process-meeting-request' AND subject = $2
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(&process_subject)
+    .fetch_one(pool)
+    .await?;
+    anyhow::ensure!(
+        processed_replay_rows == 2 && process_audits == 1,
+        "the first Processed transition must journal both memberships and audit once"
+    );
+    let after_identity = sqlx::query(
+        r#"
+        SELECT mapi_change_number, change_key, predecessor_change_list,
+               updated_at::text AS updated_at
+        FROM mapi_object_identities
+        WHERE tenant_id = $1 AND account_id = $2
+          AND object_kind = 'message' AND canonical_id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(message_id)
+    .fetch_one(pool)
+    .await?;
+    anyhow::ensure!(
+        after_identity.try_get::<i64, _>("mapi_change_number")?
+            > before_identity.try_get::<i64, _>("mapi_change_number")?
+            && after_identity.try_get::<Vec<u8>, _>("change_key")?
+                != before_identity.try_get::<Vec<u8>, _>("change_key")?
+            && after_identity.try_get::<Vec<u8>, _>("predecessor_change_list")?
+                != before_identity.try_get::<Vec<u8>, _>("predecessor_change_list")?
+            && after_identity.try_get::<String, _>("updated_at")?
+                != before_identity.try_get::<String, _>("updated_at")?,
+        "the first Processed transition must rotate ChangeKey/PCL/LMT"
+    );
+    let committed_change_number = after_identity.try_get::<i64, _>("mapi_change_number")?;
+    let committed_change_key = after_identity.try_get::<Vec<u8>, _>("change_key")?;
+    let committed_predecessors = after_identity.try_get::<Vec<u8>, _>("predecessor_change_list")?;
+    let committed_updated_at = after_identity.try_get::<String, _>("updated_at")?;
+    let cursor_after_first = sqlx::query_scalar::<_, i64>(
+        "SELECT COALESCE(MAX(cursor), 0) FROM mail_change_log WHERE tenant_id = $1",
+    )
+    .bind(fixture.tenant_id)
+    .fetch_one(pool)
+    .await?;
+    let (_, changed) = storage
+        .mark_mapi_calendar_meeting_request_processed(
+            fixture.account_id,
+            message_id,
+            audit(
+                &fixture.account_email,
+                "mapi-process-meeting-request",
+                &process_subject,
+            ),
+        )
+        .await?;
+    let idempotent_state = sqlx::query(
+        r#"
+        SELECT identity.mapi_change_number, identity.change_key,
+               identity.predecessor_change_list, identity.updated_at::text AS updated_at,
+               (SELECT COALESCE(MAX(cursor), 0) FROM mail_change_log WHERE tenant_id = $1) AS cursor,
+               (SELECT COUNT(*) FROM audit_events
+                WHERE tenant_id = $1 AND action = 'mapi-process-meeting-request'
+                  AND subject = $3) AS audit_count
+        FROM mapi_object_identities identity
+        WHERE identity.tenant_id = $1 AND identity.account_id = $2
+          AND identity.object_kind = 'message' AND identity.canonical_id = $4
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(&process_subject)
+    .bind(message_id)
+    .fetch_one(pool)
+    .await?;
+    anyhow::ensure!(
+        !changed
+            && idempotent_state.try_get::<i64, _>("mapi_change_number")? == committed_change_number
+            && idempotent_state.try_get::<Vec<u8>, _>("change_key")? == committed_change_key
+            && idempotent_state.try_get::<Vec<u8>, _>("predecessor_change_list")?
+                == committed_predecessors
+            && idempotent_state.try_get::<String, _>("updated_at")? == committed_updated_at
+            && idempotent_state.try_get::<i64, _>("cursor")? == cursor_after_first
+            && idempotent_state.try_get::<i64, _>("audit_count")? == 1,
+        "repeated TRUE must not rotate, journal, audit, or report a durable transition"
+    );
+
+    let generation_before_parser_repair = sqlx::query_scalar::<_, i64>(
+        "SELECT classification_generation FROM calendar_mail_classifications WHERE tenant_id = $1 AND message_id = $2",
+    )
+    .bind(fixture.tenant_id)
+    .bind(message_id)
+    .fetch_one(pool)
+    .await?;
+    sqlx::query(
+        r#"
+        UPDATE calendar_mail_classifications
+        SET parser_revision = parser_revision - 1, updated_at = NOW()
+        WHERE tenant_id = $1 AND message_id = $2
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(message_id)
+    .execute(pool)
+    .await?;
+    let parser_repaired = storage
+        .fetch_jmap_emails(fixture.account_id, &[message_id])
+        .await?
+        .into_iter()
+        .next()
+        .context("load parser-only repaired Meeting Request")?;
+    let generation_after_parser_repair = sqlx::query_scalar::<_, i64>(
+        "SELECT classification_generation FROM calendar_mail_classifications WHERE tenant_id = $1 AND message_id = $2",
+    )
+    .bind(fixture.tenant_id)
+    .bind(message_id)
+    .fetch_one(pool)
+    .await?;
+    anyhow::ensure!(
+        generation_after_parser_repair == generation_before_parser_repair
+            && parser_repaired
+                .calendar_meeting_request
+                .as_ref()
+                .is_some_and(|request| request.client_processed),
+        "a parser-only repair of unchanged request payload must preserve Processed"
+    );
+
+    let moved = storage
+        .move_jmap_email_from_mailbox(
+            fixture.account_id,
+            fixture.inbox_id,
+            message_id,
+            move_target_mailbox_id,
+            audit(
+                &fixture.account_email,
+                "calendar-request-move",
+                "move processed request",
+            ),
+        )
+        .await?;
+    anyhow::ensure!(
+        moved
+            .calendar_meeting_request
+            .as_ref()
+            .is_some_and(|request| request.client_processed),
+        "move must preserve Meeting Request Processed"
+    );
+    let copied_after = storage
+        .copy_jmap_email(
+            fixture.account_id,
+            message_id,
+            copy_after_mailbox_id,
+            audit(
+                &fixture.account_email,
+                "calendar-request-copy",
+                "copy processed request",
+            ),
+        )
+        .await?;
+    anyhow::ensure!(
+        copied_after
+            .calendar_meeting_request
+            .as_ref()
+            .is_some_and(|request| request.client_processed),
+        "a later copy must inherit Meeting Request Processed"
+    );
+
+    let target_account_id = Uuid::new_v4();
+    let target_mailbox_id = Uuid::new_v4();
+    let domain_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT primary_domain_id FROM accounts WHERE tenant_id = $1 AND id = $2",
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .fetch_one(pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO accounts (id, tenant_id, primary_domain_id, primary_email, display_name)
+        VALUES ($1, $2, $3, $4, 'Processed generation target')
+        "#,
+    )
+    .bind(target_account_id)
+    .bind(fixture.tenant_id)
+    .bind(domain_id)
+    .bind(format!(
+        "processed-target-{}@example.test",
+        Uuid::new_v4().simple()
+    ))
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO mailboxes (
+            id, tenant_id, account_id, role, display_name, sort_order, uid_validity
+        )
+        VALUES ($1, $2, $3, 'inbox', 'Inbox', 0, 7201)
+        "#,
+    )
+    .bind(target_mailbox_id)
+    .bind(fixture.tenant_id)
+    .bind(target_account_id)
+    .execute(pool)
+    .await?;
+    storage
+        .copy_jmap_email_between_accounts(
+            fixture.account_id,
+            target_account_id,
+            message_id,
+            target_mailbox_id,
+            audit(
+                &fixture.account_email,
+                "calendar-request-cross-account-copy",
+                "retain visible generation trigger",
+            ),
+        )
+        .await?;
+
+    storage
+        .delete_jmap_email(
+            fixture.account_id,
+            message_id,
+            audit(
+                &fixture.account_email,
+                "mapi-delete-message",
+                "expunge processed request before generation change",
+            ),
+        )
+        .await?;
+    let recoverable_before_generation = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT recoverable.id
+        FROM recoverable_items recoverable
+        JOIN mailbox_messages source
+          ON source.tenant_id = recoverable.tenant_id
+         AND source.account_id = recoverable.account_id
+         AND source.id = recoverable.source_mailbox_message_id
+        WHERE recoverable.tenant_id = $1 AND recoverable.account_id = $2
+          AND recoverable.message_id = $3 AND recoverable.status = 'active'
+          AND source.calendar_request_processed
+        ORDER BY recoverable.deleted_at DESC, recoverable.id
+        LIMIT 1
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(message_id)
+    .fetch_one(pool)
+    .await
+    .context("load processed recoverable source before generation change")?;
+    sqlx::query(
+        r#"
+        UPDATE calendar_mail_classifications
+        SET parser_revision = parser_revision - 1,
+            metadata_json = jsonb_set(
+                metadata_json,
+                '{request,meeting_location}',
+                '"stale generation"'::jsonb,
+                TRUE
+            ),
+            updated_at = NOW()
+        WHERE tenant_id = $1 AND message_id = $2
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(message_id)
+    .execute(pool)
+    .await?;
+    storage
+        .fetch_jmap_emails(target_account_id, &[message_id])
+        .await?
+        .into_iter()
+        .next()
+        .context("visible target did not trigger classification generation repair")?;
+    let reset_state = sqlx::query(
+        r#"
+        SELECT classification.classification_generation,
+               projection.applied_generation,
+               COALESCE(bool_or(source.calendar_request_processed), FALSE) AS any_processed
+        FROM calendar_mail_classifications classification
+        JOIN mailbox_messages source
+          ON source.tenant_id = classification.tenant_id
+         AND source.message_id = classification.message_id
+         AND source.account_id = $2
+        LEFT JOIN calendar_mail_classification_projections projection
+          ON projection.tenant_id = classification.tenant_id
+         AND projection.account_id = $2
+         AND projection.message_id = classification.message_id
+        WHERE classification.tenant_id = $1 AND classification.message_id = $3
+        GROUP BY classification.classification_generation, projection.applied_generation
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(message_id)
+    .fetch_one(pool)
+    .await?;
+    anyhow::ensure!(
+        reset_state.try_get::<i64, _>("classification_generation")?
+            > generation_after_parser_repair
+            && reset_state.try_get::<i64, _>("applied_generation")?
+                < reset_state.try_get::<i64, _>("classification_generation")?
+            && !reset_state.try_get::<bool, _>("any_processed")?,
+        "a payload generation change must reset retained rows for an expunged-only account"
+    );
+    let restored_after_generation = storage
+        .restore_recoverable_item(
+            fixture.account_id,
+            recoverable_before_generation,
+            Some(fixture.inbox_id),
+            audit(
+                &fixture.account_email,
+                "restore-recoverable-message",
+                "restore request after generation change",
+            ),
+        )
+        .await?;
+    anyhow::ensure!(
+        restored_after_generation
+            .calendar_meeting_request
+            .as_ref()
+            .is_some_and(|request| !request.client_processed),
+        "Recoverable Items restore must not revive Processed from an older generation"
+    );
+
+    let (_, changed) = storage
+        .mark_mapi_calendar_meeting_request_processed(
+            fixture.account_id,
+            message_id,
+            audit(
+                &fixture.account_email,
+                "mapi-process-meeting-request",
+                &process_subject,
+            ),
+        )
+        .await?;
+    anyhow::ensure!(
+        changed,
+        "the new request generation must accept Processed again"
+    );
+    storage
+        .delete_jmap_email(
+            fixture.account_id,
+            message_id,
+            audit(
+                &fixture.account_email,
+                "mapi-delete-message",
+                "expunge processed request for stable restore",
+            ),
+        )
+        .await?;
+    let stable_recoverable = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT recoverable.id
+        FROM recoverable_items recoverable
+        JOIN mailbox_messages source
+          ON source.tenant_id = recoverable.tenant_id
+         AND source.account_id = recoverable.account_id
+         AND source.id = recoverable.source_mailbox_message_id
+        WHERE recoverable.tenant_id = $1 AND recoverable.account_id = $2
+          AND recoverable.message_id = $3 AND recoverable.status = 'active'
+          AND source.calendar_request_processed
+        ORDER BY recoverable.deleted_at DESC, recoverable.id
+        LIMIT 1
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(message_id)
+    .fetch_one(pool)
+    .await?;
+    let stable_restore = storage
+        .restore_recoverable_item(
+            fixture.account_id,
+            stable_recoverable,
+            Some(fixture.inbox_id),
+            audit(
+                &fixture.account_email,
+                "restore-recoverable-message",
+                "restore request without generation change",
+            ),
+        )
+        .await?;
+    anyhow::ensure!(
+        stable_restore
+            .calendar_meeting_request
+            .as_ref()
+            .is_some_and(|request| request.client_processed),
+        "Recoverable Items restore must preserve Processed within the same generation"
+    );
+
     Ok(())
 }
 

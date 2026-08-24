@@ -33,6 +33,7 @@ mod message_computed;
 mod named;
 mod navigation_shortcut;
 mod notes;
+mod recipient_delivery;
 mod recurrence;
 mod reminders;
 mod restrictions;
@@ -65,6 +66,7 @@ pub(crate) use message_computed::{
 pub(crate) use named::*;
 pub(in crate::mapi) use navigation_shortcut::*;
 pub(in crate::mapi) use notes::*;
+pub(crate) use recipient_delivery::*;
 use recurrence::*;
 pub(in crate::mapi) use reminders::*;
 pub(in crate::mapi) use restrictions::*;
@@ -89,6 +91,7 @@ pub(in crate::mapi) fn rop_read_recipients_response(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+    principal: &AccountPrincipal,
 ) -> Vec<u8> {
     let input_handle_index = request.input_handle_index().unwrap_or(0);
     let start = request.row_id().unwrap_or(0) as usize;
@@ -112,7 +115,7 @@ pub(in crate::mapi) fn rop_read_recipients_response(
             else {
                 return rop_error_response(0x0F, input_handle_index, 0x8004_010F);
             };
-            message_recipients(email)
+            message_recipients_for_principal(email, principal)
                 .into_iter()
                 .enumerate()
                 .map(|(offset, recipient)| {
