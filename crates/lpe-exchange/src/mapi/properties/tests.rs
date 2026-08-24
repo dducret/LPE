@@ -2860,6 +2860,29 @@ fn outlook_common_probe_named_properties_have_stable_ids() {
 }
 
 #[test]
+fn meeting_request_named_properties_have_stable_ids() {
+    for (property_id, lid, guid) in [
+        (0x8224, PID_LID_INTENDED_BUSY_STATUS, PSETID_APPOINTMENT_GUID),
+        (0x8229, PID_LID_F_INVITED, PSETID_APPOINTMENT_GUID),
+        (0x8128, PID_LID_OWNER_CRITICAL_CHANGE, PSETID_MEETING_GUID),
+        (0x81E4, PID_LID_IS_EXCEPTION, PSETID_MEETING_GUID),
+        (
+            0x8311,
+            PID_LID_APPOINTMENT_MESSAGE_CLASS,
+            PSETID_MEETING_GUID,
+        ),
+        (0x8314, PID_LID_MEETING_TYPE, PSETID_MEETING_GUID),
+    ] {
+        let property = MapiNamedProperty {
+            guid,
+            kind: MapiNamedPropertyKind::Lid(lid),
+        };
+        assert_eq!(well_known_named_property_id(&property), Some(property_id));
+        assert_eq!(well_known_named_property_for_id(property_id), Some(property));
+    }
+}
+
+#[test]
 fn microsoft_oxcdata_reminder_restriction_matches_recurring_calendar_items() {
     const MSGFLAG_SUBMIT: u32 = 0x0000_0004;
 
@@ -3151,6 +3174,7 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
         categories: Vec::new(),
         has_attachments: false,
         calendar_invitation: false,
+        calendar_meeting_request: None,
         calendar_meeting_response: None,
         size_octets: 128,
         internet_message_id: Some("rss-guid".to_string()),
@@ -3168,7 +3192,22 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
     );
     let mut invitation = email.clone();
     invitation.mailbox_role = "inbox".to_string();
+    invitation.to = vec![lpe_storage::JmapEmailAddress {
+        address: "test@l-p-e.ch".to_string(),
+        display_name: Some("Test User".to_string()),
+    }];
     invitation.calendar_invitation = true;
+    invitation.calendar_meeting_request = Some(lpe_storage::CalendarMeetingRequest {
+        uid: "probe-7@example.test".to_string(),
+        transport_attachment_id: None,
+        response_requested: true,
+        sent_at: Some("2026-08-23T18:00:00Z".to_string()),
+        meeting_start: "2026-08-24T06:30:00Z".to_string(),
+        meeting_end: "2026-08-24T07:00:00Z".to_string(),
+        meeting_location: Some("Les Planches".to_string()),
+        meeting_sequence: 2,
+        intended_busy_status: 2,
+    });
     assert_eq!(
         email_property_value(&invitation, PID_TAG_MESSAGE_CLASS_W),
         Some(MapiValue::String(
@@ -3180,6 +3219,116 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
         Some(MapiValue::String(
             "urn:content-classes:calendarmessage".to_string()
         ))
+    );
+    for tag in [PID_TAG_REPLY_REQUESTED, PID_TAG_RESPONSE_REQUESTED] {
+        assert_eq!(
+            email_property_value(&invitation, tag),
+            Some(MapiValue::Bool(true))
+        );
+    }
+    let request_start = mapi_mailstore::filetime_from_rfc3339_utc("2026-08-24T06:30:00Z");
+    let request_end = mapi_mailstore::filetime_from_rfc3339_utc("2026-08-24T07:00:00Z");
+    for tag in [
+        PID_TAG_START_DATE,
+        PID_LID_COMMON_START_TAG,
+        PID_LID_APPOINTMENT_START_WHOLE_TAG,
+    ] {
+        assert_eq!(
+            email_property_value(&invitation, tag),
+            Some(MapiValue::U64(request_start))
+        );
+    }
+    for tag in [
+        PID_TAG_END_DATE,
+        PID_LID_COMMON_END_TAG,
+        PID_LID_APPOINTMENT_END_WHOLE_TAG,
+    ] {
+        assert_eq!(
+            email_property_value(&invitation, tag),
+            Some(MapiValue::U64(request_end))
+        );
+    }
+    assert_eq!(
+        email_property_value(&invitation, PID_LID_LOCATION_W_TAG),
+        Some(MapiValue::String("Les Planches".to_string()))
+    );
+    assert_eq!(
+        email_property_value(&invitation, PID_LID_APPOINTMENT_SEQUENCE_TAG),
+        Some(MapiValue::I32(2))
+    );
+    for (tag, value) in [
+        (PID_LID_BUSY_STATUS_TAG, 1),
+        (PID_LID_INTENDED_BUSY_STATUS_TAG, 2),
+        (PID_LID_APPOINTMENT_STATE_FLAGS_TAG, 3),
+        (PID_LID_RESPONSE_STATUS_TAG, 5),
+        (PID_LID_SIDE_EFFECTS_TAG, 0x0000_1C61),
+        (PID_LID_MEETING_TYPE_TAG, 1),
+    ] {
+        assert_eq!(
+            email_property_value(&invitation, tag),
+            Some(MapiValue::I32(value))
+        );
+    }
+    assert_eq!(
+        email_property_value(&invitation, PID_LID_F_INVITED_TAG),
+        Some(MapiValue::Bool(true))
+    );
+    for tag in [PID_LID_IS_RECURRING_TAG, PID_LID_RECURRING_TAG] {
+        assert_eq!(
+            email_property_value(&invitation, tag),
+            Some(MapiValue::Bool(false))
+        );
+    }
+    assert_eq!(
+        email_property_value(&invitation, PID_LID_IS_EXCEPTION_TAG),
+        Some(MapiValue::Bool(false))
+    );
+    assert_eq!(
+        email_property_value(&invitation, PID_LID_APPOINTMENT_MESSAGE_CLASS_W_TAG),
+        Some(MapiValue::String("IPM.Appointment".to_string()))
+    );
+    assert_eq!(
+        email_property_value(&invitation, PID_LID_ALL_ATTENDEES_STRING_W_TAG),
+        Some(MapiValue::String("Test User".to_string()))
+    );
+    assert_eq!(email_property_value(&invitation, PID_TAG_PROCESSED), None);
+    assert_eq!(
+        email_property_value(&invitation, PID_TAG_ICON_INDEX),
+        Some(MapiValue::U32(u32::MAX))
+    );
+    assert_eq!(
+        email_property_value(&invitation, PID_TAG_OWNER_APPOINTMENT_ID),
+        Some(MapiValue::U32(owner_appointment_id_from_filetime(
+            request_start
+        )))
+    );
+    let goid = match email_property_value(&invitation, PID_LID_GLOBAL_OBJECT_ID_TAG) {
+        Some(MapiValue::Binary(value)) => value,
+        value => panic!("expected request GlobalObjectId, got {value:?}"),
+    };
+    assert_eq!(&goid[20..36], &[0; 16]);
+    assert_eq!(&goid[40..48], b"vCal-Uid");
+    assert_eq!(&goid[48..52], &1u32.to_le_bytes());
+    assert_eq!(&goid[52..], b"probe-7@example.test");
+    assert_eq!(
+        email_property_value(&invitation, PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG),
+        Some(MapiValue::Binary(goid))
+    );
+    let encoded_uid = "040000008200e00074c5b7101a82e00800000000c08470cd9e31dd01000000000000000010000000ecff8aec00ce584390f914bf6a87f955";
+    let mut native_uid_invitation = invitation.clone();
+    native_uid_invitation
+        .calendar_meeting_request
+        .as_mut()
+        .expect("request metadata exists")
+        .uid = encoded_uid.to_string();
+    let decoded_uid = hex_to_bytes(encoded_uid).expect("encoded Outlook UID is valid hex");
+    assert_eq!(
+        email_property_value(&native_uid_invitation, PID_LID_GLOBAL_OBJECT_ID_TAG),
+        Some(MapiValue::Binary(decoded_uid.clone()))
+    );
+    assert_eq!(
+        email_property_value(&native_uid_invitation, PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG),
+        Some(MapiValue::Binary(decoded_uid))
     );
     let mut counter = email.clone();
     counter.calendar_meeting_response = Some(lpe_storage::CalendarMeetingResponse {
@@ -3633,6 +3782,7 @@ fn followup_mail_projects_outlook_flag_properties() {
         categories: Vec::new(),
         has_attachments: false,
         calendar_invitation: false,
+        calendar_meeting_request: None,
         calendar_meeting_response: None,
         size_octets: 128,
         internet_message_id: None,
@@ -6410,6 +6560,7 @@ fn client_submit_time_falls_back_to_received_time_for_imported_mail() {
         categories: Vec::new(),
         has_attachments: false,
         calendar_invitation: false,
+        calendar_meeting_request: None,
         calendar_meeting_response: None,
         size_octets: 128,
         internet_message_id: None,

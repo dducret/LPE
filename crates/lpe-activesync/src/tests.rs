@@ -208,6 +208,7 @@ impl FakeStore {
             categories: Vec::new(),
             has_attachments: false,
             calendar_invitation: false,
+            calendar_meeting_request: None,
             calendar_meeting_response: None,
             size_octets: 32,
             internet_message_id: None,

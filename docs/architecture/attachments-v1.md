@@ -14,6 +14,11 @@ Attachments are validated before processing and indexed only for the documented 
 - Store attachment metadata separately from deduplicated blobs.
 - Deduplicate identical attachments per domain through `attachment_blobs`.
 - Keep export able to reconstruct messages with the original blobs.
+- Keep an inbound meeting request's inline or unnamed `text/calendar` scheduling
+  body in canonical MIME/blob state for reconstruction, but correlate and omit
+  only that exact transport part from the MAPI attachment projection once the
+  request is actionable.
+  An explicitly attached calendar file remains a visible attachment.
 - Keep `Bcc` out of user search and AI-facing pipelines.
 - Use asynchronous extraction for attachment text.
 - Storage module split plan: `crates/lpe-storage/src/attachments.rs` currently owns both

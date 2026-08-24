@@ -1,6 +1,6 @@
 use super::*;
 use crate::mapi::properties::{
-    fast_transfer_named_property_for_message_tag, MapiNamedPropertyKind,
+    fast_transfer_named_property_for_message_tag, MapiNamedPropertyKind, MapiValue,
 };
 
 use super::FastTransferDirectPropertyFilter;
@@ -53,6 +53,25 @@ pub(crate) enum SpecialMessagePropertyValue {
     MultiBinary(Vec<Vec<u8>>),
     MultiString(Vec<String>),
     Time(String),
+}
+
+impl SpecialMessagePropertyValue {
+    pub(crate) fn from_mapi_value(value: MapiValue) -> Option<Self> {
+        match value {
+            MapiValue::Binary(value) => Some(Self::Binary(value)),
+            MapiValue::Bool(value) => Some(Self::Bool(value)),
+            MapiValue::Guid(value) => Some(Self::Guid(value)),
+            MapiValue::I32(value) => Some(Self::I32(value)),
+            MapiValue::I64(value) => Some(Self::I64(value)),
+            MapiValue::U32(value) => Some(Self::U32(value)),
+            MapiValue::U64(value) => Some(Self::U64(value)),
+            MapiValue::String(value) => Some(Self::String(value)),
+            MapiValue::MultiString(values) => Some(Self::MultiString(values)),
+            MapiValue::MultiI32(values) => Some(Self::MultiI32(values)),
+            MapiValue::MultiBinary(values) => Some(Self::MultiBinary(values)),
+            _ => None,
+        }
+    }
 }
 
 pub(super) fn special_message_delivery_sort_time(object: &SpecialMessageSyncFact) -> u64 {
@@ -477,7 +496,30 @@ pub(super) fn write_special_message_property(
     property_tag: u32,
     value: &SpecialMessagePropertyValue,
 ) -> bool {
-    if !write_fast_transfer_property_info(buffer, object, property_tag) {
+    write_fast_transfer_property(
+        buffer,
+        &object.message_class,
+        Some(&object.named_property_definitions),
+        property_tag,
+        value,
+    )
+}
+
+pub(super) fn write_fast_transfer_property(
+    buffer: &mut Vec<u8>,
+    message_class: &str,
+    named_property_definitions: Option<
+        &HashMap<u16, crate::mapi::properties::MapiNamedProperty>,
+    >,
+    property_tag: u32,
+    value: &SpecialMessagePropertyValue,
+) -> bool {
+    if !write_fast_transfer_property_info(
+        buffer,
+        message_class,
+        named_property_definitions,
+        property_tag,
+    ) {
         return false;
     }
     match value {
@@ -534,9 +576,12 @@ pub(super) fn write_special_message_property(
     true
 }
 
-fn write_fast_transfer_property_info(
+pub(super) fn write_fast_transfer_property_info(
     buffer: &mut Vec<u8>,
-    object: &SpecialMessageSyncFact,
+    message_class: &str,
+    named_property_definitions: Option<
+        &HashMap<u16, crate::mapi::properties::MapiNamedProperty>,
+    >,
     property_tag: u32,
 ) -> bool {
     let property_id = (property_tag >> 16) as u16;
@@ -545,17 +590,16 @@ fn write_fast_transfer_property_info(
         return true;
     }
 
-    let property = object
-        .named_property_definitions
-        .get(&property_id)
+    let property = named_property_definitions
+        .and_then(|definitions| definitions.get(&property_id))
         .cloned()
         .or_else(|| {
-            fast_transfer_named_property_for_message_tag(&object.message_class, property_tag)
+            fast_transfer_named_property_for_message_tag(message_class, property_tag)
         });
     let Some(property) = property else {
         tracing::error!(
             adapter = "mapi",
-            message_class = %object.message_class,
+            message_class = %message_class,
             property_tag = format_args!("0x{property_tag:08x}"),
             "cannot encode FastTransfer named property without its mailbox mapping"
         );

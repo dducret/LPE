@@ -1562,6 +1562,125 @@ fn microsoft_oxcfxics_fast_transfer_copy_messages_uses_message_markers() {
 }
 
 #[test]
+fn meeting_request_fast_transfer_projects_actionable_properties() {
+    const PID_TAG_START_DATE: u32 = 0x0060_0040;
+    const PID_TAG_END_DATE: u32 = 0x0061_0040;
+    const PID_TAG_REPLY_REQUESTED: u32 = 0x0C17_000B;
+    const PID_TAG_RESPONSE_REQUESTED: u32 = 0x0063_000B;
+    const PID_TAG_PROCESSED: u32 = 0x7D01_000B;
+    const PID_LID_APPOINTMENT_START_WHOLE_TAG: u32 = 0x820D_0040;
+    const PID_LID_LOCATION_W_TAG: u32 = 0x8208_001F;
+    const PID_LID_GLOBAL_OBJECT_ID_TAG: u32 = 0x8001_0102;
+    const PSETID_APPOINTMENT_GUID: [u8; 16] = [
+        0x02, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x46,
+    ];
+    const PSETID_MEETING_GUID: [u8; 16] = [
+        0x90, 0xDA, 0xD8, 0x6E, 0x0B, 0x45, 0x1B, 0x10, 0x98, 0xDA, 0x00, 0xAA, 0x00,
+        0x3F, 0x13, 0x05,
+    ];
+
+    let mut email = test_email();
+    crate::mapi::identity::remember_mapi_identity(
+        email.id,
+        crate::mapi::identity::mapi_store_id(50),
+    );
+    email.calendar_invitation = true;
+    email.calendar_meeting_request = Some(lpe_storage::CalendarMeetingRequest {
+        uid: "probe-7@example.test".to_string(),
+        transport_attachment_id: None,
+        response_requested: true,
+        sent_at: Some("2026-08-23T18:00:00Z".to_string()),
+        meeting_start: "2026-08-24T06:30:00Z".to_string(),
+        meeting_end: "2026-08-24T07:00:00Z".to_string(),
+        meeting_location: Some("Les Planches".to_string()),
+        meeting_sequence: 2,
+        intended_busy_status: 2,
+    });
+    let copy_to = fast_transfer_message_content_buffer_with_attachments(
+        &email,
+        &[],
+        None,
+        FastTransferDirectPropertyFilter::CopyToExcluding(&[]),
+        FastTransferMessageChildren::new(false, false),
+    );
+    let contents_sync = sync_manifest_buffer_with_attachments(
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_NORMAL,
+        0,
+        &[],
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &[],
+        &[email.clone()],
+        &[],
+        &[],
+        1,
+    );
+    let start = filetime_from_rfc3339_utc("2026-08-24T06:30:00Z") as i64;
+    let end = filetime_from_rfc3339_utc("2026-08-24T07:00:00Z") as i64;
+    let goid = match crate::mapi::properties::email_property_value(
+        &email,
+        PID_LID_GLOBAL_OBJECT_ID_TAG,
+    ) {
+        Some(crate::mapi::properties::MapiValue::Binary(value)) => value,
+        value => panic!("expected request GlobalObjectId, got {value:?}"),
+    };
+    let mut encoded_goid = (goid.len() as u32).to_le_bytes().to_vec();
+    encoded_goid.extend_from_slice(&goid);
+    let mut encoded_location = (utf16z("Les Planches").len() as u32)
+        .to_le_bytes()
+        .to_vec();
+    encoded_location.extend_from_slice(&utf16z("Les Planches"));
+
+    for buffer in [&copy_to, &contents_sync] {
+        assert_variable_property_present(
+            buffer,
+            PID_TAG_MESSAGE_CLASS_W,
+            &utf16z("IPM.Schedule.Meeting.Request"),
+        );
+        assert_i64_property(buffer, PID_TAG_START_DATE, start);
+        assert_i64_property(buffer, PID_TAG_END_DATE, end);
+        assert_bool_property(buffer, PID_TAG_REPLY_REQUESTED, true);
+        assert_bool_property(buffer, PID_TAG_RESPONSE_REQUESTED, true);
+        assert_absent_property(buffer, PID_TAG_PROCESSED);
+        assert_named_lid_property(
+            buffer,
+            PID_LID_APPOINTMENT_START_WHOLE_TAG,
+            PSETID_APPOINTMENT_GUID,
+            0x820D,
+            &start.to_le_bytes(),
+        );
+        assert_named_lid_property(
+            buffer,
+            PID_LID_LOCATION_W_TAG,
+            PSETID_APPOINTMENT_GUID,
+            0x8208,
+            &encoded_location,
+        );
+        assert_named_lid_property(
+            buffer,
+            PID_LID_GLOBAL_OBJECT_ID_TAG,
+            PSETID_MEETING_GUID,
+            0x0003,
+            &encoded_goid,
+        );
+    }
+
+    let response_only = fast_transfer_message_content_buffer_with_attachments(
+        &email,
+        &[],
+        None,
+        FastTransferDirectPropertyFilter::CopyPropertiesIncluding(&[
+            PID_TAG_RESPONSE_REQUESTED,
+        ]),
+        FastTransferMessageChildren::new(false, false),
+    );
+    assert_bool_property(&response_only, PID_TAG_RESPONSE_REQUESTED, true);
+    assert_absent_property(&response_only, PID_TAG_START_DATE);
+    assert_absent_property(&response_only, PID_LID_LOCATION_W_TAG);
+}
+
+#[test]
 fn fast_transfer_copy_properties_filters_message_identity_properties() {
     let email = test_email();
     let buffer = fast_transfer_message_content_buffer_with_attachments(
@@ -4573,6 +4692,25 @@ fn assert_bool_property(buffer: &[u8], property_tag: u32, value: bool) {
     assert_eq!(&buffer[offset + 4..offset + 6], &expected);
 }
 
+fn assert_named_lid_property(
+    buffer: &[u8],
+    property_tag: u32,
+    guid: [u8; 16],
+    lid: u32,
+    encoded_value: &[u8],
+) {
+    let mut property_info = property_tag.to_le_bytes().to_vec();
+    property_info.extend_from_slice(&guid);
+    property_info.push(0x00);
+    property_info.extend_from_slice(&lid.to_le_bytes());
+    let offset = buffer
+        .windows(property_info.len())
+        .position(|window| window == property_info)
+        .expect("named LID property and definition are present")
+        + property_info.len();
+    assert_eq!(&buffer[offset..offset + encoded_value.len()], encoded_value);
+}
+
 fn assert_change_number_property(buffer: &[u8], property_tag: u32, change_number: u64) {
     let tag = property_tag.to_le_bytes();
     let offset = buffer
@@ -4686,6 +4824,7 @@ fn test_email() -> JmapEmail {
         categories: Vec::new(),
         has_attachments: false,
         calendar_invitation: false,
+        calendar_meeting_request: None,
         calendar_meeting_response: None,
         size_octets: 42,
         internet_message_id: Some("<message@example.test>".to_string()),

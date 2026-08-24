@@ -297,15 +297,32 @@ fn push_system_time(value: &mut Vec<u8>, system_time: CalendarSystemTime) {
 }
 
 pub(super) fn calendar_global_object_id(event: &AccessibleEvent) -> Vec<u8> {
-    if let Some(encoded) = event.uid.strip_prefix("mapi-goid:") {
+    calendar_global_object_id_from_uid(&event.uid, event.id)
+}
+
+pub(super) fn calendar_global_object_id_from_uid(uid: &str, fallback_id: Uuid) -> Vec<u8> {
+    let encoded = uid.strip_prefix("mapi-goid:").or_else(|| {
+        (uid.len() >= 82
+            && uid.len() % 2 == 0
+            && uid.as_bytes().iter().all(u8::is_ascii_hexdigit)
+            && uid
+                .get(..32)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(
+                    "040000008200E00074C5B7101A82E008",
+                )))
+        .then_some(uid)
+    });
+    if let Some(encoded) = encoded {
+        // [MS-OXCICAL] section 2.1.3.1.1.20.26: a native EncodedGlobalId UID
+        // is already the hexadecimal GlobalObjectId wire value.
         if let Some(value) = hex_to_bytes(encoded) {
             return value;
         }
     }
-    let uid = if event.uid.is_empty() {
-        event.id.to_string()
+    let uid = if uid.is_empty() {
+        fallback_id.to_string()
     } else {
-        event.uid.clone()
+        uid.to_string()
     };
     let mut data = b"vCal-Uid".to_vec();
     data.extend_from_slice(&1u32.to_le_bytes());

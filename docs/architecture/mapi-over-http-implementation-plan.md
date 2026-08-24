@@ -2618,8 +2618,40 @@ participation status on the existing event. An inbound `text/calendar`
 `METHOD:REQUEST` with exactly one `VEVENT` is projected as
 `IPM.Schedule.Meeting.Request` even when the RFC 5322 message omits the legacy
 top-level `Content-Class` header. A conflicting MIME `method` parameter is
-rejected rather than overriding the decoded VCALENDAR method. Inbound
-iCalendar `REPLY` and
+rejected rather than overriding the decoded VCALENDAR method. The bounded
+request parser retains UID, `DTSTAMP`, a complete supported UTC/fixed-offset
+start/end interval, location, sequence, intended busy status, and the aggregate
+attendee `RSVP` value. Requests with an incomplete or unsupported interval or
+an `RRULE` or `RECURRENCE-ID` remain ordinary mail until the complete
+recurrence/time-zone state can be projected; this prevents zero dates, partial
+recurrence, or a falsely non-exception instance from being advertised to
+Outlook. Per `[MS-OXCICAL]` section
+2.1.3.1.1.20.2.5, `RSVP=TRUE` projects both `PidTagReplyRequested` and
+`PidTagResponseRequested` as true; `[MS-OXOCAL]` section 3.1.4.8.4 otherwise
+permits Outlook to suppress the response action. A single-instance request
+also projects the tentative/request state, not-responded status, invitation
+flag, meeting type, side effects, organizer critical time, attendee strings,
+location, sequence, request icon, and correlated Global Object IDs described
+by `[MS-OXOCAL]` section 4.2.2.2. `PidTagProcessed` remains absent until actual
+request processing, and recurrence-only `PidLidCalendarType` remains absent on
+the single-instance path. These values use the same property projection for
+direct reads, Message CopyTo, and cached-mode contents synchronization;
+FastTransfer named properties carry their GUID and LID metadata as required by
+`[MS-OXCFXICS]` section 2.2.4.1. Native hexadecimal EncodedGlobalId UIDs are
+decoded while third-party UIDs use the documented `vCal-Uid` wrapper, preserving
+the identity Outlook needs when it creates a response. The inline or unnamed
+`text/calendar` transport body remains in canonical MIME state, but its exact
+attachment identity is correlated and omitted from the actionable request's
+MAPI attachment collection; another inline part or an explicitly attached
+calendar file remains visible, and `PidTagHasAttachments` reflects only the
+remaining MAPI-visible attachments.
+
+Calendar MIME enrichment now lives in the focused
+`lpe-storage/src/protocols/calendar_mail.rs` helper; `protocols.rs` remains the
+query orchestration and result-assembly layer. Keep future calendar-part query,
+request/response parsing, and exact transport-part correlation in that helper
+and verify it with the storage calendar tests. Inbound iCalendar
+`REPLY` and
 `COUNTER` messages are accepted only when they contain exactly one `VEVENT` and
 one attendee whose address matches the envelope sender and whose UID resolves
 to an active event owned by the delivery recipient. A `COUNTER` keeps the

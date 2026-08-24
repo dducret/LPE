@@ -99,6 +99,7 @@ fn test_email(id: Uuid, mailbox_id: Uuid, subject: &str) -> JmapEmail {
         categories: Vec::new(),
         has_attachments: false,
         calendar_invitation: false,
+        calendar_meeting_request: None,
         calendar_meeting_response: None,
         size_octets: 42,
         internet_message_id: None,
@@ -2249,6 +2250,7 @@ fn snapshot_projects_canonical_mailbox_message_and_attachment_ids() {
         categories: Vec::new(),
         has_attachments: true,
         calendar_invitation: false,
+        calendar_meeting_request: None,
         calendar_meeting_response: None,
         size_octets: 42,
         internet_message_id: None,
@@ -2288,6 +2290,109 @@ fn snapshot_projects_canonical_mailbox_message_and_attachment_ids() {
         attachment_id
     );
     assert_eq!(snapshot.messages()[0].attachments[0].attach_num, 0);
+}
+
+#[test]
+fn meeting_request_snapshot_hides_only_inline_calendar_transport_part() {
+    let mailbox_id = Uuid::from_u128(0x44444444_4444_4444_8444_444444444444);
+    let message_id = Uuid::from_u128(0x77777777_7777_4777_8777_777777777777);
+    let inline_calendar_id = Uuid::from_u128(0x88888888_8888_4888_8888_888888888888);
+    crate::mapi::identity::remember_mapi_identity(
+        message_id,
+        crate::mapi::identity::mapi_store_id(0x707),
+    );
+    let mut email = test_email(message_id, mailbox_id, "Probe 7");
+    email.has_attachments = true;
+    email.calendar_invitation = true;
+    email.calendar_meeting_request = Some(lpe_storage::CalendarMeetingRequest {
+        uid: "probe-7@example.test".to_string(),
+        transport_attachment_id: Some(inline_calendar_id),
+        response_requested: true,
+        sent_at: Some("2026-08-23T18:00:00Z".to_string()),
+        meeting_start: "2026-08-24T06:30:00Z".to_string(),
+        meeting_end: "2026-08-24T07:00:00Z".to_string(),
+        meeting_location: Some("Les Planches".to_string()),
+        meeting_sequence: 2,
+        intended_busy_status: 2,
+    });
+    let inline_calendar = ActiveSyncAttachment {
+        id: inline_calendar_id,
+        message_id,
+        file_name: "calendar-1.ics".to_string(),
+        media_type: "text/calendar; method=REQUEST".to_string(),
+        disposition: Some("inline".to_string()),
+        content_id: None,
+        size_octets: 256,
+        file_reference: "inline-calendar-ref".to_string(),
+    };
+    let attached_calendar = ActiveSyncAttachment {
+        id: Uuid::from_u128(0x99999999_9999_4999_8999_999999999999),
+        message_id,
+        file_name: "agenda.ics".to_string(),
+        media_type: "text/calendar".to_string(),
+        disposition: Some("attachment".to_string()),
+        content_id: None,
+        size_octets: 128,
+        file_reference: "attached-calendar-ref".to_string(),
+    };
+    let secondary_inline_calendar = ActiveSyncAttachment {
+        id: Uuid::from_u128(0xaaaaaaaa_aaaa_4aaa_8aaa_aaaaaaaaaaaa),
+        message_id,
+        file_name: "inline-copy.ics".to_string(),
+        media_type: "text/calendar".to_string(),
+        disposition: Some("inline".to_string()),
+        content_id: Some("inline-copy".to_string()),
+        size_octets: 64,
+        file_reference: "secondary-inline-calendar-ref".to_string(),
+    };
+
+    let snapshot = MapiMailStoreSnapshot::new(
+        vec![test_mailbox(mailbox_id)],
+        vec![email.clone()],
+        vec![(
+            message_id,
+            vec![
+                inline_calendar.clone(),
+                secondary_inline_calendar.clone(),
+                attached_calendar.clone(),
+            ],
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(snapshot.messages()[0].attachments.len(), 2);
+    assert_eq!(
+        snapshot.messages()[0].attachments[0].canonical_id,
+        secondary_inline_calendar.id
+    );
+    assert_eq!(snapshot.messages()[0].attachments[0].attach_num, 0);
+    assert_eq!(
+        snapshot.messages()[0].attachments[1].canonical_id,
+        attached_calendar.id
+    );
+    assert_eq!(snapshot.messages()[0].attachments[1].attach_num, 1);
+    assert!(snapshot.messages()[0].email.has_attachments);
+
+    let inline_only = MapiMailStoreSnapshot::new(
+        vec![test_mailbox(mailbox_id)],
+        vec![email],
+        vec![(message_id, vec![inline_calendar])],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert!(inline_only.messages()[0].attachments.is_empty());
+    assert!(!inline_only.messages()[0].email.has_attachments);
+    crate::mapi::identity::forget_mapi_identity(&message_id);
 }
 
 #[test]
@@ -3075,6 +3180,7 @@ fn snapshot_projects_followup_mail_into_todo_search_results() {
         categories: Vec::new(),
         has_attachments: false,
         calendar_invitation: false,
+        calendar_meeting_request: None,
         calendar_meeting_response: None,
         size_octets: 42,
         internet_message_id: None,
@@ -3204,6 +3310,7 @@ fn snapshot_projects_swapped_todo_mail_into_tracked_mail_processing_results() {
         categories: Vec::new(),
         has_attachments: false,
         calendar_invitation: false,
+        calendar_meeting_request: None,
         calendar_meeting_response: None,
         size_octets: 42,
         internet_message_id: None,
@@ -3397,6 +3504,7 @@ fn snapshot_projects_reminders_as_underlying_calendar_and_task_links() {
         categories: Vec::new(),
         has_attachments: false,
         calendar_invitation: false,
+        calendar_meeting_request: None,
         calendar_meeting_response: None,
         size_octets: 42,
         internet_message_id: None,

@@ -9,10 +9,12 @@ use super::special_message::{
     special_message_property_is_ics_identity, special_message_property_is_server_projected,
     special_message_search_key, special_message_status, special_message_sync_parent_source_key,
     special_message_sync_source_key, write_special_message_property, PID_TAG_HAS_ATTACHMENTS,
-    PID_TAG_MESSAGE_STATUS,
+    write_fast_transfer_property, PID_TAG_MESSAGE_STATUS,
 };
 use super::*;
-use crate::mapi::properties::message_class_for_email;
+use crate::mapi::properties::{
+    email_property_value, message_class_for_email, EMAIL_MEETING_REQUEST_FAST_TRANSFER_TAGS,
+};
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,6 +93,33 @@ fn fast_transfer_sender_address(email: &JmapEmail) -> &str {
 
 fn fast_transfer_sent_representing_name(email: &JmapEmail) -> &str {
     email.from_display.as_deref().unwrap_or(&email.from_address)
+}
+
+fn write_email_meeting_request_properties(
+    buffer: &mut Vec<u8>,
+    email: &JmapEmail,
+    mut includes: impl FnMut(u32) -> bool,
+) {
+    if email.calendar_meeting_request.is_none() {
+        return;
+    }
+    for property_tag in EMAIL_MEETING_REQUEST_FAST_TRANSFER_TAGS {
+        if !includes(*property_tag) {
+            continue;
+        }
+        let Some(value) = email_property_value(email, *property_tag)
+            .and_then(SpecialMessagePropertyValue::from_mapi_value)
+        else {
+            continue;
+        };
+        write_fast_transfer_property(
+            buffer,
+            message_class_for_email(email),
+            None,
+            *property_tag,
+            &value,
+        );
+    }
 }
 
 pub(super) fn write_fast_transfer_message_content(
@@ -172,6 +201,9 @@ pub(super) fn write_fast_transfer_message_content(
     if property_filter.includes(PID_TAG_BODY_W) {
         write_utf16_property(buffer, PID_TAG_BODY_W, &email.body_text);
     }
+    write_email_meeting_request_properties(buffer, email, |property_tag| {
+        property_filter.includes(property_tag)
+    });
     write_fast_transfer_message_children(buffer, message_children, Some(email), &[], attachments);
 }
 
@@ -1211,6 +1243,14 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
         if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_BODY_W) {
             write_utf16_property(&mut buffer, PID_TAG_BODY_W, &email.body_text);
         }
+        write_email_meeting_request_properties(&mut buffer, email, |property_tag| {
+            content_property_in_scope(
+                sync_type,
+                sync_flags,
+                sync_property_tags,
+                property_tag,
+            )
+        });
         write_fast_transfer_message_children(
             &mut buffer,
             content_sync_message_children(sync_type, sync_flags, sync_property_tags),

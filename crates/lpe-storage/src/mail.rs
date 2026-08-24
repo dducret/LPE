@@ -2,6 +2,7 @@ use anyhow::Result;
 use lpe_magika::{collect_mime_attachment_parts, extract_visible_body_parts};
 use sqlx::types::chrono::{DateTime, FixedOffset, NaiveDate, TimeZone, Utc};
 use std::collections::HashMap;
+use uuid::Uuid;
 
 use crate::{AttachmentUploadInput, SubmittedRecipientInput};
 
@@ -47,6 +48,19 @@ pub struct CalendarMeetingResponse {
     pub original_end: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CalendarMeetingRequest {
+    pub uid: String,
+    pub transport_attachment_id: Option<Uuid>,
+    pub response_requested: bool,
+    pub sent_at: Option<String>,
+    pub meeting_start: String,
+    pub meeting_end: String,
+    pub meeting_location: Option<String>,
+    pub meeting_sequence: i32,
+    pub intended_busy_status: i32,
+}
+
 pub fn normalize_calendar_meeting_uid(value: &str) -> String {
     let value = value.trim();
     let Some(encoded) = value
@@ -77,17 +91,19 @@ pub fn parse_calendar_meeting_response(
     })
 }
 
-pub(crate) fn contains_calendar_meeting_request(attachments: &[AttachmentUploadInput]) -> bool {
+pub fn parse_calendar_meeting_request(
+    attachments: &[AttachmentUploadInput],
+) -> Option<CalendarMeetingRequest> {
     // [MS-OXCMAIL] section 2.2.3.3.2 and [MS-OXCICAL] section 2.1.3.1.1.1:
     // the decoded text/calendar METHOD, not a legacy outer Content-Class, owns classification.
-    attachments.iter().any(|attachment| {
+    attachments.iter().find_map(|attachment| {
         if !attachment
             .media_type
             .trim()
             .to_ascii_lowercase()
             .starts_with("text/calendar")
         {
-            return false;
+            return None;
         }
         let declared_method = attachment
             .media_type
@@ -103,21 +119,102 @@ pub(crate) fn contains_calendar_meeting_request(attachments: &[AttachmentUploadI
             .as_deref()
             .is_some_and(|method| method != "REQUEST")
         {
-            return false;
+            return None;
         }
         let lines = unfold_icalendar_lines(&String::from_utf8_lossy(&attachment.blob_bytes));
-        icalendar_value(&lines, "METHOD")
+        if !icalendar_value(&lines, "METHOD")
             .is_some_and(|method| method.eq_ignore_ascii_case("REQUEST"))
-            && lines
+            || lines
                 .iter()
                 .filter(|line| line.eq_ignore_ascii_case("BEGIN:VEVENT"))
                 .count()
-                == 1
-            && lines
+                != 1
+            || lines
                 .iter()
                 .filter(|line| line.eq_ignore_ascii_case("END:VEVENT"))
                 .count()
-                == 1
+                != 1
+        {
+            return None;
+        }
+        parse_icalendar_meeting_request(&lines)
+    })
+}
+
+fn parse_icalendar_meeting_request(lines: &[String]) -> Option<CalendarMeetingRequest> {
+    let event_start = lines
+        .iter()
+        .position(|line| line.eq_ignore_ascii_case("BEGIN:VEVENT"))?;
+    let event_end = lines
+        .iter()
+        .skip(event_start + 1)
+        .position(|line| line.eq_ignore_ascii_case("END:VEVENT"))?
+        + event_start
+        + 1;
+    let event = &lines[event_start + 1..event_end];
+    let uid = icalendar_value(event, "UID")?;
+    if uid.trim().is_empty() {
+        return None;
+    }
+
+    let timezone_offsets = icalendar_timezone_offsets(lines);
+    let parsed_time = |name| {
+        icalendar_value_with_parameters(event, name).and_then(|(parameters, value)| {
+            parse_icalendar_datetime(parameters, value, &timezone_offsets)
+        })
+    };
+    // This bounded projection does not yet carry a recurrence pattern or an
+    // arbitrary VTIMEZONE into MAPI. Do not advertise an actionable request
+    // unless Outlook can receive a complete, single-instance UTC interval.
+    if icalendar_value(event, "RRULE").is_some()
+        || icalendar_value(event, "RECURRENCE-ID").is_some()
+    {
+        return None;
+    }
+    let meeting_start = parsed_time("DTSTART")?;
+    let meeting_end = parsed_time("DTEND")?;
+    if meeting_end <= meeting_start {
+        return None;
+    }
+    let response_requested = event
+        .iter()
+        .filter_map(|line| icalendar_property(line, "ATTENDEE"))
+        .any(|(parameters, _)| {
+            icalendar_parameter(parameters, "RSVP")
+                .is_some_and(|value| value.eq_ignore_ascii_case("TRUE"))
+        });
+    let meeting_sequence = icalendar_value(event, "X-MICROSOFT-CDO-APPT-SEQUENCE")
+        .or_else(|| icalendar_value(event, "SEQUENCE"))
+        .and_then(|value| value.parse::<u32>().ok())
+        .and_then(|value| i32::try_from(value).ok())
+        .unwrap_or(0);
+    let intended_busy_status = match icalendar_value(event, "X-MICROSOFT-CDO-INTENDEDSTATUS")
+        .or_else(|| icalendar_value(event, "X-MICROSOFT-CDO-BUSYSTATUS"))
+        .as_deref()
+        .map(str::trim)
+    {
+        Some(value) if value.eq_ignore_ascii_case("FREE") => 0,
+        Some(value) if value.eq_ignore_ascii_case("TENTATIVE") => 1,
+        Some(value) if value.eq_ignore_ascii_case("OOF") => 3,
+        Some(value) if value.eq_ignore_ascii_case("WORKINGELSEWHERE") => 4,
+        _ if icalendar_value(event, "TRANSP")
+            .is_some_and(|value| value.eq_ignore_ascii_case("TRANSPARENT")) =>
+        {
+            0
+        }
+        _ => 2,
+    };
+
+    Some(CalendarMeetingRequest {
+        uid: normalize_calendar_meeting_uid(&uid),
+        transport_attachment_id: None,
+        response_requested,
+        sent_at: parsed_time("DTSTAMP"),
+        meeting_start,
+        meeting_end,
+        meeting_location: icalendar_value(event, "LOCATION").filter(|value| !value.is_empty()),
+        meeting_sequence,
+        intended_busy_status,
     })
 }
 
@@ -732,7 +829,17 @@ mod tests {
             "BEGIN:VCALENDAR\r\n",
             "METHOD:REQUEST\r\n",
             "BEGIN:VEVENT\r\n",
-            "UID:probe-7@example.test\r\n",
+            "UID:probe-7@\r\n",
+            " example.test\r\n",
+            "DTSTAMP:20260823T180000Z\r\n",
+            "DTSTART:20260824T063000Z\r\n",
+            "DTEND:20260824T070000Z\r\n",
+            "LOCATION:Les Planches\r\n",
+            "SEQUENCE:2\r\n",
+            "X-MICROSOFT-CDO-BUSYSTATUS:FREE\r\n",
+            "X-MICROSOFT-CDO-INTENDEDSTATUS:OOF\r\n",
+            "ATTENDEE;RSVP=FALSE:mailto:observer@example.test\r\n",
+            "ATTENDEE;RSVP=TRUE:mailto:test@l-p-e.ch\r\n",
             "END:VEVENT\r\n",
             "END:VCALENDAR\r\n",
             "--invite--\r\n"
@@ -746,7 +853,20 @@ mod tests {
             attachments[0].media_type,
             "text/calendar; method=REQUEST; charset=UTF-8"
         );
-        assert!(super::contains_calendar_meeting_request(&attachments));
+        assert_eq!(
+            super::parse_calendar_meeting_request(&attachments),
+            Some(super::CalendarMeetingRequest {
+                uid: "probe-7@example.test".to_string(),
+                transport_attachment_id: None,
+                response_requested: true,
+                sent_at: Some("2026-08-23T18:00:00Z".to_string()),
+                meeting_start: "2026-08-24T06:30:00Z".to_string(),
+                meeting_end: "2026-08-24T07:00:00Z".to_string(),
+                meeting_location: Some("Les Planches".to_string()),
+                meeting_sequence: 2,
+                intended_busy_status: 3,
+            })
+        );
     }
 
     #[test]
@@ -758,14 +878,41 @@ mod tests {
             content_id: None,
             blob_bytes: body.as_bytes().to_vec(),
         };
-        assert!(!super::contains_calendar_meeting_request(&[attachment(
-            "text/calendar; method=REQUEST",
-            "BEGIN:VCALENDAR\r\nMETHOD:PUBLISH\r\nBEGIN:VEVENT\r\nUID:x\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
-        )]));
-        assert!(!super::contains_calendar_meeting_request(&[attachment(
-            "text/calendar; method=PUBLISH",
-            "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:x\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
-        )]));
+        assert_eq!(
+            super::parse_calendar_meeting_request(&[attachment(
+                "text/calendar; method=REQUEST",
+                "BEGIN:VCALENDAR\r\nMETHOD:PUBLISH\r\nBEGIN:VEVENT\r\nUID:x\r\nDTSTART:20260824T063000Z\r\nDTEND:20260824T070000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+            )]),
+            None
+        );
+        assert_eq!(
+            super::parse_calendar_meeting_request(&[attachment(
+                "text/calendar; method=PUBLISH",
+                "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:x\r\nDTSTART:20260824T063000Z\r\nDTEND:20260824T070000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+            )]),
+            None
+        );
+        assert_eq!(
+            super::parse_calendar_meeting_request(&[attachment(
+                "text/calendar; method=REQUEST",
+                "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:x\r\nDTSTART:20260824T063000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+            )]),
+            None
+        );
+        assert_eq!(
+            super::parse_calendar_meeting_request(&[attachment(
+                "text/calendar; method=REQUEST",
+                "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:x\r\nDTSTART:20260824T063000Z\r\nDTEND:20260824T070000Z\r\nRRULE:FREQ=DAILY;COUNT=2\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+            )]),
+            None
+        );
+        assert_eq!(
+            super::parse_calendar_meeting_request(&[attachment(
+                "text/calendar; method=REQUEST",
+                "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:x\r\nRECURRENCE-ID:20260825T063000Z\r\nDTSTART:20260825T063000Z\r\nDTEND:20260825T070000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+            )]),
+            None
+        );
     }
 
     #[test]
@@ -789,6 +936,7 @@ mod tests {
 
         assert_eq!(attachments.len(), 1);
         assert_eq!(attachments[0].file_name, "calendar-1.ics");
+        assert_eq!(attachments[0].disposition.as_deref(), Some("inline"));
         assert_eq!(
             attachments[0].media_type,
             "text/calendar; charset=utf-8; method=COUNTER"

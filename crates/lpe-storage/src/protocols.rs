@@ -6,13 +6,15 @@ use serde_json::Value;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::mail::{contains_calendar_meeting_request, parse_calendar_meeting_response};
 use crate::{
     submission,
     submission::{AttachmentUploadInput, SubmittedRecipientInput},
-    AuditEntryInput, CalendarMeetingResponse, JmapEmailRecipientRow, JmapEmailRow,
-    JmapEmailSubmissionRow, MessageBccRecipientRecordRow, Storage, DEFAULT_TASK_LIST_ROLE,
+    AuditEntryInput, CalendarMeetingRequest, CalendarMeetingResponse, JmapEmailRecipientRow,
+    JmapEmailRow, JmapEmailSubmissionRow, MessageBccRecipientRecordRow, Storage,
+    DEFAULT_TASK_LIST_ROLE,
 };
+
+mod calendar_mail;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct JmapEmailAddress {
@@ -62,6 +64,8 @@ pub struct JmapEmail {
     pub categories: Vec<String>,
     pub has_attachments: bool,
     pub calendar_invitation: bool,
+    #[serde(skip)]
+    pub calendar_meeting_request: Option<CalendarMeetingRequest>,
     #[serde(skip)]
     pub calendar_meeting_response: Option<CalendarMeetingResponse>,
     pub size_octets: i64,
@@ -913,52 +917,14 @@ impl Storage {
         .fetch_all(&self.pool)
         .await?;
 
-        let calendar_parts = sqlx::query(
-            r#"
-            SELECT part.message_id, part.content_type, blob.blob_bytes
-            FROM mime_parts part
-            JOIN blobs blob
-              ON blob.tenant_id = part.tenant_id
-             AND blob.domain_id = part.domain_id
-             AND blob.id = part.blob_id
-             AND blob.blob_kind = part.blob_kind
-            WHERE part.tenant_id = $1
-              AND part.message_id = ANY($2)
-              AND lower(part.content_type) LIKE 'text/calendar%'
-            ORDER BY part.message_id ASC, part.ordinal ASC
-            "#,
-        )
-        .bind(&tenant_id)
-        .bind(ids)
-        .fetch_all(&self.pool)
-        .await?;
-        let mut calendar_invitations = HashMap::new();
-        let mut calendar_responses = HashMap::new();
-        for part in calendar_parts {
-            let message_id: Uuid = part.try_get("message_id")?;
-            let content_type: String = part.try_get("content_type")?;
-            let blob_bytes: Option<Vec<u8>> = part.try_get("blob_bytes")?;
-            let Some(blob_bytes) = blob_bytes else {
-                continue;
-            };
-            let attachment = AttachmentUploadInput {
-                file_name: String::new(),
-                media_type: content_type,
-                disposition: None,
-                content_id: None,
-                blob_bytes,
-            };
-            if contains_calendar_meeting_request(std::slice::from_ref(&attachment)) {
-                calendar_invitations.insert(message_id, ());
-            }
-            if !calendar_responses.contains_key(&message_id) {
-                if let Some(response) =
-                    parse_calendar_meeting_response(std::slice::from_ref(&attachment))
-                {
-                    calendar_responses.insert(message_id, response);
-                }
-            }
-        }
+        let (mut calendar_invitations, mut calendar_responses) =
+            calendar_mail::fetch_calendar_mail_metadata(
+                &self.pool,
+                tenant_id,
+                account_id,
+                ids,
+            )
+            .await?;
 
         let mut emails = Vec::with_capacity(ids.len());
         for id in ids {
@@ -1063,6 +1029,7 @@ impl Storage {
                 let primary_mailbox_name = primary_mailbox.name.clone();
                 let primary_modseq = primary_mailbox.modseq;
 
+                let calendar_meeting_request = calendar_invitations.remove(&row.id);
                 emails.push(JmapEmail {
                     id: row.id,
                     thread_id: row.thread_id,
@@ -1103,7 +1070,8 @@ impl Storage {
                     swapped_todo_data: row.swapped_todo_data.clone(),
                     categories: row.categories.clone(),
                     has_attachments: row.has_attachments,
-                    calendar_invitation: calendar_invitations.remove(&row.id).is_some(),
+                    calendar_invitation: calendar_meeting_request.is_some(),
+                    calendar_meeting_request,
                     calendar_meeting_response: calendar_responses.remove(&row.id),
                     size_octets: row.size_octets,
                     internet_message_id: row.internet_message_id.clone(),

@@ -127,6 +127,9 @@ fn collect_mime_attachment_parts_extracts_attachment_payloads() {
 #[test]
 fn collect_mime_attachment_parts_keeps_unnamed_inline_calendar_parts() {
     let message = concat!(
+        "Content-Type: multipart/mixed; boundary=\"outer\"\r\n",
+        "\r\n",
+        "--outer\r\n",
         "Content-Type: multipart/alternative; boundary=\"invite\"\r\n",
         "\r\n",
         "--invite\r\n",
@@ -138,7 +141,8 @@ fn collect_mime_attachment_parts_keeps_unnamed_inline_calendar_parts() {
         "Content-Transfer-Encoding: base64\r\n",
         "\r\n",
         "QkVHSU46VkNBTEVOREFSDQpNRVRIT0Q6Q09VTlRFUg0KRU5EOlZDQUxFTkRBUg==\r\n",
-        "--invite--\r\n"
+        "--invite--\r\n",
+        "--outer--\r\n"
     );
 
     let attachments = collect_mime_attachment_parts(message.as_bytes()).unwrap();
@@ -149,9 +153,58 @@ fn collect_mime_attachment_parts_keeps_unnamed_inline_calendar_parts() {
         Some("text/calendar; charset=utf-8; method=COUNTER")
     );
     assert_eq!(
+        attachments[0].content_disposition.as_deref(),
+        Some("inline")
+    );
+    assert_eq!(
         attachments[0].bytes,
         b"BEGIN:VCALENDAR\r\nMETHOD:COUNTER\r\nEND:VCALENDAR".to_vec()
     );
+}
+
+#[test]
+fn collect_mime_attachment_parts_preserves_explicit_calendar_attachment_role() {
+    let message = concat!(
+        "Content-Type: multipart/mixed; boundary=\"mixed\"\r\n",
+        "\r\n",
+        "--mixed\r\n",
+        "Content-Type: text/plain\r\n",
+        "\r\n",
+        "Body\r\n",
+        "--mixed\r\n",
+        "Content-Type: text/calendar; name=\"copy.ics\"\r\n",
+        "Content-Disposition: attachment; filename=\"copy.ics\"\r\n",
+        "\r\n",
+        "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n",
+        "--mixed--\r\n"
+    );
+
+    let attachments = collect_mime_attachment_parts(message.as_bytes()).unwrap();
+
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].filename.as_deref(), Some("copy.ics"));
+    assert!(attachments[0]
+        .content_disposition
+        .as_deref()
+        .is_some_and(|value| value.starts_with("attachment")));
+}
+
+#[test]
+fn collect_mime_attachment_parts_does_not_infer_inline_inside_multipart_mixed() {
+    let message = concat!(
+        "Content-Type: multipart/mixed; boundary=\"mixed\"\r\n",
+        "\r\n",
+        "--mixed\r\n",
+        "Content-Type: text/calendar; method=REQUEST\r\n",
+        "\r\n",
+        "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n",
+        "--mixed--\r\n"
+    );
+
+    let attachments = collect_mime_attachment_parts(message.as_bytes()).unwrap();
+
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].content_disposition, None);
 }
 
 #[test]

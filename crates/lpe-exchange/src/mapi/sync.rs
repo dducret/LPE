@@ -965,30 +965,7 @@ fn conversation_action_sync_object(
 fn special_message_property_value(
     value: MapiValue,
 ) -> Option<mapi_mailstore::SpecialMessagePropertyValue> {
-    match value {
-        MapiValue::Binary(value) => {
-            Some(mapi_mailstore::SpecialMessagePropertyValue::Binary(value))
-        }
-        MapiValue::Bool(value) => Some(mapi_mailstore::SpecialMessagePropertyValue::Bool(value)),
-        MapiValue::Guid(value) => Some(mapi_mailstore::SpecialMessagePropertyValue::Guid(value)),
-        MapiValue::I32(value) => Some(mapi_mailstore::SpecialMessagePropertyValue::I32(value)),
-        MapiValue::I64(value) => Some(mapi_mailstore::SpecialMessagePropertyValue::I64(value)),
-        MapiValue::U32(value) => Some(mapi_mailstore::SpecialMessagePropertyValue::U32(value)),
-        MapiValue::U64(value) => Some(mapi_mailstore::SpecialMessagePropertyValue::U64(value)),
-        MapiValue::String(value) => {
-            Some(mapi_mailstore::SpecialMessagePropertyValue::String(value))
-        }
-        MapiValue::MultiString(values) => Some(
-            mapi_mailstore::SpecialMessagePropertyValue::MultiString(values),
-        ),
-        MapiValue::MultiI32(values) => Some(mapi_mailstore::SpecialMessagePropertyValue::MultiI32(
-            values,
-        )),
-        MapiValue::MultiBinary(values) => Some(
-            mapi_mailstore::SpecialMessagePropertyValue::MultiBinary(values),
-        ),
-        _ => None,
-    }
+    mapi_mailstore::SpecialMessagePropertyValue::from_mapi_value(value)
 }
 
 pub(in crate::mapi) fn sync_attachment_facts_for(

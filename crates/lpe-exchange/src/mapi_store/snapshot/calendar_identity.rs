@@ -283,12 +283,27 @@ impl MapiMailStoreSnapshot {
                     .as_ref()
                     .map(|identity| identity.object_id)
                     .unwrap_or_else(|| mapi_message_id(&email));
+                let transport_attachment_id = email
+                    .calendar_meeting_request
+                    .as_ref()
+                    .and_then(|request| request.transport_attachment_id);
                 let message_attachments = attachments
                     .iter()
                     .find(|(message_id, _)| *message_id == email.id)
                     .map(|(_, attachments)| attachments.as_slice())
                     .unwrap_or_default()
                     .iter()
+                    .filter(|attachment| {
+                        !(transport_attachment_id == Some(attachment.id)
+                            && attachment.disposition.as_deref().is_some_and(|disposition| {
+                                disposition.eq_ignore_ascii_case("inline")
+                            })
+                            && attachment
+                                .media_type
+                                .trim()
+                                .to_ascii_lowercase()
+                                .starts_with("text/calendar"))
+                    })
                     .enumerate()
                     .map(|(index, attachment)| MapiAttachment {
                         attach_num: index as u32,
@@ -301,6 +316,9 @@ impl MapiMailStoreSnapshot {
                         size_octets: attachment.size_octets,
                     })
                     .collect::<Vec<_>>();
+                if email.calendar_meeting_request.is_some() {
+                    email.has_attachments = !message_attachments.is_empty();
+                }
                 MapiMessage {
                     id: message_id,
                     folder_id,

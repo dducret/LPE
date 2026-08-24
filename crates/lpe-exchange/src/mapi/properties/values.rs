@@ -2,7 +2,7 @@ use super::*;
 use lpe_domain::crypto::hex_lower;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::mapi) enum MapiValue {
+pub(crate) enum MapiValue {
     Null,
     Bool(bool),
     I16(i16),

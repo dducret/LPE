@@ -48,6 +48,9 @@ pub(in crate::mapi) use attachments::*;
 pub(in crate::mapi) use calendar::*;
 pub(in crate::mapi) use contact::*;
 pub(crate) use folder::*;
+pub(crate) use message::{
+    email_property_value, EMAIL_MEETING_REQUEST_FAST_TRANSFER_TAGS,
+};
 pub(crate) use message::message_class_for_email;
 pub(in crate::mapi) use message::*;
 pub(crate) use named::*;
@@ -64,6 +67,7 @@ use streams::{pending_body_text_property, property_tag_type};
 pub(crate) use tags::*;
 pub(in crate::mapi) use task::*;
 pub(super) use values::*;
+pub(crate) use values::MapiValue;
 pub(in crate::mapi) use views::*;
 
 pub(in crate::mapi) const NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID: [u8; 16] = [

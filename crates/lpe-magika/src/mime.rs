@@ -10,9 +10,16 @@ struct ParsedVisiblePart {
     body_text: String,
 }
 
+#[derive(Clone, Copy)]
+enum AttachmentPartContext {
+    Root,
+    Alternative,
+    OtherMultipart,
+}
+
 pub fn collect_mime_attachment_parts(bytes: &[u8]) -> Result<Vec<MimeAttachmentPart>> {
     let mut attachments = Vec::new();
-    collect_attachment_parts(bytes, &mut attachments)?;
+    collect_attachment_parts(bytes, &mut attachments, AttachmentPartContext::Root)?;
     Ok(attachments)
 }
 
@@ -60,7 +67,11 @@ pub fn extract_visible_body_parts(bytes: &[u8]) -> Result<VisibleBodyParts> {
     })
 }
 
-fn collect_attachment_parts(bytes: &[u8], attachments: &mut Vec<MimeAttachmentPart>) -> Result<()> {
+fn collect_attachment_parts(
+    bytes: &[u8],
+    attachments: &mut Vec<MimeAttachmentPart>,
+    context: AttachmentPartContext,
+) -> Result<()> {
     let (header_block, body_block) = split_headers_and_body_bytes(bytes);
     let headers = parse_rfc822_headers_bytes(header_block);
     let content_type = headers
@@ -77,13 +88,21 @@ fn collect_attachment_parts(bytes: &[u8], attachments: &mut Vec<MimeAttachmentPa
         let Some(boundary) = content_type_parameter(&content_type, "boundary") else {
             return Ok(());
         };
+        let child_context = if content_type
+            .to_ascii_lowercase()
+            .starts_with("multipart/alternative")
+        {
+            AttachmentPartContext::Alternative
+        } else {
+            AttachmentPartContext::OtherMultipart
+        };
         for part in split_multipart_parts(&decoded_body, &boundary) {
-            collect_attachment_parts(&part, attachments)?;
+            collect_attachment_parts(&part, attachments, child_context)?;
         }
         return Ok(());
     }
 
-    let content_disposition = headers.get("content-disposition").cloned();
+    let mut content_disposition = headers.get("content-disposition").cloned();
     let content_id = headers
         .get("content-id")
         .map(|value| value.trim().trim_matches(['<', '>']).to_string())
@@ -101,6 +120,18 @@ fn collect_attachment_parts(bytes: &[u8], attachments: &mut Vec<MimeAttachmentPa
     let is_calendar = content_type
         .to_ascii_lowercase()
         .starts_with("text/calendar");
+    if is_calendar
+        && !is_attachment
+        && content_disposition.is_none()
+        && matches!(
+            context,
+            AttachmentPartContext::Root | AttachmentPartContext::Alternative
+        )
+    {
+        // A root or multipart/alternative calendar part is the scheduling
+        // body even when Outlook omits Content-Disposition.
+        content_disposition = Some("inline".to_string());
+    }
     if is_attachment || filename.is_some() || is_calendar {
         attachments.push(MimeAttachmentPart {
             filename,

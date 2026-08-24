@@ -145,6 +145,18 @@ pub(super) fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
         (0x8219, PID_LID_WHERE, PSETID_MEETING_GUID),
         (0x81E6, PID_LID_IS_SILENT, PSETID_MEETING_GUID),
         (
+            0x8128,
+            PID_LID_OWNER_CRITICAL_CHANGE,
+            PSETID_MEETING_GUID,
+        ),
+        (0x81E4, PID_LID_IS_EXCEPTION, PSETID_MEETING_GUID),
+        (
+            0x8311,
+            PID_LID_APPOINTMENT_MESSAGE_CLASS,
+            PSETID_MEETING_GUID,
+        ),
+        (0x8314, PID_LID_MEETING_TYPE, PSETID_MEETING_GUID),
+        (
             0x8017,
             PID_LID_OUTLOOK_APPOINTMENT_8F07,
             OUTLOOK_VIEW_8F07_GUID,
@@ -176,6 +188,8 @@ pub(super) fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
             (PID_LID_TASK_COMPLETE, PSETID_TASK_GUID),
             (PID_LID_TASK_F_RECURRING, PSETID_TASK_GUID),
             (PID_LID_BUSY_STATUS, PSETID_APPOINTMENT_GUID),
+            (PID_LID_INTENDED_BUSY_STATUS, PSETID_APPOINTMENT_GUID),
+            (PID_LID_F_INVITED, PSETID_APPOINTMENT_GUID),
             (PID_LID_APPOINTMENT_SEQUENCE, PSETID_APPOINTMENT_GUID),
             (PID_LID_LOCATION, PSETID_APPOINTMENT_GUID),
             (PID_LID_APPOINTMENT_START_WHOLE, PSETID_APPOINTMENT_GUID),
