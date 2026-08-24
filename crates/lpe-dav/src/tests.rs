@@ -1102,6 +1102,7 @@ async fn put_parses_structured_calendar_metadata() {
 async fn get_serializes_organizer_and_participant_status() {
     let event_id = Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap();
     let event = AccessibleEvent {
+        uid: "mapi-goid:040000008200e00074c5b7101a82e00800000000c08470cd9e31dd0100000000000000001e0000007643616c2d556964010000006d6170692d637265617465642d6576656e74".to_string(),
         date: "2026-04-24".to_string(),
         time: "15:00".to_string(),
         time_zone: "Europe/Berlin".to_string(),
@@ -1143,6 +1144,7 @@ async fn get_serializes_organizer_and_participant_status() {
         .unwrap();
 
     let body = response_text(response).await;
+    assert!(body.contains("UID:mapi-created-event"));
     assert!(body.contains("ORGANIZER;CN=Owner Example:mailto:owner@example.test"));
     assert!(body.contains(
         "ATTENDEE;CN=Bob;ROLE=REQ-PARTICIPANT;PARTSTAT=DECLINED;RSVP=TRUE:mailto:bob@example.test"

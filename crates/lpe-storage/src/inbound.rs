@@ -11,16 +11,16 @@ use sqlx::{Postgres, Row};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
+mod meeting_response;
+
+use meeting_response::MeetingResponseOutcome;
+
 use crate::mail::{
-    parse_calendar_meeting_response, parse_header_recipients, parse_headers_map,
-    parse_rfc822_message, CalendarMeetingResponse,
+    parse_calendar_meeting_request, parse_calendar_meeting_response_with_content_sha256,
+    parse_header_recipients, parse_headers_map, parse_rfc822_message, CalendarMeetingResponse,
 };
 use crate::shared::allocate_uid_validity;
-use crate::{
-    calendar_attendee_labels, parse_calendar_participants_metadata,
-    serialize_calendar_participants_metadata, submission, AttachmentUploadInput, AuditEntryInput,
-    CanonicalChangeCategory, Storage, SubmittedRecipientInput, normalize_calendar_meeting_uid,
-};
+use crate::{submission, AttachmentUploadInput, AuditEntryInput, Storage, SubmittedRecipientInput};
 
 const MAX_SIEVE_REDIRECTS_PER_MESSAGE: usize = 4;
 const DEFAULT_SIEVE_MAILBOX_RETENTION_DAYS: i32 = 365;
@@ -72,14 +72,18 @@ impl Storage {
         let mail_from = crate::normalize_email(&request.mail_from);
         let subject = crate::normalize_subject(&request.subject);
         let parsed_message = parse_rfc822_message(&request.raw_message)?;
+        let rfc_from = parsed_message.from.clone();
+        let rfc_from_is_unambiguous = parsed_message.from_is_unambiguous;
+        let header_from = rfc_from
+            .clone()
+            .unwrap_or_else(|| crate::mail::ParsedMailAddress {
+                email: mail_from.clone(),
+                display_name: None,
+            });
+        let header_sender = parsed_message.sender.clone();
         let body_text = parsed_message.body_text.trim().to_string();
         let headers = parse_headers_map(&request.raw_message);
-        let rcpt_to = request
-            .rcpt_to
-            .iter()
-            .map(|recipient| crate::normalize_email(recipient))
-            .filter(|recipient| !recipient.is_empty())
-            .collect::<Vec<_>>();
+        let rcpt_to = normalized_inbound_recipients(&request.rcpt_to);
 
         if rcpt_to.is_empty() {
             bail!("at least one recipient is required");
@@ -90,7 +94,8 @@ impl Storage {
         let mut visible_recipients = Vec::with_capacity(visible_to.len() + visible_cc.len());
         submission::push_recipients(&mut visible_recipients, "to", &visible_to);
         submission::push_recipients(&mut visible_recipients, "cc", &visible_cc);
-        let participants = submission::participants_normalized(&mail_from, &visible_recipients);
+        let participants =
+            submission::participants_normalized(&header_from.email, &visible_recipients);
         let preview = crate::preview_text(&body_text);
         let size_octets = request.raw_message.len() as i64;
 
@@ -120,8 +125,18 @@ impl Storage {
         let mut stored_messages = Vec::new();
         let thread_id = Uuid::new_v4();
         let attachments = parsed_message.attachments;
-        let calendar_response = parse_calendar_meeting_response(&attachments)
-            .filter(|response| response.attendee_email == mail_from);
+        // Use this sender-authorized result for both Event correlation and the
+        // durable Outlook classification. Re-parsing below the trust boundary
+        // would make a rejected response actionable again on message reads.
+        let calendar_response = parse_calendar_meeting_response_with_content_sha256(&attachments)
+            .filter(|(response, _)| {
+                rfc_from_is_unambiguous
+                    && calendar_response_sender_matches(
+                        &response.attendee_email,
+                        &mail_from,
+                        rfc_from.as_ref().map(|from| from.email.as_str()),
+                    )
+            });
         let mut followups = Vec::new();
 
         for recipient in &rcpt_to {
@@ -138,6 +153,16 @@ impl Storage {
             let tenant_id: Uuid = row.try_get("tenant_id")?;
             let account_email: String = row.try_get("primary_email")?;
             let account_display_name: String = row.try_get("display_name")?;
+            let authorized_calendar_response =
+                calendar_response.as_ref().filter(|(response, _)| {
+                    calendar_response_organizer_matches(
+                        response
+                            .organizer
+                            .as_ref()
+                            .map(|organizer| organizer.email.as_str()),
+                        &account_email,
+                    )
+                });
             let sieve_outcome = self
                 .evaluate_inbound_sieve(account_id, &mail_from, recipient, &headers, &account_email)
                 .await?;
@@ -177,7 +202,9 @@ impl Storage {
                     thread_id,
                     message_id,
                     &request,
-                    &mail_from,
+                    &header_from.email,
+                    header_from.display_name.as_deref(),
+                    header_sender.as_ref(),
                     &subject,
                     &preview,
                     size_octets,
@@ -185,15 +212,38 @@ impl Storage {
                     &participants,
                     &visible_recipients,
                     &attachments,
+                    authorized_calendar_response.map(|(response, _)| response),
+                    authorized_calendar_response.map(|(_, content_sha256)| content_sha256.as_str()),
                 )
                 .await?;
-                if let Some(response) = calendar_response.as_ref() {
-                    self.apply_calendar_meeting_response_in_tx(
+                let response_outcome = if let Some((response, _)) = authorized_calendar_response {
+                    Some(
+                        self.apply_calendar_meeting_response_in_tx(
+                            &mut tx,
+                            &tenant_id,
+                            account_id,
+                            &account_email,
+                            response,
+                        )
+                        .await?,
+                    )
+                } else if calendar_response.is_some() {
+                    Some(MeetingResponseOutcome::IgnoredOrganizerMismatch)
+                } else {
+                    None
+                };
+                if let Some(response_outcome) = response_outcome {
+                    if response_outcome.server_processed() {
+                        self.mark_inbound_calendar_response_processed_in_tx(
+                            &mut tx, &tenant_id, message_id,
+                        )
+                        .await?;
+                    }
+                    self.record_calendar_meeting_response_outcome_in_tx(
                         &mut tx,
                         &tenant_id,
-                        account_id,
-                        response,
-                        &mail_from,
+                        message_id,
+                        response_outcome,
                     )
                     .await?;
                 }
@@ -451,7 +501,9 @@ impl Storage {
         thread_id: Uuid,
         message_id: Uuid,
         request: &InboundDeliveryRequest,
-        mail_from: &str,
+        from_address: &str,
+        from_display: Option<&str>,
+        sender: Option<&crate::mail::ParsedMailAddress>,
         subject: &str,
         _preview: &str,
         size_octets: i64,
@@ -459,7 +511,14 @@ impl Storage {
         participants: &str,
         visible_recipients: &[(&'static str, SubmittedRecipientInput)],
         attachments: &[AttachmentUploadInput],
+        authorized_calendar_response: Option<&CalendarMeetingResponse>,
+        authorized_calendar_response_content_sha256: Option<&str>,
     ) -> Result<()> {
+        if authorized_calendar_response.is_some()
+            != authorized_calendar_response_content_sha256.is_some()
+        {
+            bail!("authorized calendar response and its content hash must be stored together");
+        }
         let domain_id = self
             .load_account_domain_id_in_tx(tx, tenant_id, account_id)
             .await?;
@@ -479,11 +538,12 @@ impl Storage {
             r#"
             INSERT INTO messages (
                 id, tenant_id, domain_id, blob_id, internet_message_id, message_hash,
-                normalized_subject, sent_at, received_at, size_octets, has_attachments
+                authorized_calendar_response_content_sha256, normalized_subject,
+                sent_at, received_at, size_octets, has_attachments
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6,
-                $7, COALESCE($8::timestamptz, NOW()), NOW(), $9, FALSE
+                $7, $8, COALESCE($9::timestamptz, NOW()), NOW(), $10, FALSE
             )
             "#,
         )
@@ -493,6 +553,7 @@ impl Storage {
         .bind(blob_id)
         .bind(request.internet_message_id.as_deref())
         .bind(crate::sha256_hex(&request.raw_message))
+        .bind(authorized_calendar_response_content_sha256)
         .bind(subject)
         .bind(sent_at.as_deref())
         .bind(size_octets.max(0))
@@ -524,15 +585,34 @@ impl Storage {
             INSERT INTO message_recipients (
                 id, tenant_id, message_id, role, address, display_name, ordinal
             )
-            VALUES ($1, $2, $3, 'from', $4, NULL, 0)
+                VALUES ($1, $2, $3, 'from', $4, $5, 0)
             "#,
         )
         .bind(Uuid::new_v4())
         .bind(tenant_id)
         .bind(message_id)
-        .bind(mail_from)
+        .bind(from_address)
+        .bind(from_display)
         .execute(&mut **tx)
         .await?;
+
+        if let Some(sender) = sender {
+            sqlx::query(
+                r#"
+                INSERT INTO message_recipients (
+                    id, tenant_id, message_id, role, address, display_name, ordinal
+                )
+                VALUES ($1, $2, $3, 'sender', $4, $5, 0)
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(tenant_id)
+            .bind(message_id)
+            .bind(&sender.email)
+            .bind(sender.display_name.as_deref())
+            .execute(&mut **tx)
+            .await?;
+        }
 
         for (ordinal, (kind, recipient_value)) in visible_recipients.iter().enumerate() {
             sqlx::query(
@@ -554,13 +634,25 @@ impl Storage {
             .await?;
         }
 
+        let calendar_request = parse_calendar_meeting_request(attachments);
         self.ingest_message_attachments_in_tx(tx, tenant_id, account_id, message_id, attachments)
             .await?;
+        self.persist_new_calendar_mail_classification_in_tx(
+            tx,
+            tenant_id,
+            account_id,
+            message_id,
+            calendar_request.as_ref(),
+            authorized_calendar_response,
+        )
+        .await?;
         let membership_id = self
             .allocate_mailbox_membership_in_tx(
                 tx, tenant_id, account_id, mailbox_id, message_id, thread_id, "", false, false,
                 false, "created",
             )
+            .await?;
+        self.mark_calendar_mail_classification_applied_in_tx(tx, tenant_id, account_id, message_id)
             .await?;
         self.assign_message_attachments_membership_in_tx(
             tx,
@@ -580,146 +672,6 @@ impl Storage {
             participants,
             body_text,
             "",
-        )
-        .await?;
-        Ok(())
-    }
-
-    async fn apply_calendar_meeting_response_in_tx(
-        &self,
-        tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &Uuid,
-        organizer_account_id: Uuid,
-        response: &CalendarMeetingResponse,
-        mail_from: &str,
-    ) -> Result<()> {
-        let Some(event) = sqlx::query(
-            r#"
-            SELECT id, calendar_id, uid, attendees_json::text AS attendees_json
-            FROM calendar_events
-            WHERE tenant_id = $1
-              AND owner_account_id = $2
-              AND uid = $3
-              AND lifecycle_state = 'active'
-              AND ($4::timestamptz IS NULL OR starts_at = $4::timestamptz)
-              AND ($5::timestamptz IS NULL OR ends_at = $5::timestamptz)
-            FOR UPDATE
-            "#,
-        )
-        .bind(tenant_id)
-        .bind(organizer_account_id)
-        .bind(normalize_calendar_meeting_uid(&response.uid))
-        .bind(response.original_start.as_deref())
-        .bind(response.original_end.as_deref())
-        .fetch_optional(&mut **tx)
-        .await?
-        else {
-            return Ok(());
-        };
-        let event_id: Uuid = event.try_get("id")?;
-        let calendar_id: Uuid = event.try_get("calendar_id")?;
-        let uid: String = event.try_get("uid")?;
-        let attendees_json: String = event.try_get("attendees_json")?;
-        let mut participants = parse_calendar_participants_metadata(&attendees_json);
-        let Some(attendee) = participants.attendees.iter_mut().find(|attendee| {
-            !attendee.email.is_empty()
-                && attendee.email.eq_ignore_ascii_case(&response.attendee_email)
-        }) else {
-            return Ok(());
-        };
-
-        let counter_proposal = response.method == "COUNTER";
-        let changed = attendee.partstat != response.partstat
-            || attendee.counter_proposal != counter_proposal
-            || attendee.proposed_start != response.proposed_start
-            || attendee.proposed_end != response.proposed_end;
-        if !changed {
-            return Ok(());
-        }
-        attendee.partstat = response.partstat.clone();
-        attendee.counter_proposal = counter_proposal;
-        attendee.proposed_start = response.proposed_start.clone();
-        attendee.proposed_end = response.proposed_end.clone();
-        let attendees = calendar_attendee_labels(&participants);
-        let attendees_json = serialize_calendar_participants_metadata(&participants);
-        sqlx::query(
-            r#"
-            UPDATE calendar_events
-            SET attendees_json = $4::jsonb,
-                source_payload_json = jsonb_set(
-                    source_payload_json,
-                    '{attendees}',
-                    to_jsonb($5::text),
-                    TRUE
-                )
-            WHERE tenant_id = $1
-              AND owner_account_id = $2
-              AND id = $3
-            "#,
-        )
-        .bind(tenant_id)
-        .bind(organizer_account_id)
-        .bind(event_id)
-        .bind(&attendees_json)
-        .bind(attendees)
-        .execute(&mut **tx)
-        .await?;
-        let modseq = self
-            .allocate_account_modseq_in_tx(
-                tx,
-                tenant_id,
-                organizer_account_id,
-                CanonicalChangeCategory::Calendar.as_str(),
-            )
-            .await?;
-        self.advance_calendar_event_version_in_tx(
-            tx,
-            tenant_id,
-            organizer_account_id,
-            event_id,
-            modseq,
-        )
-        .await?;
-        let affected_principals = Self::calendar_event_affected_principals_in_tx(
-            tx,
-            tenant_id,
-            organizer_account_id,
-            event_id,
-        )
-        .await?;
-        Self::insert_mail_change_log_in_tx(
-            tx,
-            tenant_id,
-            Some(organizer_account_id),
-            None,
-            "calendar_event",
-            event_id,
-            "updated",
-            modseq,
-            &affected_principals,
-            serde_json::json!({
-                "collectionId": calendar_id,
-                "objectUid": uid,
-                "meetingResponse": response.method,
-                "counterProposal": counter_proposal,
-            }),
-        )
-        .await?;
-        Self::emit_collaboration_change(
-            tx,
-            tenant_id,
-            CanonicalChangeCategory::Calendar,
-            organizer_account_id,
-        )
-        .await?;
-        self.insert_audit(
-            tx,
-            tenant_id,
-            AuditEntryInput {
-                actor: mail_from.to_string(),
-                action: "calendar.meeting-response.received".to_string(),
-                subject: uid,
-            },
         )
         .await?;
         Ok(())
@@ -943,6 +895,90 @@ fn hash_sieve_vacation_key(vacation: &VacationAction) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+fn calendar_response_sender_matches(
+    attendee_email: &str,
+    envelope_from: &str,
+    header_from: Option<&str>,
+) -> bool {
+    let attendee_email = crate::normalize_email(attendee_email);
+    attendee_email == crate::normalize_email(envelope_from)
+        && header_from
+            .is_some_and(|header_from| attendee_email == crate::normalize_email(header_from))
+}
+
+fn calendar_response_organizer_matches(
+    response_organizer_email: Option<&str>,
+    mailbox_owner_email: &str,
+) -> bool {
+    response_organizer_email.is_none_or(|organizer_email| {
+        crate::normalize_email(organizer_email) == crate::normalize_email(mailbox_owner_email)
+    })
+}
+
+fn calendar_event_organizer_matches_mailbox(
+    participants: &crate::CalendarParticipantsMetadata,
+    organizer_json: &str,
+    mailbox_owner_email: &str,
+) -> bool {
+    let mailbox_owner_email = crate::normalize_email(mailbox_owner_email);
+    let mut organizer_emails = Vec::new();
+    if let Some(organizer) = participants.organizer.as_ref() {
+        let Some(email) = normalize_calendar_organizer_email(&organizer.email) else {
+            return false;
+        };
+        organizer_emails.push(email);
+    }
+
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(organizer_json) else {
+        return false;
+    };
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    if let Some(value) = object.get("email") {
+        let Some(email) = value.as_str().and_then(normalize_calendar_organizer_email) else {
+            return false;
+        };
+        organizer_emails.push(email);
+    }
+    if let Some(value) = object.get("sendTo") {
+        let Some(email) = value
+            .as_object()
+            .and_then(|send_to| send_to.get("imip"))
+            .and_then(serde_json::Value::as_str)
+            .and_then(normalize_calendar_organizer_email)
+        else {
+            return false;
+        };
+        organizer_emails.push(email);
+    }
+    !organizer_emails.is_empty()
+        && organizer_emails
+            .iter()
+            .all(|organizer_email| organizer_email == &mailbox_owner_email)
+}
+
+fn normalize_calendar_organizer_email(value: &str) -> Option<String> {
+    let value = value.trim();
+    let value = value
+        .get(.."mailto:".len())
+        .filter(|prefix| prefix.eq_ignore_ascii_case("mailto:"))
+        .and_then(|_| value.get("mailto:".len()..))
+        .unwrap_or(value);
+    let email = crate::normalize_email(value);
+    (!email.is_empty()).then_some(email)
+}
+
+fn normalized_inbound_recipients(recipients: &[String]) -> Vec<String> {
+    recipients
+        .iter()
+        .map(|recipient| crate::normalize_email(recipient))
+        .filter(|recipient| !recipient.is_empty())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1013,5 +1049,121 @@ mod tests {
         assert!(response
             .delivered_mailboxes
             .contains(&format!("message:{}", Uuid::nil())));
+    }
+
+    #[test]
+    fn inbound_recipients_are_normalized_deduplicated_and_globally_ordered() {
+        let recipients = vec![
+            " Z@example.test ".to_string(),
+            "a@example.test".to_string(),
+            "A@EXAMPLE.TEST".to_string(),
+            "".to_string(),
+        ];
+
+        assert_eq!(
+            normalized_inbound_recipients(&recipients),
+            vec!["a@example.test".to_string(), "z@example.test".to_string()]
+        );
+        let mut reversed = recipients;
+        reversed.reverse();
+        assert_eq!(
+            normalized_inbound_recipients(&reversed),
+            vec!["a@example.test".to_string(), "z@example.test".to_string()]
+        );
+    }
+
+    #[test]
+    fn meeting_response_requires_the_envelope_and_header_from_to_be_the_attendee() {
+        assert!(calendar_response_sender_matches(
+            "Denis.Ducret@sdic.ch",
+            "denis.ducret@sdic.ch",
+            Some("DENIS.DUCRET@SDIC.CH"),
+        ));
+        assert!(!calendar_response_sender_matches(
+            "denis.ducret@sdic.ch",
+            "forged@example.test",
+            Some("denis.ducret@sdic.ch"),
+        ));
+        assert!(!calendar_response_sender_matches(
+            "denis.ducret@sdic.ch",
+            "denis.ducret@sdic.ch",
+            Some("forged@example.test"),
+        ));
+        assert!(!calendar_response_sender_matches(
+            "denis.ducret@sdic.ch",
+            "denis.ducret@sdic.ch",
+            None,
+        ));
+    }
+
+    #[test]
+    fn meeting_response_organizer_must_match_the_receiving_mailbox_when_present() {
+        assert!(calendar_response_organizer_matches(
+            None,
+            "organizer@example.test"
+        ));
+        assert!(calendar_response_organizer_matches(
+            Some("ORGANIZER@example.test"),
+            "organizer@example.test",
+        ));
+        assert!(!calendar_response_organizer_matches(
+            Some("other@example.test"),
+            "organizer@example.test",
+        ));
+    }
+
+    #[test]
+    fn meeting_response_only_mutates_the_organizers_canonical_event_copy() {
+        let organizer_copy = crate::CalendarParticipantsMetadata {
+            organizer: Some(crate::CalendarOrganizerMetadata {
+                email: "organizer@example.test".to_string(),
+                common_name: "Organizer".to_string(),
+            }),
+            attendees: Vec::new(),
+        };
+        assert!(!calendar_event_organizer_matches_mailbox(
+            &organizer_copy,
+            r#"{"email":"other@example.test"}"#,
+            "ORGANIZER@example.test",
+        ));
+        assert!(calendar_event_organizer_matches_mailbox(
+            &organizer_copy,
+            r#"{"email":"ORGANIZER@example.test"}"#,
+            "organizer@example.test",
+        ));
+
+        let attendee_copy = crate::CalendarParticipantsMetadata {
+            organizer: Some(crate::CalendarOrganizerMetadata {
+                email: "external@example.test".to_string(),
+                common_name: "External".to_string(),
+            }),
+            attendees: Vec::new(),
+        };
+        assert!(!calendar_event_organizer_matches_mailbox(
+            &attendee_copy,
+            r#"{"email":"organizer@example.test"}"#,
+            "organizer@example.test",
+        ));
+
+        assert!(calendar_event_organizer_matches_mailbox(
+            &crate::CalendarParticipantsMetadata::default(),
+            r#"{"email":"organizer@example.test"}"#,
+            "organizer@example.test",
+        ));
+        assert!(calendar_event_organizer_matches_mailbox(
+            &crate::CalendarParticipantsMetadata::default(),
+            r#"{"sendTo":{"imip":"MAILTO:ORGANIZER@example.test"}}"#,
+            "organizer@example.test",
+        ));
+        assert!(!calendar_event_organizer_matches_mailbox(
+            &crate::CalendarParticipantsMetadata::default(),
+            "{}",
+            "organizer@example.test",
+        ));
+        assert!(!calendar_event_organizer_matches_mailbox(
+            &crate::CalendarParticipantsMetadata::default(),
+            r#"{"sendTo":{"imip":"not-a-mailbox"}}"#,
+            "organizer@example.test",
+        ));
     }
 }

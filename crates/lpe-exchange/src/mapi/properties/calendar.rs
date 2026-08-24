@@ -2,6 +2,7 @@ mod meeting;
 mod projection;
 
 use super::*;
+pub(in crate::mapi) use meeting::materialize_owner_meeting_organizer;
 use meeting::{appointment_state_flags, organizer_json_from_mapi, response_status};
 pub(in crate::mapi) use projection::*;
 
@@ -300,24 +301,16 @@ pub(super) fn calendar_global_object_id(event: &AccessibleEvent) -> Vec<u8> {
     calendar_global_object_id_from_uid(&event.uid, event.id)
 }
 
+pub(super) fn calendar_clean_global_object_id(event: &AccessibleEvent) -> Vec<u8> {
+    calendar_clean_global_object_id_from_uid(&event.uid, event.id)
+}
+
 pub(super) fn calendar_global_object_id_from_uid(uid: &str, fallback_id: Uuid) -> Vec<u8> {
-    let encoded = uid.strip_prefix("mapi-goid:").or_else(|| {
-        (uid.len() >= 82
-            && uid.len() % 2 == 0
-            && uid.as_bytes().iter().all(u8::is_ascii_hexdigit)
-            && uid
-                .get(..32)
-                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(
-                    "040000008200E00074C5B7101A82E008",
-                )))
-        .then_some(uid)
-    });
-    if let Some(encoded) = encoded {
-        // [MS-OXCICAL] section 2.1.3.1.1.20.26: a native EncodedGlobalId UID
-        // is already the hexadecimal GlobalObjectId wire value.
-        if let Some(value) = hex_to_bytes(encoded) {
-            return value;
-        }
+    // [MS-OXCICAL] section 2.1.3.1.1.20.26: a native EncodedGlobalId UID
+    // is already the hexadecimal GlobalObjectId wire value, but only a full
+    // structure with a consistent Size field is safe to project as binary.
+    if let Some(value) = lpe_storage::decode_calendar_global_object_id_uid(uid) {
+        return value;
     }
     let uid = if uid.is_empty() {
         fallback_id.to_string()
@@ -339,6 +332,14 @@ pub(super) fn calendar_global_object_id_from_uid(uid: &str, fallback_id: Uuid) -
     value.extend_from_slice(&0u64.to_le_bytes());
     value.extend_from_slice(&(data.len().min(u32::MAX as usize) as u32).to_le_bytes());
     value.extend_from_slice(&data);
+    value
+}
+
+pub(super) fn calendar_clean_global_object_id_from_uid(uid: &str, fallback_id: Uuid) -> Vec<u8> {
+    let mut value = calendar_global_object_id_from_uid(uid, fallback_id);
+    // [MS-OXOCAL] section 2.2.1.28: CleanGlobalObjectId differs from
+    // GlobalObjectId only by zeroing the occurrence Year/Month/Day fields.
+    value[16..20].fill(0);
     value
 }
 
@@ -565,10 +566,8 @@ pub(in crate::mapi) fn event_input_from_mapi(
             .get(&PID_LID_GLOBAL_OBJECT_ID_TAG)
             .or_else(|| properties.get(&PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG))
             .and_then(|value| match value {
-                MapiValue::Binary(value) => Some(format!(
-                    "mapi-goid:{}",
-                    lpe_domain::crypto::hex_lower(value)
-                )),
+                MapiValue::Binary(value) => lpe_storage::calendar_uid_from_global_object_id(value)
+                    .map(|uid| lpe_storage::normalize_calendar_meeting_uid(&uid)),
                 _ => None,
             })
             .unwrap_or_else(|| existing.uid.clone()),

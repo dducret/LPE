@@ -15,7 +15,7 @@ use lpe_storage::{
     PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
     PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree,
     RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument,
-    Storage, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    Storage, SubmissionSourcePatch, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
     UpdatePublicFolderInput, UpsertClientContactInput, UpsertClientEventInput,
     UpsertClientNoteInput, UpsertClientTaskInput, UpsertConversationActionInput,
     UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
@@ -1503,6 +1503,13 @@ pub trait ExchangeStore: AccountAuthStore {
     fn submit_message<'a>(
         &'a self,
         input: SubmitMessageInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, SubmittedMessage>;
+
+    fn submit_message_with_source_patch<'a>(
+        &'a self,
+        input: SubmitMessageInput,
+        patch: SubmissionSourcePatch,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, SubmittedMessage>;
 

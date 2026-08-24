@@ -4,13 +4,14 @@ use anyhow::{Context, Result};
 use lpe_domain::InboundDeliveryRequest;
 use lpe_storage::{
     mapi_store_identity::{mapi_store_id, mapi_xid},
-    AttachmentUploadInput, AuditEntryInput, CancelSubmissionResult, CollaborationGrantInput,
-    CollaborationResourceKind, CreatePublicFolderTreeInput, DelegatePreferencesPatch,
-    JmapImportedEmailInput, JmapMailboxCreateInput, JmapMailboxUpdateInput,
-    MailboxDelegationGrantInput, MailboxFolderDelegationGrantInput,
-    ManagedRetentionFolderCreateInput, NewAccount, NewDomain, NewMailbox, NewPstTransferJob,
-    PublicFolderPerUserStatePatch, PublicFolderPermissionInput, PublicFolderReplicaInput,
-    ReminderQuery, SenderDelegationGrantInput, SenderDelegationRight, Storage, SubmitMessageInput,
+    normalize_calendar_meeting_uid, AttachmentUploadInput, AuditEntryInput, CancelSubmissionResult,
+    CollaborationGrantInput, CollaborationResourceKind, CreatePublicFolderTreeInput,
+    DelegatePreferencesPatch, JmapEmailFollowupUpdate, JmapImportedEmailInput,
+    JmapMailboxCreateInput, JmapMailboxUpdateInput, MailboxDelegationGrantInput,
+    MailboxFolderDelegationGrantInput, ManagedRetentionFolderCreateInput, NewAccount, NewDomain,
+    NewMailbox, NewPstTransferJob, PublicFolderPerUserStatePatch, PublicFolderPermissionInput,
+    PublicFolderReplicaInput, ReminderQuery, SenderDelegationGrantInput, SenderDelegationRight,
+    Storage, SubmissionMessageCustomPropertyInput, SubmissionSourcePatch, SubmitMessageInput,
     SubmittedMessage, SubmittedRecipientInput, UpsertClientEventInput, UpsertClientNoteInput,
     UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
@@ -206,6 +207,18 @@ async fn run_runtime_drift_validation(pool: &PgPool) -> Result<()> {
 
         collect(
             &mut failures,
+            "outbound meeting request Event correlation boundary",
+            exercise_outbound_meeting_request_correlation(&storage, pool, &fixture).await,
+        );
+
+        collect(
+            &mut failures,
+            "atomic submission source claim",
+            exercise_atomic_submission_source_claim(&storage, pool, &fixture).await,
+        );
+
+        collect(
+            &mut failures,
             "canonical identity allocation beyond MAPI",
             exercise_canonical_identity_allocation(&storage, pool, &fixture).await,
         );
@@ -328,7 +341,7 @@ async fn assert_schema_metadata(pool: &PgPool) -> Result<()> {
     .await
     .context("read schema_metadata after applying schema.sql")?;
     anyhow::ensure!(
-        version == "0.5.3-sql",
+        version == "0.5.2-sql",
         "unexpected schema version {version}"
     );
     Ok(())
@@ -1287,7 +1300,8 @@ async fn exercise_inbound_mime_canonical_body_path(
     let trace_id = format!("runtime-inbound-{}", Uuid::new_v4());
     let raw_message = format!(
         concat!(
-            "From: sender@example.test\r\n",
+            "From: \"Header, Author\" <header-author@example.test>, Secondary Author <secondary@example.test>\r\n",
+            "Sender: Transport Agent <header-sender@example.test>\r\n",
             "To: {}\r\n",
             "Subject: Re: Test 10:57\r\n",
             "Message-ID: <{}@example.test>\r\n",
@@ -1305,7 +1319,7 @@ async fn exercise_inbound_mime_canonical_body_path(
             trace_id: trace_id.clone(),
             peer: "192.0.2.10:25".to_string(),
             helo: "mx.example.test".to_string(),
-            mail_from: "sender@example.test".to_string(),
+            mail_from: "smtp-envelope@example.test".to_string(),
             rcpt_to: vec![fixture.account_email.clone()],
             subject: "Re: Test 10:57".to_string(),
             body_text: "Test r\u{fffd}ussi 10:58".to_string(),
@@ -1315,9 +1329,9 @@ async fn exercise_inbound_mime_canonical_body_path(
         .await
         .context("deliver inbound ISO-8859-1 MIME fixture")?;
 
-    let stored_body = sqlx::query_scalar::<_, String>(
+    let stored = sqlx::query(
         r#"
-        SELECT b.body_text
+        SELECT b.message_id, b.body_text
         FROM message_bodies b
         JOIN message_headers h
           ON h.tenant_id = b.tenant_id
@@ -1332,10 +1346,28 @@ async fn exercise_inbound_mime_canonical_body_path(
     .fetch_one(pool)
     .await
     .context("load canonical inbound message body")?;
+    let message_id = stored.try_get::<Uuid, _>("message_id")?;
+    let stored_body = stored.try_get::<String, _>("body_text")?;
 
     anyhow::ensure!(
         stored_body == "Test réussi 10:58",
         "core trusted the edge body projection instead of raw MIME: {stored_body:?}"
+    );
+
+    let email = storage
+        .fetch_jmap_emails(fixture.account_id, &[message_id])
+        .await
+        .context("fetch ordinary inbound message through JMAP projection")?
+        .into_iter()
+        .next()
+        .context("ordinary inbound message missing from JMAP projection")?;
+    anyhow::ensure!(
+        email.from_address == "header-author@example.test"
+            && email.from_display.as_deref() == Some("Header, Author")
+            && email.sender_address.as_deref() == Some("header-sender@example.test")
+            && email.sender_display.as_deref() == Some("Transport Agent")
+            && email.sender_authorization_kind == "external",
+        "JMAP projection did not preserve distinct RFC From/Sender independently of SMTP MAIL FROM"
     );
     Ok(())
 }
@@ -1349,7 +1381,13 @@ async fn exercise_inbound_calendar_meeting_response_path(
         .fetch_accessible_calendar_collections(fixture.account_id)
         .await
         .context("ensure organizer default calendar")?;
-    let uid = "mapi-goid:040000008200e00074c5b7101a82e008000000000000000010000000";
+    let encoded_uid = "040000008200E00074C5B7101A82E00800000000C08470CD9E31DD01000000000000000010000000ECFF8AEC00CE584390F914BF6A87F955";
+    let uid = format!("MAPI-GOID:{encoded_uid}");
+    let response_uid = format!(
+        "{}{}",
+        &encoded_uid[..32],
+        encoded_uid[32..].to_ascii_lowercase()
+    );
     let mut input = runtime_calendar_event_input(
         fixture.account_id,
         None,
@@ -1359,32 +1397,42 @@ async fn exercise_inbound_calendar_meeting_response_path(
     input.date = "2026-08-24".to_string();
     input.time = "06:30".to_string();
     input.duration_minutes = 30;
+    input.sequence = 2;
     input.attendees = "Denis Ducret".to_string();
-    input.attendees_json = r#"{
-        "organizer":{"email":"alice@example.test","common_name":"Alice Drift"},
-        "attendees":[{
-            "email":"denis.ducret@sdic.ch",
-            "common_name":"Denis Ducret",
-            "role":"REQ-PARTICIPANT",
-            "partstat":"needs-action",
-            "rsvp":true
+    let organizer_attendees_json = serde_json::json!({
+        "organizer": {
+            "email": fixture.account_email.clone(),
+            "common_name": "Alice Drift"
+        },
+        "attendees": [{
+            "email": "denis.ducret@sdic.ch",
+            "common_name": "Denis Ducret",
+            "role": "REQ-PARTICIPANT",
+            "partstat": "needs-action",
+            "rsvp": true
         }]
-    }"#
+    })
     .to_string();
+    input.attendees_json = organizer_attendees_json.clone();
     let event = storage
         .create_accessible_event(fixture.account_id, None, input)
         .await
         .context("create organizer event for inbound meeting response")?;
+    anyhow::ensure!(
+        event.uid == normalize_calendar_meeting_uid(&uid),
+        "calendar Event writers must canonicalize MAPI GlobalObjectId UIDs"
+    );
 
     let trace_id = format!("runtime-counter-{}", Uuid::new_v4());
     let raw_message = format!(
         concat!(
             "From: Denis Ducret <denis.ducret@sdic.ch>\r\n",
+            "Sender: Calendar Relay <calendar-relay@sdic.ch>\r\n",
             "To: {}\r\n",
             "Subject: New Time Proposed: Inbound meeting response correlation\r\n",
             "Message-ID: <{}@sdic.ch>\r\n",
             "MIME-Version: 1.0\r\n",
-            "Content-Type: multipart/mixed; boundary=counter-boundary\r\n",
+            "Content-Type: multipart/alternative; boundary=counter-boundary\r\n",
             "\r\n",
             "--counter-boundary\r\n",
             "Content-Type: text/plain; charset=UTF-8\r\n",
@@ -1392,7 +1440,6 @@ async fn exercise_inbound_calendar_meeting_response_path(
             "Denis proposes a new time.\r\n",
             "--counter-boundary\r\n",
             "Content-Type: text/calendar; method=COUNTER; charset=UTF-8\r\n",
-            "Content-Disposition: attachment; filename=calendar-2.ics\r\n",
             "\r\n",
             "BEGIN:VCALENDAR\r\n",
             "METHOD:COUNTER\r\n",
@@ -1409,17 +1456,135 @@ async fn exercise_inbound_calendar_meeting_response_path(
             "DTEND;TZID=Greenwich Standard Time:20260824T073000\r\n",
             "X-MS-OLK-ORIGINALSTART;TZID=Greenwich Standard Time:20260824T063000\r\n",
             "X-MS-OLK-ORIGINALEND;TZID=Greenwich Standard Time:20260824T070000\r\n",
+            "SEQUENCE:2\r\n",
+            "DTSTAMP:20260824T060000Z\r\n",
             "UID:{}\r\n",
             "END:VEVENT\r\n",
             "END:VCALENDAR\r\n",
             "--counter-boundary--\r\n"
         ),
-        fixture.account_email, trace_id, uid
+        fixture.account_email, trace_id, response_uid
     )
     .into_bytes();
+    let wrong_organizer_message = String::from_utf8(raw_message.clone())?
+        .replacen(
+            "BEGIN:VEVENT\r\n",
+            "BEGIN:VEVENT\r\nORGANIZER:mailto:other-organizer@example.test\r\n",
+            1,
+        )
+        .into_bytes();
+    for (case_name, rejected_mail_from, rejected_raw_message, delete_classification) in [
+        (
+            "sender-mismatch",
+            "other-attendee@example.test",
+            raw_message.clone(),
+            true,
+        ),
+        (
+            "organizer-mismatch",
+            "denis.ducret@sdic.ch",
+            wrong_organizer_message,
+            false,
+        ),
+    ] {
+        let rejected_trace_id = format!("runtime-counter-{case_name}-{}", Uuid::new_v4());
+        storage
+            .deliver_inbound_message(InboundDeliveryRequest {
+                trace_id: rejected_trace_id.clone(),
+                peer: "192.0.2.10:25".to_string(),
+                helo: "mx.example.test".to_string(),
+                mail_from: rejected_mail_from.to_string(),
+                rcpt_to: vec![fixture.account_email.clone()],
+                subject: "Rejected inbound meeting response".to_string(),
+                body_text: "This response must remain ordinary mail.".to_string(),
+                internet_message_id: None,
+                raw_message: rejected_raw_message,
+            })
+            .await
+            .with_context(|| format!("deliver rejected {case_name} meeting response"))?;
+        let rejected = sqlx::query(
+            r#"
+            SELECT message.id, message.authorized_calendar_response_content_sha256,
+                   classification.classification
+            FROM message_headers trace
+            JOIN messages message
+              ON message.tenant_id = trace.tenant_id
+             AND message.id = trace.message_id
+            JOIN calendar_mail_classifications classification
+              ON classification.tenant_id = message.tenant_id
+             AND classification.message_id = message.id
+            WHERE trace.tenant_id = $1
+              AND lower(trace.header_name) = 'x-lpe-ct-trace-id'
+              AND trace.header_value = $2
+            "#,
+        )
+        .bind(fixture.tenant_id)
+        .bind(&rejected_trace_id)
+        .fetch_one(pool)
+        .await?;
+        let rejected_message_id: Uuid = rejected.try_get("id")?;
+        anyhow::ensure!(
+            rejected.try_get::<String, _>("classification")? == "none"
+                && rejected
+                    .try_get::<Option<String>, _>("authorized_calendar_response_content_sha256",)?
+                    .is_none(),
+            "rejected {case_name} response retained actionable authorization"
+        );
+        let rejected_outcome =
+            meeting_response_outcome_for_trace(pool, fixture.tenant_id, &rejected_trace_id).await?;
+        if case_name == "sender-mismatch" {
+            anyhow::ensure!(
+                rejected_outcome.is_none(),
+                "sender-authentication failures must not create response outcome audits"
+            );
+        } else {
+            anyhow::ensure!(
+                rejected_outcome
+                    == Some((
+                        "calendar.meeting-response.ignored-organizer-mismatch".to_string(),
+                        false,
+                    )),
+                "organizer mismatch did not record the bounded unprocessed outcome"
+            );
+        }
+        if delete_classification {
+            sqlx::query(
+                "DELETE FROM calendar_mail_classifications WHERE tenant_id = $1 AND message_id = $2",
+            )
+            .bind(fixture.tenant_id)
+            .bind(rejected_message_id)
+            .execute(pool)
+            .await?;
+        } else {
+            sqlx::query(
+                r#"
+                UPDATE calendar_mail_classifications
+                SET needs_reclassification = TRUE,
+                    scheduling_mime_part_id = NULL,
+                    updated_at = NOW()
+                WHERE tenant_id = $1 AND message_id = $2
+                "#,
+            )
+            .bind(fixture.tenant_id)
+            .bind(rejected_message_id)
+            .execute(pool)
+            .await?;
+        }
+        let rejected_email = storage
+            .fetch_jmap_emails(fixture.account_id, &[rejected_message_id])
+            .await?
+            .into_iter()
+            .next()
+            .context("load rejected response after classification repair")?;
+        anyhow::ensure!(
+            rejected_email.calendar_meeting_response.is_none()
+                && rejected_email.calendar_meeting_request.is_none(),
+            "lazy repair promoted rejected {case_name} response to actionable mail"
+        );
+    }
     storage
         .deliver_inbound_message(InboundDeliveryRequest {
-            trace_id,
+            trace_id: trace_id.clone(),
             peer: "192.0.2.10:25".to_string(),
             helo: "mx.example.test".to_string(),
             mail_from: "denis.ducret@sdic.ch".to_string(),
@@ -1431,6 +1596,601 @@ async fn exercise_inbound_calendar_meeting_response_path(
         })
         .await
         .context("deliver inbound COUNTER response")?;
+    let applied_counter_outcome =
+        meeting_response_outcome_for_trace(pool, fixture.tenant_id, &trace_id).await?;
+    anyhow::ensure!(
+        applied_counter_outcome == Some(("calendar.meeting-response.applied".to_string(), true,)),
+        "applied COUNTER did not record the bounded processed outcome: {applied_counter_outcome:?}"
+    );
+
+    let stored_identity = sqlx::query(
+        r#"
+        SELECT
+            sender_from.address AS from_address,
+            sender_from.display_name AS from_display,
+            transport_sender.address AS sender_address,
+            transport_sender.display_name AS sender_display
+        FROM message_headers trace
+        JOIN message_recipients sender_from
+          ON sender_from.tenant_id = trace.tenant_id
+         AND sender_from.message_id = trace.message_id
+         AND sender_from.role = 'from'
+        JOIN message_recipients transport_sender
+          ON transport_sender.tenant_id = trace.tenant_id
+         AND transport_sender.message_id = trace.message_id
+         AND transport_sender.role = 'sender'
+        WHERE trace.tenant_id = $1
+          AND lower(trace.header_name) = 'x-lpe-ct-trace-id'
+          AND trace.header_value = $2
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(&trace_id)
+    .fetch_one(pool)
+    .await
+    .context("load preserved inbound From and Sender identities")?;
+    anyhow::ensure!(
+        stored_identity.try_get::<String, _>("from_address")? == "denis.ducret@sdic.ch"
+            && stored_identity
+                .try_get::<Option<String>, _>("from_display")?
+                .as_deref()
+                == Some("Denis Ducret")
+            && stored_identity.try_get::<String, _>("sender_address")? == "calendar-relay@sdic.ch"
+            && stored_identity
+                .try_get::<Option<String>, _>("sender_display")?
+                .as_deref()
+                == Some("Calendar Relay"),
+        "inbound RFC From and distinct Sender identities were not preserved"
+    );
+
+    let classification = sqlx::query(
+        r#"
+        SELECT
+            classification.message_id,
+            classification.classification,
+            classification.parser_revision,
+            classification.classification_generation,
+            classification.needs_reclassification,
+            classification.scheduling_mime_part_id,
+            message.authorized_calendar_response_content_sha256,
+            message.calendar_response_processed,
+            projection.applied_generation,
+            part.is_scheduling_body,
+            part.content_disposition AS mime_disposition,
+            attachment.disposition AS attachment_disposition,
+            attachment.id AS attachment_id,
+            blob.content_sha256 AS selected_content_sha256
+        FROM message_headers trace
+        JOIN messages message
+          ON message.tenant_id = trace.tenant_id
+         AND message.id = trace.message_id
+        JOIN calendar_mail_classifications classification
+          ON classification.tenant_id = trace.tenant_id
+         AND classification.message_id = trace.message_id
+        JOIN mime_parts part
+          ON part.tenant_id = classification.tenant_id
+         AND part.message_id = classification.message_id
+         AND part.id = classification.scheduling_mime_part_id
+        JOIN calendar_mail_classification_projections projection
+          ON projection.tenant_id = classification.tenant_id
+         AND projection.account_id = $3
+         AND projection.message_id = classification.message_id
+        JOIN attachments attachment
+          ON attachment.tenant_id = classification.tenant_id
+         AND attachment.account_id = $3
+         AND attachment.message_id = classification.message_id
+         AND attachment.mime_part_id = classification.scheduling_mime_part_id
+        JOIN blobs blob
+          ON blob.tenant_id = part.tenant_id
+         AND blob.domain_id = part.domain_id
+         AND blob.id = part.blob_id
+         AND blob.blob_kind = part.blob_kind
+        WHERE trace.tenant_id = $1
+          AND lower(trace.header_name) = 'x-lpe-ct-trace-id'
+          AND trace.header_value = $2
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(&trace_id)
+    .bind(fixture.account_id)
+    .fetch_one(pool)
+    .await
+    .context("load eager inbound calendar classification")?;
+    anyhow::ensure!(
+        classification.try_get::<String, _>("classification")? == "response"
+            && classification.try_get::<i32, _>("parser_revision")? > 0
+            && classification.try_get::<i64, _>("classification_generation")?
+                == classification.try_get::<i64, _>("applied_generation")?
+            && !classification.try_get::<bool, _>("needs_reclassification")?
+            && classification
+                .try_get::<Option<Uuid>, _>("scheduling_mime_part_id")?
+                .is_some()
+            && classification.try_get::<bool, _>("is_scheduling_body")?
+            && classification.try_get::<bool, _>("calendar_response_processed")?
+            && classification
+                .try_get::<Option<String>, _>("authorized_calendar_response_content_sha256",)?
+                == Some(classification.try_get::<String, _>("selected_content_sha256")?)
+            && classification
+                .try_get::<Option<String>, _>("mime_disposition")?
+                .is_none()
+            && classification.try_get::<String, _>("attachment_disposition")? == "inline",
+        "inbound meeting response classification was not persisted against its exact MIME part"
+    );
+
+    let response_message_id: Uuid = classification.try_get("message_id")?;
+    let response_attachment_id: Uuid = classification.try_get("attachment_id")?;
+    let response_file_reference =
+        format!("attachment:{response_message_id}:{response_attachment_id}");
+    expect_constraint_failure(
+        "calendar classification rejects a request metadata object without a request payload",
+        sqlx::query(
+            r#"
+            UPDATE calendar_mail_classifications
+            SET classification = 'request',
+                metadata_json = '{"kind":"request"}'::jsonb
+            WHERE tenant_id = $1 AND message_id = $2
+            "#,
+        )
+        .bind(fixture.tenant_id)
+        .bind(response_message_id)
+        .execute(pool)
+        .await,
+    )?;
+    let modseq_before_repair = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT MAX(modseq)
+        FROM mailbox_messages
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND message_id = $3
+          AND visibility = 'visible'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(response_message_id)
+    .fetch_one(pool)
+    .await?;
+    sqlx::query(
+        r#"
+        DELETE FROM calendar_mail_classifications
+        WHERE tenant_id = $1 AND message_id = $2
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(response_message_id)
+    .execute(pool)
+    .await?;
+    let repaired_email = storage
+        .fetch_jmap_emails(fixture.account_id, &[response_message_id])
+        .await?
+        .into_iter()
+        .next()
+        .context("load lazily repaired meeting response")?;
+    anyhow::ensure!(
+        repaired_email
+            .calendar_meeting_response
+            .as_ref()
+            .is_some_and(|response| response.server_processed),
+        "lazy classification repair did not restore the authorized processed meeting response"
+    );
+    let repaired = sqlx::query(
+        r#"
+        SELECT classification.classification_generation,
+               projection.applied_generation,
+               MAX(membership.modseq) AS modseq
+        FROM calendar_mail_classifications classification
+        JOIN calendar_mail_classification_projections projection
+          ON projection.tenant_id = classification.tenant_id
+         AND projection.account_id = $2
+         AND projection.message_id = classification.message_id
+        JOIN mailbox_messages membership
+          ON membership.tenant_id = classification.tenant_id
+         AND membership.account_id = $2
+         AND membership.message_id = classification.message_id
+         AND membership.visibility = 'visible'
+        WHERE classification.tenant_id = $1
+          AND classification.message_id = $3
+        GROUP BY classification.classification_generation,
+                 projection.applied_generation
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(response_message_id)
+    .fetch_one(pool)
+    .await?;
+    let repaired_modseq: i64 = repaired.try_get("modseq")?;
+    anyhow::ensure!(
+        repaired.try_get::<i64, _>("classification_generation")?
+            == repaired.try_get::<i64, _>("applied_generation")?
+            && repaired_modseq > modseq_before_repair,
+        "lazy actionable classification repair was not versioned and acknowledged"
+    );
+    storage
+        .fetch_jmap_emails(fixture.account_id, &[response_message_id])
+        .await?;
+    let second_fetch_modseq = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT MAX(modseq)
+        FROM mailbox_messages
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND message_id = $3
+          AND visibility = 'visible'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(response_message_id)
+    .fetch_one(pool)
+    .await?;
+    anyhow::ensure!(
+        second_fetch_modseq == repaired_modseq,
+        "an already-applied classification generation rotated the message twice"
+    );
+
+    let target_account_id = Uuid::new_v4();
+    let target_mailbox_id = Uuid::new_v4();
+    let domain_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT primary_domain_id FROM accounts WHERE tenant_id = $1 AND id = $2",
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .fetch_one(pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO accounts (id, tenant_id, primary_domain_id, primary_email, display_name)
+        VALUES ($1, $2, $3, $4, 'Calendar classification copy target')
+        "#,
+    )
+    .bind(target_account_id)
+    .bind(fixture.tenant_id)
+    .bind(domain_id)
+    .bind(format!(
+        "classification-copy-{}@example.test",
+        Uuid::new_v4().simple()
+    ))
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO mailboxes (
+            id, tenant_id, account_id, role, display_name, sort_order, uid_validity
+        )
+        VALUES ($1, $2, $3, 'inbox', 'Inbox', 0, 1)
+        "#,
+    )
+    .bind(target_mailbox_id)
+    .bind(fixture.tenant_id)
+    .bind(target_account_id)
+    .execute(pool)
+    .await?;
+    storage
+        .copy_jmap_email_between_accounts(
+            fixture.account_id,
+            target_account_id,
+            response_message_id,
+            target_mailbox_id,
+            audit(
+                "alice@example.test",
+                "calendar-classification-copy",
+                "runtime all-account calendar projection",
+            ),
+        )
+        .await?;
+    let original_target_membership = sqlx::query(
+        r#"
+        SELECT id, modseq
+        FROM mailbox_messages
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND message_id = $3
+          AND visibility = 'visible'
+        ORDER BY id
+        LIMIT 1
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(target_account_id)
+    .bind(response_message_id)
+    .fetch_one(pool)
+    .await?;
+    let original_target_membership_id: Uuid = original_target_membership.try_get("id")?;
+    let original_target_modseq: i64 = original_target_membership.try_get("modseq")?;
+    let pending_copy_generation = sqlx::query_scalar::<_, i64>(
+        r#"
+        UPDATE calendar_mail_classifications
+        SET classification_generation = classification_generation + 1,
+            requires_projection_rotation = TRUE,
+            updated_at = NOW()
+        WHERE tenant_id = $1 AND message_id = $2
+        RETURNING classification_generation
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(response_message_id)
+    .fetch_one(pool)
+    .await?;
+    let second_target_mailbox_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO mailboxes (
+            id, tenant_id, account_id, role, display_name, sort_order, uid_validity
+        )
+        VALUES ($1, $2, $3, 'custom', 'Meeting Archive', 1, 2)
+        "#,
+    )
+    .bind(second_target_mailbox_id)
+    .bind(fixture.tenant_id)
+    .bind(target_account_id)
+    .execute(pool)
+    .await?;
+    storage
+        .copy_jmap_email(
+            target_account_id,
+            response_message_id,
+            second_target_mailbox_id,
+            audit(
+                "alice@example.test",
+                "calendar-classification-second-copy",
+                "runtime pending generation copy",
+            ),
+        )
+        .await?;
+    let pending_copy_result = sqlx::query(
+        r#"
+        SELECT projection.applied_generation,
+               source_projection.applied_generation AS source_generation,
+               membership.modseq
+        FROM calendar_mail_classification_projections projection
+        JOIN calendar_mail_classification_projections source_projection
+          ON source_projection.tenant_id = projection.tenant_id
+         AND source_projection.account_id = $5
+         AND source_projection.message_id = projection.message_id
+        JOIN mailbox_messages membership
+          ON membership.tenant_id = projection.tenant_id
+         AND membership.account_id = projection.account_id
+         AND membership.message_id = projection.message_id
+         AND membership.id = $4
+        WHERE projection.tenant_id = $1
+          AND projection.account_id = $2
+          AND projection.message_id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(target_account_id)
+    .bind(response_message_id)
+    .bind(original_target_membership_id)
+    .bind(fixture.account_id)
+    .fetch_one(pool)
+    .await?;
+    anyhow::ensure!(
+        pending_copy_result.try_get::<i64, _>("applied_generation")?
+            == pending_copy_generation
+            && pending_copy_result.try_get::<i64, _>("source_generation")?
+                == pending_copy_generation
+            && pending_copy_result.try_get::<i64, _>("modseq")? > original_target_modseq,
+        "a second mailbox copy acknowledged a pending generation before rotating the existing membership"
+    );
+    let target_modseq_before_invalidation = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT MAX(modseq)
+        FROM mailbox_messages
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND message_id = $3
+          AND visibility = 'visible'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(target_account_id)
+    .bind(response_message_id)
+    .fetch_one(pool)
+    .await?;
+    let shared_attachment_delete = storage
+        .delete_message_attachment(
+            fixture.account_id,
+            &response_file_reference,
+            audit(
+                "alice@example.test",
+                "calendar-transport-delete",
+                "runtime actionable-to-none invalidation",
+            ),
+        )
+        .await;
+    anyhow::ensure!(
+        shared_attachment_delete.is_err(),
+        "shared scheduling content must not be mutated while visible in another account"
+    );
+    let invalidated_part = sqlx::query(
+        r#"
+        WITH selected AS (
+            UPDATE mime_parts part
+            SET is_scheduling_body = FALSE
+            FROM attachments attachment
+            WHERE part.tenant_id = $1
+              AND part.message_id = $2
+              AND attachment.tenant_id = part.tenant_id
+              AND attachment.message_id = part.message_id
+              AND attachment.mime_part_id = part.id
+              AND attachment.id = $3
+            RETURNING part.id
+        )
+        UPDATE calendar_mail_classifications classification
+        SET needs_reclassification = TRUE,
+            scheduling_mime_part_id = NULL,
+            updated_at = NOW()
+        WHERE classification.tenant_id = $1
+          AND classification.message_id = $2
+          AND classification.scheduling_mime_part_id = (SELECT id FROM selected)
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(response_message_id)
+    .bind(response_attachment_id)
+    .execute(pool)
+    .await
+    .context("simulate legacy scheduling-role drift for actionable-to-none repair")?;
+    anyhow::ensure!(
+        invalidated_part.rows_affected() == 1,
+        "legacy scheduling-role drift must invalidate exactly one selected MIME part"
+    );
+    let target_email = storage
+        .fetch_jmap_emails(target_account_id, &[response_message_id])
+        .await?
+        .into_iter()
+        .next()
+        .context("load copied email after scheduling-part deletion")?;
+    anyhow::ensure!(
+        target_email.calendar_meeting_response.is_none()
+            && target_email.calendar_meeting_request.is_none(),
+        "actionable-to-none repair left stale meeting metadata in the copied account"
+    );
+    let invalidated = sqlx::query(
+        r#"
+        SELECT classification.classification,
+               classification.classification_generation,
+               source_projection.applied_generation AS source_generation,
+               target_projection.applied_generation AS target_generation,
+               MAX(target_membership.modseq) AS target_modseq
+        FROM calendar_mail_classifications classification
+        JOIN calendar_mail_classification_projections source_projection
+          ON source_projection.tenant_id = classification.tenant_id
+         AND source_projection.account_id = $2
+         AND source_projection.message_id = classification.message_id
+        JOIN calendar_mail_classification_projections target_projection
+          ON target_projection.tenant_id = classification.tenant_id
+         AND target_projection.account_id = $3
+         AND target_projection.message_id = classification.message_id
+        JOIN mailbox_messages target_membership
+          ON target_membership.tenant_id = classification.tenant_id
+         AND target_membership.account_id = $3
+         AND target_membership.message_id = classification.message_id
+         AND target_membership.visibility = 'visible'
+        WHERE classification.tenant_id = $1
+          AND classification.message_id = $4
+        GROUP BY classification.classification,
+                 classification.classification_generation,
+                 source_projection.applied_generation,
+                 target_projection.applied_generation
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(target_account_id)
+    .bind(response_message_id)
+    .fetch_one(pool)
+    .await?;
+    let invalidated_generation: i64 = invalidated.try_get("classification_generation")?;
+    anyhow::ensure!(
+        invalidated.try_get::<String, _>("classification")? == "none"
+            && invalidated_generation > repaired.try_get::<i64, _>("classification_generation")?
+            && invalidated.try_get::<i64, _>("source_generation")? == invalidated_generation
+            && invalidated.try_get::<i64, _>("target_generation")? == invalidated_generation
+            && invalidated.try_get::<i64, _>("target_modseq")? > target_modseq_before_invalidation,
+        "actionable-to-none repair did not rotate and acknowledge every visible account"
+    );
+
+    sqlx::query(
+        r#"
+        UPDATE mailbox_messages
+        SET visibility = 'expunged', expunged_at = NOW(), updated_at = NOW()
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND message_id = $3
+          AND visibility = 'visible'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(target_account_id)
+    .bind(response_message_id)
+    .execute(pool)
+    .await?;
+    let invisible_target_modseq = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT current_modseq
+        FROM account_sync_state
+        WHERE tenant_id = $1 AND account_id = $2 AND category = 'mail'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(target_account_id)
+    .fetch_one(pool)
+    .await?;
+    let recopy_generation = sqlx::query_scalar::<_, i64>(
+        r#"
+        UPDATE calendar_mail_classifications
+        SET classification_generation = classification_generation + 1,
+            requires_projection_rotation = TRUE,
+            updated_at = NOW()
+        WHERE tenant_id = $1 AND message_id = $2
+        RETURNING classification_generation
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(response_message_id)
+    .fetch_one(pool)
+    .await?;
+    let recopy_mailbox_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO mailboxes (
+            id, tenant_id, account_id, role, display_name, sort_order, uid_validity
+        )
+        VALUES ($1, $2, $3, 'custom', 'Meeting Recopy', 2, 3)
+        "#,
+    )
+    .bind(recopy_mailbox_id)
+    .bind(fixture.tenant_id)
+    .bind(target_account_id)
+    .execute(pool)
+    .await?;
+    storage
+        .copy_jmap_email_between_accounts(
+            fixture.account_id,
+            target_account_id,
+            response_message_id,
+            recopy_mailbox_id,
+            audit(
+                "alice@example.test",
+                "calendar-classification-recopy",
+                "runtime persisted invisible projection",
+            ),
+        )
+        .await?;
+    let recopy_state = sqlx::query(
+        r#"
+        SELECT sync.current_modseq, projection.applied_generation,
+               COUNT(membership.id) AS visible_memberships
+        FROM account_sync_state sync
+        JOIN calendar_mail_classification_projections projection
+          ON projection.tenant_id = sync.tenant_id
+         AND projection.account_id = sync.account_id
+         AND projection.message_id = $3
+        LEFT JOIN mailbox_messages membership
+          ON membership.tenant_id = sync.tenant_id
+         AND membership.account_id = sync.account_id
+         AND membership.message_id = $3
+         AND membership.visibility = 'visible'
+        WHERE sync.tenant_id = $1
+          AND sync.account_id = $2
+          AND sync.category = 'mail'
+        GROUP BY sync.current_modseq, projection.applied_generation
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(target_account_id)
+    .bind(response_message_id)
+    .fetch_one(pool)
+    .await?;
+    anyhow::ensure!(
+        recopy_state.try_get::<i64, _>("applied_generation")? == recopy_generation
+            && recopy_state.try_get::<i64, _>("visible_memberships")? == 1
+            && recopy_state.try_get::<i64, _>("current_modseq")? >= invisible_target_modseq + 2,
+        "recopy over an invisible persisted projection suppressed its pending generation rotation"
+    );
 
     let row = sqlx::query(
         r#"
@@ -1474,6 +2234,8 @@ async fn exercise_inbound_calendar_meeting_response_path(
             "METHOD:REPLY\r\n",
             "BEGIN:VEVENT\r\n",
             "ATTENDEE;PARTSTAT=ACCEPTED:mailto:denis.ducret@sdic.ch\r\n",
+            "SEQUENCE:2\r\n",
+            "DTSTAMP:20260824T061000Z\r\n",
             "UID:{}\r\n",
             "END:VEVENT\r\n",
             "END:VCALENDAR\r\n"
@@ -1483,7 +2245,7 @@ async fn exercise_inbound_calendar_meeting_response_path(
     .into_bytes();
     storage
         .deliver_inbound_message(InboundDeliveryRequest {
-            trace_id: reply_trace_id,
+            trace_id: reply_trace_id.clone(),
             peer: "192.0.2.10:25".to_string(),
             helo: "mx.example.test".to_string(),
             mail_from: "denis.ducret@sdic.ch".to_string(),
@@ -1491,7 +2253,7 @@ async fn exercise_inbound_calendar_meeting_response_path(
             subject: "Accepted: Inbound meeting response correlation".to_string(),
             body_text: String::new(),
             internet_message_id: None,
-            raw_message: raw_reply,
+            raw_message: raw_reply.clone(),
         })
         .await
         .context("deliver inbound REPLY response")?;
@@ -1513,9 +2275,348 @@ async fn exercise_inbound_calendar_meeting_response_path(
     anyhow::ensure!(
         reply.try_get::<String, _>("partstat")? == "accepted"
             && reply.try_get::<String, _>("counter_proposal")? == "false"
-            && reply.try_get::<Option<String>, _>("proposed_start")?.is_none()
-            && reply.try_get::<Option<String>, _>("proposed_end")?.is_none(),
+            && reply
+                .try_get::<Option<String>, _>("proposed_start")?
+                .is_none()
+            && reply
+                .try_get::<Option<String>, _>("proposed_end")?
+                .is_none(),
         "ordinary reply must clear the attendee's prior counter proposal"
+    );
+    anyhow::ensure!(
+        meeting_response_outcome_for_trace(pool, fixture.tenant_id, &reply_trace_id).await?
+            == Some(("calendar.meeting-response.applied".to_string(), true,)),
+        "applied REPLY did not record the bounded processed outcome"
+    );
+
+    let idempotent_trace_id = format!("runtime-idempotent-reply-{}", Uuid::new_v4());
+    storage
+        .deliver_inbound_message(InboundDeliveryRequest {
+            trace_id: idempotent_trace_id.clone(),
+            peer: "192.0.2.10:25".to_string(),
+            helo: "mx.example.test".to_string(),
+            mail_from: "denis.ducret@sdic.ch".to_string(),
+            rcpt_to: vec![fixture.account_email.clone()],
+            subject: "Accepted: idempotent response".to_string(),
+            body_text: String::new(),
+            internet_message_id: None,
+            raw_message: raw_reply,
+        })
+        .await
+        .context("deliver exact idempotent REPLY response")?;
+    anyhow::ensure!(
+        meeting_response_outcome_for_trace(pool, fixture.tenant_id, &idempotent_trace_id).await?
+            == Some(("calendar.meeting-response.idempotent".to_string(), true,)),
+        "exact response replay did not record the bounded idempotent outcome"
+    );
+
+    let superseded_trace_id = format!("runtime-superseded-reply-{}", Uuid::new_v4());
+    let superseded_reply = format!(
+        concat!(
+            "From: Denis Ducret <denis.ducret@sdic.ch>\r\n",
+            "To: {}\r\n",
+            "Subject: Declined: superseded response\r\n",
+            "Content-Type: text/calendar; method=REPLY; charset=UTF-8\r\n",
+            "\r\n",
+            "BEGIN:VCALENDAR\r\n",
+            "METHOD:REPLY\r\n",
+            "BEGIN:VEVENT\r\n",
+            "ATTENDEE;PARTSTAT=DECLINED:mailto:denis.ducret@sdic.ch\r\n",
+            "SEQUENCE:2\r\n",
+            "DTSTAMP:20260824T060500Z\r\n",
+            "UID:{}\r\n",
+            "END:VEVENT\r\n",
+            "END:VCALENDAR\r\n"
+        ),
+        fixture.account_email, uid
+    )
+    .into_bytes();
+    storage
+        .deliver_inbound_message(InboundDeliveryRequest {
+            trace_id: superseded_trace_id.clone(),
+            peer: "192.0.2.10:25".to_string(),
+            helo: "mx.example.test".to_string(),
+            mail_from: "denis.ducret@sdic.ch".to_string(),
+            rcpt_to: vec![fixture.account_email.clone()],
+            subject: "Declined: superseded response".to_string(),
+            body_text: String::new(),
+            internet_message_id: None,
+            raw_message: superseded_reply,
+        })
+        .await
+        .context("deliver older-DTSTAMP superseded REPLY response")?;
+    anyhow::ensure!(
+        meeting_response_outcome_for_trace(pool, fixture.tenant_id, &superseded_trace_id).await?
+            == Some(("calendar.meeting-response.superseded".to_string(), true,)),
+        "older response did not record the bounded superseded outcome"
+    );
+
+    let response_state_before_invalid = sqlx::query_scalar::<_, String>(
+        "SELECT meeting_response_state_json::text FROM calendar_events WHERE id = $1",
+    )
+    .bind(event.id)
+    .fetch_one(pool)
+    .await?;
+    sqlx::query(
+        r#"
+        UPDATE calendar_events
+        SET meeting_response_state_json = '{"denis.ducret@sdic.ch":"invalid"}'::jsonb
+        WHERE id = $1
+        "#,
+    )
+    .bind(event.id)
+    .execute(pool)
+    .await?;
+    let invalid_state_trace_id = format!("runtime-invalid-response-state-{}", Uuid::new_v4());
+    let invalid_state_reply = format!(
+        concat!(
+            "From: Denis Ducret <denis.ducret@sdic.ch>\r\n",
+            "To: {}\r\n",
+            "Subject: Accepted: invalid durable state\r\n",
+            "Content-Type: text/calendar; method=REPLY; charset=UTF-8\r\n",
+            "\r\n",
+            "BEGIN:VCALENDAR\r\n",
+            "METHOD:REPLY\r\n",
+            "BEGIN:VEVENT\r\n",
+            "ATTENDEE;PARTSTAT=ACCEPTED:mailto:denis.ducret@sdic.ch\r\n",
+            "DTSTART:20260824T063000Z\r\n",
+            "DTEND:20260824T070000Z\r\n",
+            "SEQUENCE:2\r\n",
+            "UID:{}\r\n",
+            "END:VEVENT\r\n",
+            "END:VCALENDAR\r\n"
+        ),
+        fixture.account_email, uid
+    )
+    .into_bytes();
+    storage
+        .deliver_inbound_message(InboundDeliveryRequest {
+            trace_id: invalid_state_trace_id.clone(),
+            peer: "192.0.2.10:25".to_string(),
+            helo: "mx.example.test".to_string(),
+            mail_from: "denis.ducret@sdic.ch".to_string(),
+            rcpt_to: vec![fixture.account_email.clone()],
+            subject: "Accepted: invalid durable state".to_string(),
+            body_text: String::new(),
+            internet_message_id: None,
+            raw_message: invalid_state_reply,
+        })
+        .await
+        .context("deliver response against invalid durable watermark state")?;
+    anyhow::ensure!(
+        meeting_response_outcome_for_trace(pool, fixture.tenant_id, &invalid_state_trace_id)
+            .await?
+            == Some((
+                "calendar.meeting-response.ignored-invalid-durable-state".to_string(),
+                false,
+            )),
+        "invalid durable response state did not record the bounded unprocessed outcome"
+    );
+    sqlx::query("UPDATE calendar_events SET meeting_response_state_json = $2::jsonb WHERE id = $1")
+        .bind(event.id)
+        .bind(response_state_before_invalid)
+        .execute(pool)
+        .await?;
+
+    let duplicate_calendar = storage
+        .create_accessible_calendar_collection(fixture.account_id, "Meeting response UID collision")
+        .await
+        .context("create a second calendar for duplicate meeting UID correlation")?;
+    let mut duplicate_input =
+        runtime_calendar_event_input(fixture.account_id, None, "Duplicate meeting response UID");
+    duplicate_input.uid = uid.to_string();
+    duplicate_input.date = "2026-08-24".to_string();
+    duplicate_input.time = "09:00".to_string();
+    duplicate_input.duration_minutes = 30;
+    duplicate_input.sequence = 2;
+    duplicate_input.attendees = "Denis Ducret".to_string();
+    duplicate_input.attendees_json = organizer_attendees_json;
+    let duplicate_event = storage
+        .create_accessible_event(
+            fixture.account_id,
+            Some(&duplicate_calendar.id),
+            duplicate_input,
+        )
+        .await
+        .context("create a second active event with the same meeting UID")?;
+
+    let ambiguous_trace_id = format!("runtime-ambiguous-reply-{}", Uuid::new_v4());
+    let ambiguous_reply = format!(
+        concat!(
+            "From: Denis Ducret <denis.ducret@sdic.ch>\r\n",
+            "To: {}\r\n",
+            "Subject: Declined: ambiguous duplicate UID\r\n",
+            "Content-Type: text/calendar; method=REPLY; charset=UTF-8\r\n",
+            "\r\n",
+            "BEGIN:VCALENDAR\r\n",
+            "METHOD:REPLY\r\n",
+            "BEGIN:VEVENT\r\n",
+            "ATTENDEE;PARTSTAT=DECLINED:mailto:denis.ducret@sdic.ch\r\n",
+            "UID:{}\r\n",
+            "END:VEVENT\r\n",
+            "END:VCALENDAR\r\n"
+        ),
+        fixture.account_email, uid
+    )
+    .into_bytes();
+    storage
+        .deliver_inbound_message(InboundDeliveryRequest {
+            trace_id: ambiguous_trace_id.clone(),
+            peer: "192.0.2.10:25".to_string(),
+            helo: "mx.example.test".to_string(),
+            mail_from: "denis.ducret@sdic.ch".to_string(),
+            rcpt_to: vec![fixture.account_email.clone()],
+            subject: "Declined: ambiguous duplicate UID".to_string(),
+            body_text: String::new(),
+            internet_message_id: None,
+            raw_message: ambiguous_reply,
+        })
+        .await
+        .context("deliver ambiguous duplicate-UID REPLY")?;
+    let ambiguous_states = sqlx::query(
+        r#"
+        SELECT
+            (SELECT attendees_json #>> '{attendees,0,partstat}'
+             FROM calendar_events WHERE id = $1) AS original_partstat,
+            (SELECT attendees_json #>> '{attendees,0,partstat}'
+             FROM calendar_events WHERE id = $2) AS duplicate_partstat
+        "#,
+    )
+    .bind(event.id)
+    .bind(duplicate_event.id)
+    .fetch_one(pool)
+    .await
+    .context("load events after ambiguous duplicate-UID response")?;
+    anyhow::ensure!(
+        ambiguous_states.try_get::<String, _>("original_partstat")? == "accepted"
+            && ambiguous_states.try_get::<String, _>("duplicate_partstat")? == "needs-action",
+        "a response with an ambiguous duplicate UID must fail closed"
+    );
+    anyhow::ensure!(
+        meeting_response_outcome_for_trace(pool, fixture.tenant_id, &ambiguous_trace_id).await?
+            == Some((
+                "calendar.meeting-response.ignored-ambiguous-candidate".to_string(),
+                false,
+            )),
+        "ambiguous response did not record the bounded unprocessed outcome"
+    );
+
+    let targeted_trace_id = format!("runtime-targeted-reply-{}", Uuid::new_v4());
+    let targeted_reply = format!(
+        concat!(
+            "From: Denis Ducret <denis.ducret@sdic.ch>\r\n",
+            "To: {}\r\n",
+            "Subject: Declined: interval-correlated duplicate UID\r\n",
+            "Content-Type: text/calendar; method=REPLY; charset=UTF-8\r\n",
+            "\r\n",
+            "BEGIN:VCALENDAR\r\n",
+            "METHOD:REPLY\r\n",
+            "BEGIN:VEVENT\r\n",
+            "ATTENDEE;PARTSTAT=DECLINED:mailto:denis.ducret@sdic.ch\r\n",
+            "DTSTART:20260824T090000Z\r\n",
+            "DTEND:20260824T093000Z\r\n",
+            "SEQUENCE:2\r\n",
+            "UID:{}\r\n",
+            "END:VEVENT\r\n",
+            "END:VCALENDAR\r\n"
+        ),
+        fixture.account_email, uid
+    )
+    .into_bytes();
+    storage
+        .deliver_inbound_message(InboundDeliveryRequest {
+            trace_id: targeted_trace_id.clone(),
+            peer: "192.0.2.10:25".to_string(),
+            helo: "mx.example.test".to_string(),
+            mail_from: "denis.ducret@sdic.ch".to_string(),
+            rcpt_to: vec![fixture.account_email.clone()],
+            subject: "Declined: interval-correlated duplicate UID".to_string(),
+            body_text: String::new(),
+            internet_message_id: None,
+            raw_message: targeted_reply,
+        })
+        .await
+        .context("deliver interval-and-sequence-correlated duplicate-UID REPLY")?;
+    let targeted_states = sqlx::query(
+        r#"
+        SELECT
+            (SELECT attendees_json #>> '{attendees,0,partstat}'
+             FROM calendar_events WHERE id = $1) AS original_partstat,
+            (SELECT attendees_json #>> '{attendees,0,partstat}'
+             FROM calendar_events WHERE id = $2) AS duplicate_partstat
+        "#,
+    )
+    .bind(event.id)
+    .bind(duplicate_event.id)
+    .fetch_one(pool)
+    .await
+    .context("load events after targeted duplicate-UID response")?;
+    anyhow::ensure!(
+        targeted_states.try_get::<String, _>("original_partstat")? == "accepted"
+            && targeted_states.try_get::<String, _>("duplicate_partstat")? == "declined",
+        "REPLY interval and sequence evidence must select exactly one duplicate-UID event"
+    );
+    anyhow::ensure!(
+        meeting_response_outcome_for_trace(pool, fixture.tenant_id, &targeted_trace_id).await?
+            == Some(("calendar.meeting-response.applied".to_string(), true,)),
+        "targeted response did not record the bounded applied outcome"
+    );
+
+    let stale_sequence_trace_id = format!("runtime-stale-sequence-{}", Uuid::new_v4());
+    let stale_sequence_reply = format!(
+        concat!(
+            "From: Denis Ducret <denis.ducret@sdic.ch>\r\n",
+            "To: {}\r\n",
+            "Subject: Declined: stale meeting sequence\r\n",
+            "Content-Type: text/calendar; method=REPLY; charset=UTF-8\r\n",
+            "\r\n",
+            "BEGIN:VCALENDAR\r\n",
+            "METHOD:REPLY\r\n",
+            "BEGIN:VEVENT\r\n",
+            "ATTENDEE;PARTSTAT=DECLINED:mailto:denis.ducret@sdic.ch\r\n",
+            "DTSTART:20260824T063000Z\r\n",
+            "DTEND:20260824T070000Z\r\n",
+            "SEQUENCE:1\r\n",
+            "UID:{}\r\n",
+            "END:VEVENT\r\n",
+            "END:VCALENDAR\r\n"
+        ),
+        fixture.account_email, uid
+    )
+    .into_bytes();
+    storage
+        .deliver_inbound_message(InboundDeliveryRequest {
+            trace_id: stale_sequence_trace_id.clone(),
+            peer: "192.0.2.10:25".to_string(),
+            helo: "mx.example.test".to_string(),
+            mail_from: "denis.ducret@sdic.ch".to_string(),
+            rcpt_to: vec![fixture.account_email.clone()],
+            subject: "Declined: stale meeting sequence".to_string(),
+            body_text: String::new(),
+            internet_message_id: None,
+            raw_message: stale_sequence_reply,
+        })
+        .await
+        .context("deliver stale-sequence REPLY")?;
+    let original_after_stale_sequence = sqlx::query_scalar::<_, String>(
+        "SELECT attendees_json #>> '{attendees,0,partstat}' FROM calendar_events WHERE id = $1",
+    )
+    .bind(event.id)
+    .fetch_one(pool)
+    .await
+    .context("load original event after stale-sequence response")?;
+    anyhow::ensure!(
+        original_after_stale_sequence == "accepted",
+        "a response for an older meeting sequence must not update the current event"
+    );
+    anyhow::ensure!(
+        meeting_response_outcome_for_trace(pool, fixture.tenant_id, &stale_sequence_trace_id)
+            .await?
+            == Some((
+                "calendar.meeting-response.ignored-no-candidate".to_string(),
+                false,
+            )),
+        "sequence-filtered response did not record the bounded no-candidate outcome"
     );
 
     let stale_trace_id = format!("runtime-stale-counter-{}", Uuid::new_v4());
@@ -1543,7 +2644,7 @@ async fn exercise_inbound_calendar_meeting_response_path(
     .into_bytes();
     storage
         .deliver_inbound_message(InboundDeliveryRequest {
-            trace_id: stale_trace_id,
+            trace_id: stale_trace_id.clone(),
             peer: "192.0.2.10:25".to_string(),
             helo: "mx.example.test".to_string(),
             mail_from: "denis.ducret@sdic.ch".to_string(),
@@ -1573,7 +2674,51 @@ async fn exercise_inbound_calendar_meeting_response_path(
             && stale.try_get::<String, _>("counter_proposal")? == "false",
         "a counter for an older scheduled interval must not update attendee state"
     );
+    anyhow::ensure!(
+        meeting_response_outcome_for_trace(pool, fixture.tenant_id, &stale_trace_id).await?
+            == Some((
+                "calendar.meeting-response.ignored-no-candidate".to_string(),
+                false,
+            )),
+        "interval-filtered response did not record the bounded no-candidate outcome"
+    );
     Ok(())
+}
+
+async fn meeting_response_outcome_for_trace(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    trace_id: &str,
+) -> Result<Option<(String, bool)>> {
+    let row = sqlx::query(
+        r#"
+        SELECT audit.action, message.calendar_response_processed
+        FROM message_headers trace
+        JOIN messages message
+          ON message.tenant_id = trace.tenant_id
+         AND message.id = trace.message_id
+        JOIN audit_events audit
+          ON audit.tenant_id = message.tenant_id
+         AND audit.subject = 'message:' || message.id::text
+         AND audit.action LIKE 'calendar.meeting-response.%'
+        WHERE trace.tenant_id = $1
+          AND lower(trace.header_name) = 'x-lpe-ct-trace-id'
+          AND trace.header_value = $2
+        ORDER BY audit.created_at DESC, audit.id DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(trace_id)
+    .fetch_optional(pool)
+    .await?;
+    row.map(|row| {
+        Ok((
+            row.try_get("action")?,
+            row.try_get("calendar_response_processed")?,
+        ))
+    })
+    .transpose()
 }
 
 async fn exercise_notes_journal_reminder_path(
@@ -1894,7 +3039,7 @@ async fn seed_reminder_rows(pool: &PgPool, fixture: &RuntimeFixture) -> Result<(
             ($2, $5, $6, $7, $2::text, 'Dismissed calendar reminder', NOW(), NOW() + interval '1 hour', '', TRUE, NOW() - interval '20 minutes', NOW() - interval '5 minutes', 'confirmed'),
             ($3, $5, $6, $7, $3::text, 'Excluded calendar reminder', NOW(), NOW() + interval '1 hour', '', TRUE, NOW() - interval '30 minutes', NULL, 'cancelled'),
             ($4, $5, $6, $7, $4::text, 'No reminder calendar event', NOW(), NOW() + interval '1 hour', '', FALSE, NULL, NULL, 'confirmed'),
-            ($8, $5, $6, $7, $8::text, 'Recurring calendar reminder', date_trunc('hour', NOW()) - interval '1 hour', date_trunc('hour', NOW()), 'FREQ=DAILY;COUNT=2;BYDAY=' || upper(to_char(date_trunc('hour', NOW()) - interval '1 hour', 'DY')), TRUE, date_trunc('hour', NOW()) - interval '70 minutes', NULL, 'confirmed')
+            ($8, $5, $6, $7, $8::text, 'Recurring calendar reminder', date_trunc('hour', NOW()) - interval '1 hour', date_trunc('hour', NOW()), 'FREQ=DAILY;COUNT=2;BYDAY=' || CASE EXTRACT(ISODOW FROM date_trunc('hour', NOW()) - interval '1 hour')::int WHEN 1 THEN 'MO' WHEN 2 THEN 'TU' WHEN 3 THEN 'WE' WHEN 4 THEN 'TH' WHEN 5 THEN 'FR' WHEN 6 THEN 'SA' ELSE 'SU' END, TRUE, date_trunc('hour', NOW()) - interval '70 minutes', NULL, 'confirmed')
         "#,
     )
     .bind(Uuid::new_v4())
@@ -3116,6 +4261,42 @@ async fn exercise_cross_account_jmap_copy_bcc_projection(
         );
     }
 
+    let shared_subject = target_emails[0].subject.clone();
+    let cross_account_mutation = storage
+        .update_jmap_email_content(
+            fixture.account_id,
+            submitted.message_id,
+            Some(format!("{shared_subject} mutated without target sync")),
+            None,
+            audit(
+                &fixture.account_email,
+                "jmap-email-update",
+                "cross-account shared-content isolation",
+            ),
+        )
+        .await;
+    anyhow::ensure!(
+        cross_account_mutation
+            .as_ref()
+            .is_err_and(|error| error.to_string().contains("visible in another account")),
+        "shared canonical content mutation must fail closed while the message is visible in another account"
+    );
+    let source_after_rejection = storage
+        .fetch_jmap_emails(fixture.account_id, &[submitted.message_id])
+        .await
+        .context("fetch source after rejected cross-account content mutation")?;
+    let target_after_rejection = storage
+        .fetch_jmap_emails(target_account_id, &[submitted.message_id])
+        .await
+        .context("fetch target after rejected cross-account content mutation")?;
+    anyhow::ensure!(
+        source_after_rejection.len() == 1
+            && target_after_rejection.len() == 1
+            && source_after_rejection[0].subject == shared_subject
+            && target_after_rejection[0].subject == shared_subject,
+        "rejected shared-content mutation must leave both account projections unchanged"
+    );
+
     Ok(())
 }
 
@@ -3952,6 +5133,18 @@ async fn exercise_mailbox_move_path(
         .await
         .context("move_jmap_email")?;
 
+    let moved_email = storage
+        .fetch_jmap_emails(fixture.account_id, &[submitted.message_id])
+        .await
+        .context("fetch submitted JMAP message after moving it out of Sent")?
+        .into_iter()
+        .next()
+        .context("submitted message missing after moving it out of Sent")?;
+    anyhow::ensure!(
+        moved_email.sender_authorization_kind == "self" && moved_email.delivery_status == "queued",
+        "submission provenance must survive replacement of the original Sent membership"
+    );
+
     let source_after = sqlx::query(
         r#"
         SELECT visibility, imap_uid
@@ -4506,6 +5699,7 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
     pool: &PgPool,
     fixture: &RuntimeFixture,
 ) -> Result<()> {
+    let draft_internet_message_id = format!("<mapi-draft-{}@example.test>", Uuid::new_v4());
     let draft = storage
         .save_draft_message(
             SubmitMessageInput {
@@ -4522,14 +5716,11 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
                     display_name: Some("Draft Recipient".to_string()),
                 }],
                 cc: Vec::new(),
-                bcc: vec![SubmittedRecipientInput {
-                    address: "draft-hidden@example.test".to_string(),
-                    display_name: Some("Draft Hidden".to_string()),
-                }],
+                bcc: Vec::new(),
                 subject: "MAPI canonical draft gate".to_string(),
                 body_text: "MAPI draft canonical body".to_string(),
                 body_html_sanitized: None,
-                internet_message_id: Some(format!("<mapi-draft-{}@example.test>", Uuid::new_v4())),
+                internet_message_id: Some(draft_internet_message_id.clone()),
                 mime_blob_ref: None,
                 size_octets: 128,
                 unread: Some(false),
@@ -4554,6 +5745,7 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
                 media_type: "application/pdf".to_string(),
                 disposition: Some("attachment".to_string()),
                 content_id: None,
+                is_scheduling_body: false,
                 blob_bytes: b"%PDF-draft-submit".to_vec(),
             },
             audit(
@@ -4565,6 +5757,82 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
         .await
         .context("add canonical attachment to MAPI draft")?
         .context("canonical MAPI draft must accept its attachment")?;
+    let draft_response_calendar = format!(
+        concat!(
+            "BEGIN:VCALENDAR\r\n",
+            "VERSION:2.0\r\n",
+            "METHOD:REPLY\r\n",
+            "BEGIN:VEVENT\r\n",
+            "UID:runtime-draft-response@example.test\r\n",
+            "DTSTAMP:20260824T080000Z\r\n",
+            "ATTENDEE;PARTSTAT=ACCEPTED:mailto:{}\r\n",
+            "END:VEVENT\r\n",
+            "END:VCALENDAR\r\n"
+        ),
+        fixture.account_email
+    );
+    storage
+        .add_message_attachment(
+            fixture.account_id,
+            draft.message_id,
+            AttachmentUploadInput {
+                file_name: "response.ics".to_string(),
+                media_type: "text/calendar; method=REPLY; charset=UTF-8".to_string(),
+                disposition: Some("inline".to_string()),
+                content_id: None,
+                is_scheduling_body: true,
+                blob_bytes: draft_response_calendar.into_bytes(),
+            },
+            audit(
+                "alice@example.test",
+                "draft-scheduling-body-add",
+                "response.ics",
+            ),
+        )
+        .await
+        .context("add scheduling MIME body to MAPI draft")?
+        .context("canonical MAPI draft must accept its scheduling MIME body")?;
+
+    let edited_draft = storage
+        .save_draft_message(
+            SubmitMessageInput {
+                draft_message_id: Some(draft.message_id),
+                account_id: fixture.account_id,
+                submitted_by_account_id: fixture.account_id,
+                source: "mapi".to_string(),
+                from_display: Some("Alice MAPI".to_string()),
+                from_address: fixture.account_email.clone(),
+                sender_display: None,
+                sender_address: None,
+                to: vec![SubmittedRecipientInput {
+                    address: "draft-recipient@example.test".to_string(),
+                    display_name: Some("Draft Recipient".to_string()),
+                }],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "MAPI canonical draft gate edited".to_string(),
+                body_text: "MAPI draft canonical body".to_string(),
+                body_html_sanitized: None,
+                internet_message_id: Some(draft_internet_message_id),
+                mime_blob_ref: None,
+                size_octets: 128,
+                unread: Some(false),
+                flagged: Some(true),
+                replace_attachments: false,
+                attachments: Vec::new(),
+            },
+            audit(
+                "alice@example.test",
+                "mapi-edit-draft-subject",
+                "MAPI draft subject-only edit",
+            ),
+        )
+        .await
+        .context("edit only the MAPI draft subject while retaining persisted attachments")?;
+    anyhow::ensure!(
+        edited_draft.message_id == draft.message_id,
+        "a MAPI draft edit must retain the canonical message identity"
+    );
 
     let draft_jmap = storage
         .fetch_jmap_emails(fixture.account_id, &[draft.message_id])
@@ -4577,10 +5845,58 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
         draft_jmap.mailbox_ids == vec![draft.draft_mailbox_id]
             && draft_jmap.mailbox_role == "drafts"
             && draft_jmap.delivery_status == "draft"
+            && draft_jmap.subject == "MAPI canonical draft gate edited"
             && !draft_jmap.unread
             && draft_jmap.flagged
-            && draft_jmap.bcc.is_empty(),
-        "JMAP projection must expose canonical MAPI draft state without protected Bcc"
+            && draft_jmap.bcc.is_empty()
+            && draft_jmap.calendar_meeting_response.is_some(),
+        "JMAP projection must expose the edited MAPI draft and its authorized meeting response: {draft_jmap:?}"
+    );
+    let persisted_draft_state = sqlx::query(
+        r#"
+        SELECT classification.classification,
+               classification.needs_reclassification,
+               message.authorized_calendar_response_content_sha256,
+               scheduling_blob.content_sha256 AS scheduling_content_sha256,
+               (SELECT COUNT(*) FROM attachments
+                WHERE tenant_id = message.tenant_id
+                  AND account_id = $3
+                  AND message_id = message.id) AS attachment_count,
+               (SELECT COUNT(*) FROM mime_parts
+                WHERE tenant_id = message.tenant_id
+                  AND message_id = message.id
+                  AND is_scheduling_body) AS scheduling_part_count
+        FROM messages message
+        JOIN calendar_mail_classifications classification
+          ON classification.tenant_id = message.tenant_id
+         AND classification.message_id = message.id
+        JOIN mime_parts scheduling_part
+          ON scheduling_part.tenant_id = classification.tenant_id
+         AND scheduling_part.message_id = classification.message_id
+         AND scheduling_part.id = classification.scheduling_mime_part_id
+        JOIN blobs scheduling_blob
+          ON scheduling_blob.tenant_id = scheduling_part.tenant_id
+         AND scheduling_blob.domain_id = scheduling_part.domain_id
+         AND scheduling_blob.id = scheduling_part.blob_id
+         AND scheduling_blob.blob_kind = scheduling_part.blob_kind
+        WHERE message.tenant_id = $1 AND message.id = $2
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(draft.message_id)
+    .bind(fixture.account_id)
+    .fetch_one(pool)
+    .await
+    .context("load persisted attachment and response state after MAPI draft subject edit")?;
+    anyhow::ensure!(
+        persisted_draft_state.try_get::<String, _>("classification")? == "response"
+            && !persisted_draft_state.try_get::<bool, _>("needs_reclassification")?
+            && persisted_draft_state.try_get::<Option<String>, _>(
+                "authorized_calendar_response_content_sha256",
+            )? == Some(persisted_draft_state.try_get::<String, _>("scheduling_content_sha256")?)
+            && persisted_draft_state.try_get::<i64, _>("attachment_count")? == 2
+            && persisted_draft_state.try_get::<i64, _>("scheduling_part_count")? == 1,
+        "a subject-only Draft edit must retain both attachments and bind the authorized response to the exact selected ICS blob"
     );
 
     let draft_imap = storage
@@ -4592,7 +5908,7 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
         .context("MAPI draft missing from IMAP Drafts projection")?;
     anyhow::ensure!(
         !draft_imap.unread && draft_imap.flagged && draft_imap.bcc.is_empty(),
-        "IMAP projection must expose canonical MAPI draft flags without protected Bcc"
+        "IMAP projection must expose canonical MAPI draft flags"
     );
 
     let draft_submission = storage
@@ -4655,6 +5971,172 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
             && sent_draft_jmap.bcc.is_empty(),
         "MAPI draft submit must retain canonical attachments in Sent through JMAP"
     );
+    let sent_draft_raw = storage
+        .fetch_jmap_message_blob(fixture.account_id, draft_submission.message_id)
+        .await
+        .context("fetch raw MAPI-submitted draft")?
+        .context("MAPI-submitted draft raw message is missing")?;
+    let sent_draft_raw = String::from_utf8_lossy(&sent_draft_raw.blob_bytes);
+    anyhow::ensure!(
+        sent_draft_raw.contains("Content-Type: text/calendar; method=REPLY; charset=UTF-8")
+            && sent_draft_raw.contains("METHOD:REPLY")
+            && sent_draft_raw.contains("draft-submit.pdf"),
+        "canonical Drafts submission hydration must preserve the selected scheduling MIME body and ordinary attachment"
+    );
+
+    let outbox_mailbox_id = storage
+        .ensure_imap_mailboxes(fixture.account_id)
+        .await
+        .context("ensure Outbox for canonical MAPI submission source")?
+        .into_iter()
+        .find(|mailbox| mailbox.role == "outbox")
+        .map(|mailbox| mailbox.id)
+        .context("canonical Outbox mailbox is missing")?;
+    let outbox_calendar = format!(
+        concat!(
+            "BEGIN:VCALENDAR\r\n",
+            "VERSION:2.0\r\n",
+            "METHOD:COUNTER\r\n",
+            "BEGIN:VEVENT\r\n",
+            "UID:runtime-outbox-counter@example.test\r\n",
+            "DTSTAMP:20260824T081000Z\r\n",
+            "DTSTART:20260824T091000Z\r\n",
+            "DTEND:20260824T101000Z\r\n",
+            "ATTENDEE;PARTSTAT=DECLINED:mailto:{}\r\n",
+            "END:VEVENT\r\n",
+            "END:VCALENDAR\r\n"
+        ),
+        fixture.account_email
+    );
+    let outbox_source = storage
+        .import_jmap_email(
+            JmapImportedEmailInput {
+                account_id: fixture.account_id,
+                submitted_by_account_id: fixture.account_id,
+                mailbox_id: outbox_mailbox_id,
+                source: "mapi-save-message".to_string(),
+                raw_message: None,
+                from_display: Some("Alice MAPI".to_string()),
+                from_address: fixture.account_email.clone(),
+                sender_display: None,
+                sender_address: None,
+                to: vec![SubmittedRecipientInput {
+                    address: "organizer@example.test".to_string(),
+                    display_name: Some("Organizer".to_string()),
+                }],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "New Time Proposed: canonical Outbox source".to_string(),
+                body_text: "Canonical Outbox scheduling response".to_string(),
+                body_html_sanitized: None,
+                internet_message_id: Some(format!(
+                    "<mapi-outbox-source-{}@example.test>",
+                    Uuid::new_v4()
+                )),
+                mime_blob_ref: format!("mapi-save-message:{}", Uuid::new_v4()),
+                size_octets: outbox_calendar.len() as i64,
+                received_at: None,
+                thread_id: None,
+                attachments: vec![AttachmentUploadInput {
+                    file_name: "response.ics".to_string(),
+                    media_type: "text/calendar; method=COUNTER; charset=UTF-8".to_string(),
+                    disposition: Some("inline".to_string()),
+                    content_id: None,
+                    is_scheduling_body: true,
+                    blob_bytes: outbox_calendar.into_bytes(),
+                }],
+            },
+            audit(
+                "alice@example.test",
+                "mapi-save-message",
+                "canonical Outbox submission source",
+            ),
+        )
+        .await
+        .context("import canonical MAPI Outbox submission source")?;
+
+    let strict_draft_delete = storage
+        .delete_draft_message(
+            fixture.account_id,
+            outbox_source.id,
+            audit(
+                "alice@example.test",
+                "mapi-delete-draft",
+                "Outbox must not be a public draft",
+            ),
+        )
+        .await;
+    anyhow::ensure!(
+        strict_draft_delete
+            .as_ref()
+            .is_err_and(|error| error.to_string().contains("draft not found")),
+        "public draft deletion must reject an Outbox source"
+    );
+    anyhow::ensure!(
+        storage
+            .fetch_jmap_emails(fixture.account_id, &[outbox_source.id])
+            .await
+            .context("fetch Outbox source after rejected public draft deletion")?
+            .len()
+            == 1,
+        "rejected public draft deletion must leave the Outbox source visible"
+    );
+
+    let outbox_submission = storage
+        .submit_message(
+            SubmitMessageInput {
+                draft_message_id: Some(outbox_source.id),
+                account_id: fixture.account_id,
+                submitted_by_account_id: fixture.account_id,
+                source: "mapi".to_string(),
+                from_display: outbox_source.from_display.clone(),
+                from_address: outbox_source.from_address.clone(),
+                sender_display: outbox_source.sender_display.clone(),
+                sender_address: outbox_source.sender_address.clone(),
+                to: vec![SubmittedRecipientInput {
+                    address: "organizer@example.test".to_string(),
+                    display_name: Some("Organizer".to_string()),
+                }],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: outbox_source.subject.clone(),
+                body_text: outbox_source.body_text.clone(),
+                body_html_sanitized: outbox_source.body_html_sanitized.clone(),
+                internet_message_id: outbox_source.internet_message_id.clone(),
+                mime_blob_ref: None,
+                size_octets: outbox_source.size_octets,
+                unread: Some(false),
+                flagged: Some(false),
+                replace_attachments: false,
+                attachments: Vec::new(),
+            },
+            audit(
+                "alice@example.test",
+                "mapi-submit-message",
+                "canonical Outbox submission source",
+            ),
+        )
+        .await
+        .context("submit canonical MAPI Outbox source")?;
+    anyhow::ensure!(
+        storage
+            .fetch_jmap_emails(fixture.account_id, &[outbox_source.id])
+            .await
+            .context("fetch old Outbox projection after canonical submit")?
+            .is_empty(),
+        "canonical submission must remove its Outbox source"
+    );
+    let sent_outbox_raw = storage
+        .fetch_jmap_message_blob(fixture.account_id, outbox_submission.message_id)
+        .await
+        .context("fetch raw MAPI-submitted Outbox source")?
+        .context("MAPI-submitted Outbox raw message is missing")?;
+    let sent_outbox_raw = String::from_utf8_lossy(&sent_outbox_raw.blob_bytes);
+    anyhow::ensure!(
+        sent_outbox_raw.contains("Content-Type: text/calendar; method=COUNTER; charset=UTF-8")
+            && sent_outbox_raw.contains("METHOD:COUNTER"),
+        "canonical Outbox submission hydration must preserve the selected scheduling MIME body"
+    );
 
     let submitted = storage
         .submit_message(
@@ -4690,6 +6172,7 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
                     media_type: "application/pdf".to_string(),
                     disposition: Some("attachment".to_string()),
                     content_id: None,
+                    is_scheduling_body: false,
                     blob_bytes: b"%PDF-mapi-gate".to_vec(),
                 }],
             },
@@ -4960,6 +6443,1546 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
     anyhow::ensure!(
         updated_sent_mailbox.unread_emails == 1,
         "mailbox unread count must track the canonical read state changed through MAPI"
+    );
+
+    Ok(())
+}
+
+async fn exercise_outbound_meeting_request_correlation(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    storage
+        .fetch_accessible_calendar_collections(fixture.account_id)
+        .await
+        .context("ensure default calendar for outbound request correlation")?;
+    let attendee = "meeting-attendee@example.test";
+    let uid = format!("outbound-request-{}@example.test", Uuid::new_v4());
+    create_request_correlation_event(
+        storage,
+        fixture,
+        None,
+        &uid,
+        "2026-09-10",
+        "09:00",
+        3,
+        "confirmed",
+        "",
+        &fixture.account_email,
+        attendee,
+    )
+    .await?;
+
+    let persisted_input = request_submission_input(
+        fixture,
+        None,
+        &uid,
+        "20260910T090000Z",
+        "20260910T100000Z",
+        3,
+        &fixture.account_email,
+        attendee,
+    );
+    let persisted_draft = storage
+        .save_draft_message(
+            persisted_input,
+            audit(
+                "alice@example.test",
+                "mapi-save-request",
+                "persisted meeting request correlation",
+            ),
+        )
+        .await
+        .context("save persisted meeting REQUEST source")?;
+    let persisted_draft_classification = sqlx::query(
+        r#"
+        SELECT classification, needs_reclassification, classification_generation,
+               (SELECT COUNT(*) FROM mime_parts
+                WHERE tenant_id = classification.tenant_id
+                  AND message_id = classification.message_id
+                  AND is_scheduling_body) AS scheduling_part_count,
+               (SELECT COUNT(*) FROM calendar_mail_classification_projections
+                WHERE tenant_id = classification.tenant_id
+                  AND account_id = $3
+                  AND message_id = classification.message_id
+                  AND applied_generation = 1) AS applied_projection_count
+        FROM calendar_mail_classifications classification
+        WHERE classification.tenant_id = $1 AND classification.message_id = $2
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(persisted_draft.message_id)
+    .bind(fixture.account_id)
+    .fetch_one(pool)
+    .await?;
+    anyhow::ensure!(
+        persisted_draft_classification.try_get::<String, _>("classification")? == "request"
+            && !persisted_draft_classification.try_get::<bool, _>("needs_reclassification")?
+            && persisted_draft_classification.try_get::<i64, _>("classification_generation")? == 1
+            && persisted_draft_classification.try_get::<i64, _>("scheduling_part_count")? == 1
+            && persisted_draft_classification.try_get::<i64, _>("applied_projection_count")? == 1,
+        "a newly saved REQUEST Draft must persist one clean applied scheduling classification"
+    );
+    let persisted_submission = storage
+        .submit_draft_message(
+            fixture.account_id,
+            persisted_draft.message_id,
+            fixture.account_id,
+            "mapi",
+            audit(
+                "alice@example.test",
+                "mapi-submit-request",
+                "persisted meeting request correlation",
+            ),
+        )
+        .await
+        .context("submit exact persisted meeting REQUEST source")?;
+    let persisted_state = sqlx::query(
+        r#"
+        SELECT
+            (SELECT COUNT(*) FROM submission_queue
+             WHERE tenant_id = $1 AND id = $2) AS queue_count,
+            (SELECT COUNT(*) FROM mailbox_messages
+             WHERE tenant_id = $1 AND account_id = $3 AND message_id = $4
+               AND visibility = 'visible') AS source_visible_count,
+            (SELECT classification FROM calendar_mail_classifications
+             WHERE tenant_id = $1 AND message_id = $5) AS classification,
+            (SELECT needs_reclassification FROM calendar_mail_classifications
+             WHERE tenant_id = $1 AND message_id = $5) AS needs_reclassification,
+            (SELECT classification_generation FROM calendar_mail_classifications
+             WHERE tenant_id = $1 AND message_id = $5) AS classification_generation,
+            (SELECT COUNT(*) FROM mime_parts
+             WHERE tenant_id = $1 AND message_id = $5
+               AND is_scheduling_body) AS scheduling_part_count,
+            (SELECT COUNT(*) FROM calendar_mail_classification_projections
+             WHERE tenant_id = $1 AND account_id = $3 AND message_id = $5
+               AND applied_generation = 1) AS applied_projection_count
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(persisted_submission.outbound_queue_id)
+    .bind(fixture.account_id)
+    .bind(persisted_draft.message_id)
+    .bind(persisted_submission.message_id)
+    .fetch_one(pool)
+    .await?;
+    anyhow::ensure!(
+        persisted_state.try_get::<i64, _>("queue_count")? == 1
+            && persisted_state.try_get::<i64, _>("source_visible_count")? == 0
+            && persisted_state.try_get::<String, _>("classification")? == "request"
+            && !persisted_state.try_get::<bool, _>("needs_reclassification")?
+            && persisted_state.try_get::<i64, _>("classification_generation")? == 1
+            && persisted_state.try_get::<i64, _>("scheduling_part_count")? == 1
+            && persisted_state.try_get::<i64, _>("applied_projection_count")? == 1,
+        "a correlated persisted REQUEST must queue once, expunge its source, and persist one clean applied Sent scheduling classification"
+    );
+
+    let higher = request_submission_input(
+        fixture,
+        None,
+        &uid,
+        "20260910T090000Z",
+        "20260910T100000Z",
+        4,
+        &fixture.account_email,
+        attendee,
+    );
+    storage
+        .submit_message(
+            higher,
+            audit(
+                "alice@example.test",
+                "mapi-submit-request",
+                "higher sequence meeting request correlation",
+            ),
+        )
+        .await
+        .context("higher REQUEST sequence should correlate")?;
+
+    let stale_draft = storage
+        .save_draft_message(
+            request_submission_input(
+                fixture,
+                None,
+                &uid,
+                "20260910T090000Z",
+                "20260910T100000Z",
+                2,
+                &fixture.account_email,
+                attendee,
+            ),
+            audit(
+                "alice@example.test",
+                "mapi-save-request",
+                "stale persisted meeting request",
+            ),
+        )
+        .await?;
+    let before_stale = outbound_submission_counts(pool, fixture).await?;
+    anyhow::ensure!(
+        storage
+            .submit_draft_message(
+                fixture.account_id,
+                stale_draft.message_id,
+                fixture.account_id,
+                "mapi",
+                audit(
+                    "alice@example.test",
+                    "mapi-submit-request",
+                    "stale persisted meeting request",
+                ),
+            )
+            .await
+            .is_err(),
+        "a REQUEST sequence lower than the Event sequence must fail"
+    );
+    let stale_visible = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*) FROM mailbox_messages
+        WHERE tenant_id = $1 AND account_id = $2 AND message_id = $3
+          AND visibility = 'visible'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(stale_draft.message_id)
+    .fetch_one(pool)
+    .await?;
+    anyhow::ensure!(
+        stale_visible == 1 && outbound_submission_counts(pool, fixture).await? == before_stale,
+        "a rejected persisted REQUEST must preserve its source and create no Sent/queue state"
+    );
+
+    for (label, input) in [
+        (
+            "request before Event Save",
+            request_submission_input(
+                fixture,
+                None,
+                &format!("missing-{}@example.test", Uuid::new_v4()),
+                "20260911T090000Z",
+                "20260911T100000Z",
+                0,
+                &fixture.account_email,
+                attendee,
+            ),
+        ),
+        (
+            "interval mismatch",
+            request_submission_input(
+                fixture,
+                None,
+                &uid,
+                "20260910T110000Z",
+                "20260910T120000Z",
+                3,
+                &fixture.account_email,
+                attendee,
+            ),
+        ),
+        (
+            "request organizer mismatch",
+            request_submission_input(
+                fixture,
+                None,
+                &uid,
+                "20260910T090000Z",
+                "20260910T100000Z",
+                3,
+                "other-organizer@example.test",
+                attendee,
+            ),
+        ),
+        (
+            "request attendee mismatch",
+            request_submission_input(
+                fixture,
+                None,
+                &uid,
+                "20260910T090000Z",
+                "20260910T100000Z",
+                3,
+                &fixture.account_email,
+                "other-attendee@example.test",
+            ),
+        ),
+    ] {
+        expect_request_rejected_without_submission(storage, pool, fixture, input, label).await?;
+    }
+
+    for (label, status, recurrence_rule, move_to_deleted) in [
+        ("cancelled Event", "cancelled", "", false),
+        ("deleted Event", "confirmed", "", true),
+        ("recurring Event", "confirmed", "FREQ=DAILY", false),
+    ] {
+        let candidate_uid = format!(
+            "{}-{}@example.test",
+            label.replace(' ', "-"),
+            Uuid::new_v4()
+        );
+        let event_id = create_request_correlation_event(
+            storage,
+            fixture,
+            None,
+            &candidate_uid,
+            "2026-09-12",
+            "09:00",
+            0,
+            status,
+            recurrence_rule,
+            &fixture.account_email,
+            attendee,
+        )
+        .await?;
+        if move_to_deleted {
+            storage
+                .move_accessible_event_to_deleted_items(fixture.account_id, event_id, None)
+                .await?;
+        }
+        expect_request_rejected_without_submission(
+            storage,
+            pool,
+            fixture,
+            request_submission_input(
+                fixture,
+                None,
+                &candidate_uid,
+                "20260912T090000Z",
+                "20260912T100000Z",
+                0,
+                &fixture.account_email,
+                attendee,
+            ),
+            label,
+        )
+        .await?;
+    }
+
+    let organizer_mismatch_uid = format!("organizer-mismatch-{}@example.test", Uuid::new_v4());
+    create_request_correlation_event(
+        storage,
+        fixture,
+        None,
+        &organizer_mismatch_uid,
+        "2026-09-13",
+        "09:00",
+        0,
+        "confirmed",
+        "",
+        "other-organizer@example.test",
+        attendee,
+    )
+    .await?;
+    expect_request_rejected_without_submission(
+        storage,
+        pool,
+        fixture,
+        request_submission_input(
+            fixture,
+            None,
+            &organizer_mismatch_uid,
+            "20260913T090000Z",
+            "20260913T100000Z",
+            0,
+            &fixture.account_email,
+            attendee,
+        ),
+        "canonical organizer mismatch",
+    )
+    .await?;
+
+    let duplicate_calendar = storage
+        .create_accessible_calendar_collection(fixture.account_id, "Outbound request UID collision")
+        .await?;
+    create_request_correlation_event(
+        storage,
+        fixture,
+        Some(&duplicate_calendar.id),
+        &uid,
+        "2026-09-10",
+        "09:00",
+        3,
+        "confirmed",
+        "",
+        &fixture.account_email,
+        attendee,
+    )
+    .await?;
+    expect_request_rejected_without_submission(
+        storage,
+        pool,
+        fixture,
+        request_submission_input(
+            fixture,
+            None,
+            &uid,
+            "20260910T090000Z",
+            "20260910T100000Z",
+            3,
+            &fixture.account_email,
+            attendee,
+        ),
+        "ambiguous duplicate Event",
+    )
+    .await?;
+
+    let bcc_uid = format!("bcc-request-{}@example.test", Uuid::new_v4());
+    create_request_correlation_event(
+        storage,
+        fixture,
+        None,
+        &bcc_uid,
+        "2026-09-14",
+        "09:00",
+        0,
+        "confirmed",
+        "",
+        &fixture.account_email,
+        attendee,
+    )
+    .await?;
+    let mut bcc_request = request_submission_input(
+        fixture,
+        None,
+        &bcc_uid,
+        "20260914T090000Z",
+        "20260914T100000Z",
+        0,
+        &fixture.account_email,
+        attendee,
+    );
+    bcc_request.bcc.push(SubmittedRecipientInput {
+        address: "hidden-attendee@example.test".to_string(),
+        display_name: None,
+    });
+    expect_request_rejected_without_submission(
+        storage,
+        pool,
+        fixture,
+        bcc_request,
+        "scheduling Bcc",
+    )
+    .await?;
+
+    Ok(())
+}
+
+async fn create_request_correlation_event(
+    storage: &Storage,
+    fixture: &RuntimeFixture,
+    collection_id: Option<&str>,
+    uid: &str,
+    date: &str,
+    time: &str,
+    sequence: i32,
+    status: &str,
+    recurrence_rule: &str,
+    organizer: &str,
+    attendee: &str,
+) -> Result<Uuid> {
+    let mut input =
+        runtime_calendar_event_input(fixture.account_id, None, "Outbound request correlation");
+    input.uid = uid.to_string();
+    input.date = date.to_string();
+    input.time = time.to_string();
+    input.duration_minutes = 60;
+    input.sequence = sequence;
+    input.status = status.to_string();
+    input.recurrence_rule = recurrence_rule.to_string();
+    input.organizer_json = serde_json::json!({
+        "email": organizer,
+        "common_name": "Organizer",
+        "is_meeting": true
+    })
+    .to_string();
+    input.attendees = attendee.to_string();
+    input.attendees_json = serde_json::json!({
+        "organizer": {"email": organizer, "common_name": "Organizer"},
+        "attendees": [{
+            "email": attendee,
+            "common_name": "Attendee",
+            "role": "REQ-PARTICIPANT",
+            "partstat": "needs-action",
+            "rsvp": true
+        }]
+    })
+    .to_string();
+    Ok(storage
+        .create_accessible_event(fixture.account_id, collection_id, input)
+        .await?
+        .id)
+}
+
+fn request_submission_input(
+    fixture: &RuntimeFixture,
+    draft_message_id: Option<Uuid>,
+    uid: &str,
+    start: &str,
+    end: &str,
+    sequence: i32,
+    organizer: &str,
+    attendee: &str,
+) -> SubmitMessageInput {
+    SubmitMessageInput {
+        draft_message_id,
+        account_id: fixture.account_id,
+        submitted_by_account_id: fixture.account_id,
+        source: "mapi".to_string(),
+        from_display: Some("Alice Drift".to_string()),
+        from_address: fixture.account_email.clone(),
+        sender_display: None,
+        sender_address: None,
+        to: vec![SubmittedRecipientInput {
+            address: attendee.to_string(),
+            display_name: Some("Attendee".to_string()),
+        }],
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        subject: "Outbound request correlation".to_string(),
+        body_text: "Meeting request".to_string(),
+        body_html_sanitized: None,
+        internet_message_id: None,
+        mime_blob_ref: None,
+        size_octets: 512,
+        unread: Some(false),
+        flagged: Some(false),
+        replace_attachments: false,
+        attachments: vec![AttachmentUploadInput {
+            file_name: "invite.ics".to_string(),
+            media_type: "text/calendar; method=REQUEST; charset=UTF-8".to_string(),
+            disposition: Some("inline".to_string()),
+            content_id: None,
+            is_scheduling_body: true,
+            blob_bytes: format!(
+                concat!(
+                    "BEGIN:VCALENDAR\r\n",
+                    "VERSION:2.0\r\n",
+                    "METHOD:REQUEST\r\n",
+                    "BEGIN:VEVENT\r\n",
+                    "UID:{uid}\r\n",
+                    "DTSTAMP:20260824T080000Z\r\n",
+                    "DTSTART:{start}\r\n",
+                    "DTEND:{end}\r\n",
+                    "SEQUENCE:{sequence}\r\n",
+                    "ORGANIZER:mailto:{organizer}\r\n",
+                    "ATTENDEE;RSVP=TRUE:mailto:{attendee}\r\n",
+                    "SUMMARY:Outbound request correlation\r\n",
+                    "END:VEVENT\r\n",
+                    "END:VCALENDAR\r\n"
+                ),
+                uid = uid,
+                start = start,
+                end = end,
+                sequence = sequence,
+                organizer = organizer,
+                attendee = attendee,
+            )
+            .into_bytes(),
+        }],
+    }
+}
+
+async fn outbound_submission_counts(pool: &PgPool, fixture: &RuntimeFixture) -> Result<(i64, i64)> {
+    let row = sqlx::query(
+        r#"
+        SELECT
+            (SELECT COUNT(*) FROM submission_queue
+             WHERE tenant_id = $1 AND account_id = $2) AS queue_count,
+            (SELECT COUNT(*)
+             FROM mailbox_messages membership
+             JOIN mailboxes mailbox
+               ON mailbox.tenant_id = membership.tenant_id
+              AND mailbox.account_id = membership.account_id
+              AND mailbox.id = membership.mailbox_id
+             WHERE membership.tenant_id = $1
+               AND membership.account_id = $2
+               AND membership.visibility = 'visible'
+               AND mailbox.role = 'sent') AS sent_count
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .fetch_one(pool)
+    .await?;
+    Ok((row.try_get("queue_count")?, row.try_get("sent_count")?))
+}
+
+async fn expect_request_rejected_without_submission(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+    input: SubmitMessageInput,
+    label: &str,
+) -> Result<()> {
+    let before = outbound_submission_counts(pool, fixture).await?;
+    let result = storage
+        .submit_message(
+            input,
+            audit("alice@example.test", "mapi-submit-request", label),
+        )
+        .await;
+    anyhow::ensure!(result.is_err(), "{label} REQUEST unexpectedly submitted");
+    anyhow::ensure!(
+        outbound_submission_counts(pool, fixture).await? == before,
+        "{label} REQUEST created Sent or queue state before correlation failed"
+    );
+    Ok(())
+}
+
+async fn exercise_atomic_submission_source_claim(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    let web_draft = storage
+        .save_draft_message(
+            SubmitMessageInput {
+                draft_message_id: None,
+                account_id: fixture.account_id,
+                submitted_by_account_id: fixture.account_id,
+                source: "web-client".to_string(),
+                from_display: Some("Alice Web".to_string()),
+                from_address: fixture.account_email.clone(),
+                sender_display: None,
+                sender_address: None,
+                to: vec![SubmittedRecipientInput {
+                    address: "old-recipient@example.test".to_string(),
+                    display_name: None,
+                }],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "Old saved editor subject".to_string(),
+                body_text: "Old saved editor body".to_string(),
+                body_html_sanitized: None,
+                internet_message_id: None,
+                mime_blob_ref: None,
+                size_octets: 64,
+                unread: Some(false),
+                flagged: Some(false),
+                replace_attachments: false,
+                attachments: Vec::new(),
+            },
+            audit(
+                "alice@example.test",
+                "web-save-draft",
+                "atomic editor source",
+            ),
+        )
+        .await
+        .context("save source for atomic web update-and-submit")?;
+    let web_submission = storage
+        .submit_message(
+            SubmitMessageInput {
+                draft_message_id: Some(web_draft.message_id),
+                account_id: fixture.account_id,
+                submitted_by_account_id: fixture.account_id,
+                source: "web-client".to_string(),
+                from_display: Some("Alice Web".to_string()),
+                from_address: fixture.account_email.clone(),
+                sender_display: None,
+                sender_address: None,
+                to: vec![SubmittedRecipientInput {
+                    address: "current-recipient@example.test".to_string(),
+                    display_name: Some("Current Recipient".to_string()),
+                }],
+                cc: Vec::new(),
+                bcc: vec![SubmittedRecipientInput {
+                    address: "current-hidden@example.test".to_string(),
+                    display_name: Some("Current Hidden".to_string()),
+                }],
+                subject: "Current unsaved editor subject".to_string(),
+                body_text: "Current unsaved editor body".to_string(),
+                body_html_sanitized: None,
+                internet_message_id: None,
+                mime_blob_ref: None,
+                size_octets: 96,
+                unread: Some(false),
+                flagged: Some(false),
+                replace_attachments: true,
+                attachments: vec![AttachmentUploadInput {
+                    file_name: "current-editor.bin".to_string(),
+                    media_type: "application/octet-stream".to_string(),
+                    disposition: Some("attachment".to_string()),
+                    content_id: None,
+                    is_scheduling_body: false,
+                    blob_bytes: b"atomic-editor-attachment-bytes".to_vec(),
+                }],
+            },
+            audit(
+                "alice@example.test",
+                "web-submit-message",
+                "atomic editor source",
+            ),
+        )
+        .await
+        .context("atomically update and submit web editor source")?;
+    let web_raw = storage
+        .fetch_jmap_message_blob(fixture.account_id, web_submission.message_id)
+        .await
+        .context("fetch atomic web submission raw message")?
+        .context("atomic web submission raw message is missing")?;
+    let web_raw = String::from_utf8_lossy(&web_raw.blob_bytes);
+    anyhow::ensure!(
+        web_raw.contains("Subject: Current unsaved editor subject")
+            && web_raw.contains("Current unsaved editor body")
+            && web_raw.contains("current-recipient@example.test")
+            && !web_raw.contains("Old saved editor subject")
+            && !web_raw.contains("old-recipient@example.test"),
+        "web update-and-submit must send the complete current editor fields and new attachment, not the prior persisted version"
+    );
+    let editor_attachment = storage
+        .fetch_activesync_message_attachments(fixture.account_id, web_submission.message_id)
+        .await
+        .context("fetch Sent attachments after atomic editor submission")?
+        .into_iter()
+        .find(|attachment| attachment.file_name == "current-editor.bin")
+        .context("atomic editor attachment is missing from the exact Sent version")?;
+    let editor_attachment_content = storage
+        .fetch_activesync_attachment_content(fixture.account_id, &editor_attachment.file_reference)
+        .await
+        .context("fetch atomic editor Sent attachment content")?
+        .context("atomic editor Sent attachment content is missing")?;
+    anyhow::ensure!(
+        editor_attachment_content.blob_bytes == b"atomic-editor-attachment-bytes",
+        "web update-and-submit must carry the exact new editor attachment bytes into Sent"
+    );
+    let ordinary_sent_classification = sqlx::query(
+        r#"
+        SELECT classification.classification,
+               classification.classification_generation,
+               classification.needs_reclassification,
+               COUNT(projection.message_id) AS projection_count,
+               COALESCE(MAX(projection.applied_generation), 0) AS applied_generation
+        FROM calendar_mail_classifications classification
+        LEFT JOIN calendar_mail_classification_projections projection
+          ON projection.tenant_id = classification.tenant_id
+         AND projection.account_id = $2
+         AND projection.message_id = classification.message_id
+        WHERE classification.tenant_id = $1 AND classification.message_id = $3
+        GROUP BY classification.classification, classification.classification_generation,
+                 classification.needs_reclassification
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(web_submission.message_id)
+    .fetch_one(pool)
+    .await
+    .context("load initial ordinary Sent calendar-mail classification")?;
+    anyhow::ensure!(
+        ordinary_sent_classification.try_get::<String, _>("classification")? == "none"
+            && ordinary_sent_classification
+                .try_get::<i64, _>("classification_generation")?
+                == 1
+            && !ordinary_sent_classification.try_get::<bool, _>("needs_reclassification")?
+            && ordinary_sent_classification.try_get::<i64, _>("projection_count")? == 1
+            && ordinary_sent_classification.try_get::<i64, _>("applied_generation")? == 1,
+        "ordinary Sent mail must persist and acknowledge its initial none classification without lazy repair"
+    );
+    let protected_bcc = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM submission_recipients
+        WHERE tenant_id = $1
+          AND submission_queue_id = $2
+          AND role = 'bcc'
+          AND address = 'current-hidden@example.test'
+          AND protected_metadata = TRUE
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(web_submission.outbound_queue_id)
+    .fetch_one(pool)
+    .await
+    .context("count protected Bcc on atomic web submission")?;
+    anyhow::ensure!(
+        protected_bcc == 1,
+        "web update-and-submit must carry the current protected Bcc into the exact queued version"
+    );
+
+    let source_patch_draft = storage
+        .save_draft_message(
+            SubmitMessageInput {
+                draft_message_id: None,
+                account_id: fixture.account_id,
+                submitted_by_account_id: fixture.account_id,
+                source: "mapi".to_string(),
+                from_display: Some("Alice Source Patch".to_string()),
+                from_address: fixture.account_email.clone(),
+                sender_display: None,
+                sender_address: None,
+                to: vec![SubmittedRecipientInput {
+                    address: "source-patch@example.test".to_string(),
+                    display_name: None,
+                }],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "Persisted source patch baseline".to_string(),
+                body_text: "Persisted source patch baseline body".to_string(),
+                body_html_sanitized: None,
+                internet_message_id: None,
+                mime_blob_ref: None,
+                size_octets: 128,
+                unread: Some(false),
+                flagged: Some(false),
+                replace_attachments: false,
+                attachments: vec![
+                    AttachmentUploadInput {
+                        file_name: "delete-before-submit.bin".to_string(),
+                        media_type: "application/octet-stream".to_string(),
+                        disposition: Some("attachment".to_string()),
+                        content_id: None,
+                        is_scheduling_body: false,
+                        blob_bytes: b"delete-before-submit".to_vec(),
+                    },
+                    AttachmentUploadInput {
+                        file_name: "keep-before-submit.bin".to_string(),
+                        media_type: "application/octet-stream".to_string(),
+                        disposition: Some("attachment".to_string()),
+                        content_id: None,
+                        is_scheduling_body: false,
+                        blob_bytes: b"keep-before-submit".to_vec(),
+                    },
+                ],
+            },
+            audit(
+                "alice@example.test",
+                "mapi-save-draft",
+                "atomic source patch baseline",
+            ),
+        )
+        .await
+        .context("save source for atomic selective patch submission")?;
+    let retained_parent_mime_part_id = Uuid::new_v4();
+    let renamed_body_part = sqlx::query(
+        r#"
+        UPDATE mime_parts part
+        SET part_path = 'body.original'
+        WHERE part.tenant_id = $1
+          AND part.message_id = $2
+          AND EXISTS (
+              SELECT 1
+              FROM message_bodies body
+              WHERE body.tenant_id = part.tenant_id
+                AND body.message_id = part.message_id
+                AND body.mime_part_id = part.id
+          )
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(source_patch_draft.message_id)
+    .execute(pool)
+    .await
+    .context("free the legacy body path for retained MIME-ancestor coverage")?;
+    anyhow::ensure!(
+        renamed_body_part.rows_affected() == 1,
+        "the sparse MIME fixture must contain exactly one original body part"
+    );
+    sqlx::query(
+        r#"
+        INSERT INTO mime_parts (
+            id, tenant_id, message_id, domain_id, parent_part_id,
+            part_path, ordinal, content_type, size_octets
+        )
+        SELECT $1, message.tenant_id, message.id, message.domain_id, NULL,
+               '1', 99, 'multipart/mixed', 0
+        FROM messages message
+        WHERE message.tenant_id = $2 AND message.id = $3
+        "#,
+    )
+    .bind(retained_parent_mime_part_id)
+    .bind(fixture.tenant_id)
+    .bind(source_patch_draft.message_id)
+    .execute(pool)
+    .await
+    .context("seed retained multipart ancestor on the legacy body path")?;
+    let parented_attachment = sqlx::query(
+        r#"
+        UPDATE mime_parts part
+        SET parent_part_id = $4
+        FROM attachments attachment
+        WHERE attachment.tenant_id = $1
+          AND attachment.account_id = $2
+          AND attachment.message_id = $3
+          AND attachment.file_name = 'keep-before-submit.bin'
+          AND part.tenant_id = attachment.tenant_id
+          AND part.message_id = attachment.message_id
+          AND part.id = attachment.mime_part_id
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(source_patch_draft.message_id)
+    .bind(retained_parent_mime_part_id)
+    .execute(pool)
+    .await
+    .context("attach the retained MIME leaf to its multipart ancestor")?;
+    anyhow::ensure!(
+        parented_attachment.rows_affected() == 1,
+        "the sparse MIME fixture must parent exactly one retained attachment"
+    );
+    let delete_attachment_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT id
+        FROM attachments
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND message_id = $3
+          AND file_name = 'delete-before-submit.bin'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(source_patch_draft.message_id)
+    .fetch_one(pool)
+    .await
+    .context("load attachment selected for atomic source deletion")?;
+    let source_patch_modseq = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT modseq
+        FROM mailbox_messages
+        WHERE tenant_id = $1 AND account_id = $2 AND message_id = $3
+          AND visibility = 'visible'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(source_patch_draft.message_id)
+    .fetch_one(pool)
+    .await
+    .context("load source modseq for optimistic overlay claim")?
+    .try_into()
+    .context("source modseq is outside the canonical unsigned range")?;
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_custom_property_values (
+            tenant_id, account_id, object_kind, canonical_id,
+            property_tag, property_type, property_value
+        )
+        VALUES
+            ($1, $2, 'message', $3, $4, $5, $6),
+            ($1, $2, 'message', $3, $7, $8, $9)
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(source_patch_draft.message_id)
+    .bind(i64::from(0x9000_001Fu32))
+    .bind(i32::from(0x001Fu16))
+    .bind(b"old-custom-value".as_slice())
+    .bind(i64::from(0x9001_0003u32))
+    .bind(i32::from(0x0003u16))
+    .bind(b"delete-custom-value".as_slice())
+    .execute(pool)
+    .await
+    .context("seed persisted custom Message properties for atomic source patch")?;
+
+    let source_patch_input = SubmitMessageInput {
+        draft_message_id: Some(source_patch_draft.message_id),
+        account_id: fixture.account_id,
+        submitted_by_account_id: fixture.account_id,
+        source: "mapi".to_string(),
+        from_display: Some("Alice Source Patch".to_string()),
+        from_address: fixture.account_email.clone(),
+        sender_display: None,
+        sender_address: None,
+        to: vec![SubmittedRecipientInput {
+            address: "source-patch@example.test".to_string(),
+            display_name: None,
+        }],
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        subject: "Effective source patch version".to_string(),
+        body_text: "Effective source patch body".to_string(),
+        body_html_sanitized: None,
+        internet_message_id: None,
+        mime_blob_ref: None,
+        size_octets: 160,
+        unread: Some(true),
+        flagged: Some(true),
+        replace_attachments: false,
+        attachments: vec![AttachmentUploadInput {
+            file_name: "append-after-gap.bin".to_string(),
+            media_type: "application/octet-stream".to_string(),
+            disposition: Some("attachment".to_string()),
+            content_id: None,
+            is_scheduling_body: false,
+            blob_bytes: b"append-after-gap".to_vec(),
+        }],
+    };
+    let stale_patch = storage
+        .submit_message_with_source_patch(
+            source_patch_input.clone(),
+            SubmissionSourcePatch {
+                expected_source_modseq: Some(source_patch_modseq + 1),
+                ..Default::default()
+            },
+            audit(
+                "alice@example.test",
+                "mapi-submit-message",
+                "reject stale source overlay",
+            ),
+        )
+        .await;
+    anyhow::ensure!(
+        stale_patch.is_err(),
+        "a source patch must reject a stale pre-claim client snapshot"
+    );
+    let invalid_patch = storage
+        .submit_message_with_source_patch(
+            source_patch_input.clone(),
+            SubmissionSourcePatch {
+                expected_source_modseq: Some(source_patch_modseq),
+                delete_attachment_ids: vec![Uuid::new_v4()],
+                ..Default::default()
+            },
+            audit(
+                "alice@example.test",
+                "mapi-submit-message",
+                "reject foreign source attachment patch",
+            ),
+        )
+        .await;
+    anyhow::ensure!(
+        invalid_patch.is_err(),
+        "a source patch must reject an attachment id outside the claimed message"
+    );
+    let source_still_visible = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mailbox_messages
+        WHERE tenant_id = $1 AND account_id = $2 AND message_id = $3
+          AND visibility = 'visible'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(source_patch_draft.message_id)
+    .fetch_one(pool)
+    .await
+    .context("check source visibility after rejected selective patch")?;
+    anyhow::ensure!(
+        source_still_visible == 1,
+        "a rejected source patch must roll back without expunging its source"
+    );
+
+    let source_patch_submission = storage
+        .submit_message_with_source_patch(
+            source_patch_input,
+            SubmissionSourcePatch {
+                expected_source_modseq: Some(source_patch_modseq),
+                delete_attachment_ids: vec![delete_attachment_id],
+                custom_property_upserts: vec![
+                    SubmissionMessageCustomPropertyInput {
+                        property_tag: 0x9000_001F,
+                        property_type: 0x001F,
+                        property_value: b"updated-custom-value".to_vec(),
+                    },
+                    SubmissionMessageCustomPropertyInput {
+                        property_tag: 0x9002_0102,
+                        property_type: 0x0102,
+                        property_value: b"new-custom-value".to_vec(),
+                    },
+                ],
+                delete_custom_property_tags: vec![0x9001_0003],
+                canonical_followup_update: Some(JmapEmailFollowupUpdate {
+                    followup_flag_status: Some("flagged".to_string()),
+                    followup_icon: Some(4),
+                    todo_item_flags: Some(8),
+                    followup_request: Some("Follow up after send".to_string()),
+                    categories: Some(vec![
+                        "Red".to_string(),
+                        "Blue".to_string(),
+                        "Red".to_string(),
+                    ]),
+                    ..Default::default()
+                }),
+            },
+            audit(
+                "alice@example.test",
+                "mapi-submit-message",
+                "atomic selective source patch",
+            ),
+        )
+        .await
+        .context("apply selective source patch and submit exact result")?;
+    let source_attachment_rows = sqlx::query(
+        r#"
+        SELECT a.file_name, a.ordinal, part.part_path
+        FROM attachments a
+        JOIN mime_parts part
+          ON part.tenant_id = a.tenant_id
+         AND part.message_id = a.message_id
+         AND part.id = a.mime_part_id
+        WHERE a.tenant_id = $1 AND a.account_id = $2 AND a.message_id = $3
+        ORDER BY a.ordinal, a.id
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(source_patch_draft.message_id)
+    .fetch_all(pool)
+    .await
+    .context("load sparse source attachment graph after selective append")?;
+    let source_attachment_graph = source_attachment_rows
+        .iter()
+        .map(|row| {
+            Ok((
+                row.try_get::<String, _>("file_name")?,
+                row.try_get::<i32, _>("ordinal")?,
+                row.try_get::<String, _>("part_path")?,
+            ))
+        })
+        .collect::<std::result::Result<Vec<_>, sqlx::Error>>()?;
+    anyhow::ensure!(
+        source_attachment_graph
+            == vec![
+                (
+                    "keep-before-submit.bin".to_string(),
+                    1,
+                    "attachment.2".to_string(),
+                ),
+                (
+                    "append-after-gap.bin".to_string(),
+                    2,
+                    "attachment.3".to_string(),
+                ),
+            ],
+        "an append after selective deletion must allocate after the locked maximum ordinal without colliding with a sparse MIME graph; got {source_attachment_graph:?}"
+    );
+    let preserved_mime_ancestry = sqlx::query(
+        r#"
+        SELECT parent.id AS parent_id,
+               parent.part_path AS parent_path,
+               child.parent_part_id,
+               body_part.part_path AS body_part_path
+        FROM attachments attachment
+        JOIN mime_parts child
+          ON child.tenant_id = attachment.tenant_id
+         AND child.message_id = attachment.message_id
+         AND child.id = attachment.mime_part_id
+        JOIN mime_parts parent
+          ON parent.tenant_id = child.tenant_id
+         AND parent.message_id = child.message_id
+         AND parent.id = child.parent_part_id
+        JOIN message_bodies body
+          ON body.tenant_id = attachment.tenant_id
+         AND body.message_id = attachment.message_id
+         AND body.body_kind = 'text'
+        JOIN mime_parts body_part
+          ON body_part.tenant_id = body.tenant_id
+         AND body_part.message_id = body.message_id
+         AND body_part.id = body.mime_part_id
+        WHERE attachment.tenant_id = $1
+          AND attachment.account_id = $2
+          AND attachment.message_id = $3
+          AND attachment.file_name = 'keep-before-submit.bin'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(source_patch_draft.message_id)
+    .fetch_one(pool)
+    .await
+    .context("load retained MIME ancestry after body rewrite")?;
+    anyhow::ensure!(
+        preserved_mime_ancestry.try_get::<Uuid, _>("parent_id")?
+            == retained_parent_mime_part_id
+            && preserved_mime_ancestry.try_get::<String, _>("parent_path")? == "1"
+            && preserved_mime_ancestry.try_get::<Option<Uuid>, _>("parent_part_id")?
+                == Some(retained_parent_mime_part_id)
+            && preserved_mime_ancestry
+                .try_get::<String, _>("body_part_path")?
+                .starts_with("body.text."),
+        "body replacement must preserve attachment MIME ancestry and allocate a noncolliding body path"
+    );
+    let sent_attachment_names = sqlx::query_scalar::<_, Vec<String>>(
+        r#"
+        SELECT COALESCE(array_agg(file_name ORDER BY ordinal, id), ARRAY[]::TEXT[])
+        FROM attachments
+        WHERE tenant_id = $1 AND account_id = $2 AND message_id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(source_patch_submission.message_id)
+    .fetch_one(pool)
+    .await
+    .context("load Sent attachments after selective source patch")?;
+    anyhow::ensure!(
+        sent_attachment_names
+            == vec![
+                "keep-before-submit.bin".to_string(),
+                "append-after-gap.bin".to_string(),
+            ],
+        "Sent must contain the exact preserved-plus-appended attachment set after selective deletion"
+    );
+    let sent_custom_properties = sqlx::query(
+        r#"
+        SELECT property_tag, property_type, property_value
+        FROM mapi_custom_property_values
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'message'
+          AND canonical_id = $3
+        ORDER BY property_tag
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(source_patch_submission.message_id)
+    .fetch_all(pool)
+    .await
+    .context("load Sent custom Message property bag after source patch")?;
+    anyhow::ensure!(
+        sent_custom_properties.len() == 2
+            && sent_custom_properties[0].try_get::<i64, _>("property_tag")?
+                == i64::from(0x9000_001Fu32)
+            && sent_custom_properties[0].try_get::<i32, _>("property_type")?
+                == i32::from(0x001Fu16)
+            && sent_custom_properties[0].try_get::<Vec<u8>, _>("property_value")?
+                == b"updated-custom-value"
+            && sent_custom_properties[1].try_get::<i64, _>("property_tag")?
+                == i64::from(0x9002_0102u32)
+            && sent_custom_properties[1].try_get::<Vec<u8>, _>("property_value")?
+                == b"new-custom-value",
+        "Sent must preserve the effective pre-existing plus patched custom Message property bag and omit deletes"
+    );
+    let sent_followup = sqlx::query(
+        r#"
+        SELECT is_seen, is_flagged, followup_flag_status, followup_icon,
+               todo_item_flags, followup_request, keywords
+        FROM mailbox_messages
+        WHERE tenant_id = $1 AND account_id = $2 AND message_id = $3
+          AND visibility = 'visible'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(source_patch_submission.message_id)
+    .fetch_one(pool)
+    .await
+    .context("load effective follow-up state on patched Sent message")?;
+    anyhow::ensure!(
+        !sent_followup.try_get::<bool, _>("is_seen")?
+            && sent_followup.try_get::<bool, _>("is_flagged")?
+            && sent_followup.try_get::<String, _>("followup_flag_status")? == "flagged"
+            && sent_followup.try_get::<i32, _>("followup_icon")? == 4
+            && sent_followup.try_get::<i32, _>("todo_item_flags")? == 8
+            && sent_followup.try_get::<String, _>("followup_request")? == "Follow up after send"
+            && sent_followup.try_get::<Vec<String>, _>("keywords")?
+                == vec!["Blue".to_string(), "Red".to_string()],
+        "Sent must preserve the effective canonical follow-up state from the claimed source"
+    );
+
+    let attachment_race_draft = storage
+        .save_draft_message(
+            SubmitMessageInput {
+                draft_message_id: None,
+                account_id: fixture.account_id,
+                submitted_by_account_id: fixture.account_id,
+                source: "jmap".to_string(),
+                from_display: Some("Alice Attachment Race".to_string()),
+                from_address: fixture.account_email.clone(),
+                sender_display: None,
+                sender_address: None,
+                to: vec![SubmittedRecipientInput {
+                    address: "attachment-race@example.test".to_string(),
+                    display_name: None,
+                }],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "Attachment source claim race".to_string(),
+                body_text: "The queued version must match the attachment mutation outcome"
+                    .to_string(),
+                body_html_sanitized: None,
+                internet_message_id: None,
+                mime_blob_ref: None,
+                size_octets: 96,
+                unread: Some(false),
+                flagged: Some(false),
+                replace_attachments: false,
+                attachments: Vec::new(),
+            },
+            audit(
+                "alice@example.test",
+                "jmap-save-draft",
+                "attachment source claim race",
+            ),
+        )
+        .await
+        .context("save source for attachment mutation race")?;
+    let add_attachment = storage.add_message_attachment(
+        fixture.account_id,
+        attachment_race_draft.message_id,
+        AttachmentUploadInput {
+            file_name: "attachment-race.bin".to_string(),
+            media_type: "application/octet-stream".to_string(),
+            disposition: Some("attachment".to_string()),
+            content_id: None,
+            is_scheduling_body: false,
+            blob_bytes: b"attachment-source-claim-race-bytes".to_vec(),
+        },
+        audit(
+            "alice@example.test",
+            "jmap-add-attachment",
+            "attachment source claim race",
+        ),
+    );
+    let submit_attachment_source = storage.submit_draft_message(
+        fixture.account_id,
+        attachment_race_draft.message_id,
+        fixture.account_id,
+        "jmap",
+        audit(
+            "alice@example.test",
+            "jmap-submit-draft",
+            "attachment source claim race",
+        ),
+    );
+    let (attachment_result, attachment_submission) =
+        tokio::join!(add_attachment, submit_attachment_source);
+    if let Err(error) = attachment_result.as_ref() {
+        anyhow::ensure!(
+            error
+                .to_string()
+                .contains("message not found after attachment creation"),
+            "attachment mutation race returned an unexpected error: {error:#}"
+        );
+    }
+    let attachment_submission = attachment_submission
+        .context("submit the source participating in the attachment mutation race")?;
+    let source_attachment_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM attachments
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND message_id = $3
+          AND file_name = 'attachment-race.bin'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(attachment_race_draft.message_id)
+    .fetch_one(pool)
+    .await
+    .context("count source attachments after attachment mutation race")?;
+    let sent_attachment_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM attachments
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND message_id = $3
+          AND file_name = 'attachment-race.bin'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(attachment_submission.message_id)
+    .fetch_one(pool)
+    .await
+    .context("count Sent attachments after attachment mutation race")?;
+    anyhow::ensure!(
+        source_attachment_count <= 1 && source_attachment_count == sent_attachment_count,
+        "a concurrent attachment mutation must either precede the claim and appear in Sent, or lose visibility without mutating the source"
+    );
+
+    let recipient_race_draft = storage
+        .save_draft_message(
+            SubmitMessageInput {
+                draft_message_id: None,
+                account_id: fixture.account_id,
+                submitted_by_account_id: fixture.account_id,
+                source: "jmap".to_string(),
+                from_display: Some("Alice Recipient Race".to_string()),
+                from_address: fixture.account_email.clone(),
+                sender_display: None,
+                sender_address: None,
+                to: vec![SubmittedRecipientInput {
+                    address: "old-race-recipient@example.test".to_string(),
+                    display_name: None,
+                }],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "Recipient source claim race".to_string(),
+                body_text: "The queue envelope must match the claimed recipient version"
+                    .to_string(),
+                body_html_sanitized: None,
+                internet_message_id: None,
+                mime_blob_ref: None,
+                size_octets: 96,
+                unread: Some(false),
+                flagged: Some(false),
+                replace_attachments: false,
+                attachments: Vec::new(),
+            },
+            audit(
+                "alice@example.test",
+                "jmap-save-draft",
+                "recipient source claim race",
+            ),
+        )
+        .await
+        .context("save source for recipient mutation race")?;
+    let replacement_to = vec![SubmittedRecipientInput {
+        address: "new-race-recipient@example.test".to_string(),
+        display_name: None,
+    }];
+    let replace_recipients = storage.replace_message_recipients(
+        fixture.account_id,
+        recipient_race_draft.message_id,
+        &replacement_to,
+        &[],
+        &[],
+        audit(
+            "alice@example.test",
+            "jmap-replace-recipients",
+            "recipient source claim race",
+        ),
+    );
+    let submit_recipient_source = storage.submit_draft_message(
+        fixture.account_id,
+        recipient_race_draft.message_id,
+        fixture.account_id,
+        "jmap",
+        audit(
+            "alice@example.test",
+            "jmap-submit-draft",
+            "recipient source claim race",
+        ),
+    );
+    let (recipient_result, recipient_submission) =
+        tokio::join!(replace_recipients, submit_recipient_source);
+    if let Err(error) = recipient_result.as_ref() {
+        anyhow::ensure!(
+            error.to_string().contains("message not found"),
+            "recipient mutation race returned an unexpected error: {error:#}"
+        );
+    }
+    let recipient_submission = recipient_submission
+        .context("submit the source participating in the recipient mutation race")?;
+    let source_to = sqlx::query_scalar::<_, Vec<String>>(
+        r#"
+        SELECT COALESCE(array_agg(address ORDER BY ordinal, id), ARRAY[]::TEXT[])
+        FROM message_recipients
+        WHERE tenant_id = $1 AND message_id = $2 AND role = 'to'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(recipient_race_draft.message_id)
+    .fetch_one(pool)
+    .await
+    .context("load source recipients after recipient mutation race")?;
+    let queued_to = sqlx::query_scalar::<_, Vec<String>>(
+        r#"
+        SELECT COALESCE(array_agg(address ORDER BY ordinal, id), ARRAY[]::TEXT[])
+        FROM submission_recipients
+        WHERE tenant_id = $1 AND submission_queue_id = $2 AND role = 'to'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(recipient_submission.outbound_queue_id)
+    .fetch_one(pool)
+    .await
+    .context("load queued recipients after recipient mutation race")?;
+    anyhow::ensure!(
+        source_to == queued_to
+            && matches!(
+                source_to.as_slice(),
+                [address]
+                    if address == "old-race-recipient@example.test"
+                        || address == "new-race-recipient@example.test"
+            ),
+        "a concurrent recipient mutation must either precede the claim in both source and queue state, or fail without rewriting the expunged source"
+    );
+
+    let race_draft = storage
+        .save_draft_message(
+            SubmitMessageInput {
+                draft_message_id: None,
+                account_id: fixture.account_id,
+                submitted_by_account_id: fixture.account_id,
+                source: "jmap".to_string(),
+                from_display: Some("Alice Race".to_string()),
+                from_address: fixture.account_email.clone(),
+                sender_display: None,
+                sender_address: None,
+                to: vec![SubmittedRecipientInput {
+                    address: "race-recipient@example.test".to_string(),
+                    display_name: None,
+                }],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "Single source claim race".to_string(),
+                body_text: "Only one concurrent submit may commit".to_string(),
+                body_html_sanitized: None,
+                internet_message_id: None,
+                mime_blob_ref: None,
+                size_octets: 64,
+                unread: Some(false),
+                flagged: Some(false),
+                replace_attachments: false,
+                attachments: Vec::new(),
+            },
+            audit(
+                "alice@example.test",
+                "jmap-save-draft",
+                "single source claim race",
+            ),
+        )
+        .await
+        .context("save source for concurrent submission claim")?;
+    let first = storage.submit_draft_message(
+        fixture.account_id,
+        race_draft.message_id,
+        fixture.account_id,
+        "jmap",
+        audit(
+            "alice@example.test",
+            "jmap-submit-draft",
+            "single source claim race first",
+        ),
+    );
+    let second = storage.submit_draft_message(
+        fixture.account_id,
+        race_draft.message_id,
+        fixture.account_id,
+        "jmap",
+        audit(
+            "alice@example.test",
+            "jmap-submit-draft",
+            "single source claim race second",
+        ),
+    );
+    let (first, second) = tokio::join!(first, second);
+    let outcomes = [first, second];
+    anyhow::ensure!(
+        outcomes.iter().filter(|outcome| outcome.is_ok()).count() == 1
+            && outcomes.iter().filter(|outcome| outcome.is_err()).count() == 1,
+        "two concurrent persisted-source submits must produce exactly one committed submission"
+    );
+    let membership_state = sqlx::query(
+        r#"
+        SELECT
+            COUNT(*) FILTER (WHERE visibility = 'visible') AS visible_count,
+            COUNT(*) FILTER (WHERE visibility = 'expunged') AS expunged_count
+        FROM mailbox_messages
+        WHERE tenant_id = $1 AND account_id = $2 AND message_id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(race_draft.message_id)
+    .fetch_one(pool)
+    .await
+    .context("load source membership state after concurrent submit")?;
+    anyhow::ensure!(
+        membership_state.try_get::<i64, _>("visible_count")? == 0
+            && membership_state.try_get::<i64, _>("expunged_count")? == 1,
+        "concurrent submit must expunge exactly the one claimed source membership"
     );
 
     Ok(())

@@ -42,7 +42,9 @@ where
                 .filter(|collection| collection.id == input.collection_id)
                 .collect::<Vec<_>>();
             let [collection] = matching.as_slice() else {
-                bail!("GetSharingMetadata requires one collection owned by the authenticated account");
+                bail!(
+                    "GetSharingMetadata requires one collection owned by the authenticated account"
+                );
             };
             let contacts = (collection.kind == "contacts")
                 .then(|| collection.clone())
@@ -52,7 +54,9 @@ where
                 .then(|| collection.clone())
                 .into_iter()
                 .collect::<Vec<_>>();
-            Ok(get_sharing_metadata_response(principal, &contacts, &calendars))
+            Ok(get_sharing_metadata_response(
+                principal, &contacts, &calendars,
+            ))
         }
         .await;
 
@@ -231,10 +235,16 @@ pub(in crate::service) fn validate_accept_sharing_invitation_shape(request: &str
     let [items] = item_collections.as_slice() else {
         bail!("CreateItem requires exactly one Items collection");
     };
-    let item_count = ["Message", "Contact", "CalendarItem", "Task", "AcceptSharingInvitation"]
-        .into_iter()
-        .map(|name| element_contents(items, name).len())
-        .sum::<usize>();
+    let item_count = [
+        "Message",
+        "Contact",
+        "CalendarItem",
+        "Task",
+        "AcceptSharingInvitation",
+    ]
+    .into_iter()
+    .map(|name| element_contents(items, name).len())
+    .sum::<usize>();
     if item_count != 1 || element_contents(items, "AcceptSharingInvitation").len() != 1 {
         bail!("CreateItem supports exactly one AcceptSharingInvitation item");
     }
@@ -427,7 +437,11 @@ fn parse_sharing_metadata_request(request: &str) -> Result<SharingMetadataReques
     };
     let ids = attribute_values_for_tag(folder, "FolderId", "Id")
         .into_iter()
-        .chain(attribute_values_for_tag(folder, "DistinguishedFolderId", "Id"))
+        .chain(attribute_values_for_tag(
+            folder,
+            "DistinguishedFolderId",
+            "Id",
+        ))
         .collect::<Vec<_>>();
     let [id] = ids.as_slice() else {
         bail!("GetSharingMetadata requires exactly one canonical contact or calendar folder id");

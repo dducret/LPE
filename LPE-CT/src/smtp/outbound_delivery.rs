@@ -375,6 +375,23 @@ pub(in crate::smtp) fn sanitize_outbound_ehlo_name(value: &str) -> String {
     }
 }
 
+pub(in crate::smtp) fn dot_stuff_smtp_data(data: &[u8]) -> Vec<u8> {
+    let mut stuffed = Vec::with_capacity(data.len());
+    let mut line_start = true;
+    let mut previous_was_cr = false;
+
+    for &byte in data {
+        if line_start && byte == b'.' {
+            stuffed.push(b'.');
+        }
+        stuffed.push(byte);
+        line_start = previous_was_cr && byte == b'\n';
+        previous_was_cr = byte == b'\r';
+    }
+
+    stuffed
+}
+
 fn is_valid_ehlo_hostname(value: &str) -> bool {
     if value.is_empty() || value.len() > 253 || !value.contains('.') {
         return false;
@@ -536,7 +553,11 @@ async fn relay_message_to_target_for_recipients(
             throttle: None,
         });
     }
-    writer.write_all(&message.data).await?;
+    // RFC 5321 section 4.5.2 requires SMTP clients to add one period to
+    // every DATA line that begins with a period.
+    writer
+        .write_all(&dot_stuff_smtp_data(&message.data))
+        .await?;
     if !message.data.ends_with(b"\r\n") {
         writer.write_all(b"\r\n").await?;
     }

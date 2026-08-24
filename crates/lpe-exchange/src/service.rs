@@ -75,8 +75,8 @@ mod ews {
     pub(super) mod folders;
     pub(super) mod ids;
     pub(super) mod item_batch_responses;
-    pub(super) mod item_reads;
     pub(super) mod item_mutations;
+    pub(super) mod item_reads;
     pub(super) mod items;
     pub(super) mod mail;
     pub(super) mod mail_apps;
@@ -609,7 +609,10 @@ where
         let result = async {
             let (mailbox_id, target_parent_id) =
                 requested_single_mailbox_folder_transfer(request, "MoveFolder")?;
-            let mailboxes = self.store.fetch_jmap_mailboxes(principal.account_id).await?;
+            let mailboxes = self
+                .store
+                .fetch_jmap_mailboxes(principal.account_id)
+                .await?;
             let mailbox = mailbox_by_id(&mailboxes, mailbox_id)?;
             ensure_custom_mailbox(mailbox)?;
             if let Some(target_parent_id) = target_parent_id {

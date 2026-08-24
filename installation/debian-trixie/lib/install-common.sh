@@ -703,6 +703,8 @@ WITH expected(relname, relkind) AS (
   VALUES
     ('accounts'::text, 'r'::text),
     ('account_sync_state', 'r'),
+    ('calendar_mail_classifications', 'r'),
+    ('calendar_mail_classification_projections', 'r'),
     ('calendar_events', 'r'),
     ('canonical_change_journal', 'r'),
     ('delegation_projection_state', 'r'),
@@ -750,6 +752,86 @@ SELECT CASE WHEN NOT EXISTS (
   SELECT * FROM expected
   EXCEPT
   SELECT * FROM actual
+) THEN 1 ELSE 0 END;
+SQL
+}
+
+calendar_mail_classification_shape_ok() {
+  local database_url="$1"
+  local predicate_file
+
+  predicate_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/calendar-mail-classification-shape.sql" \
+    || return 1
+  [[ -r "${predicate_file}" ]] || return 1
+
+  psql "${database_url}" -X -v ON_ERROR_STOP=1 -At -f "${predicate_file}"
+}
+
+calendar_meeting_response_state_shape_ok() {
+  local database_url="$1"
+
+  psql "${database_url}" -X -v ON_ERROR_STOP=1 -At <<'SQL'
+SELECT CASE WHEN
+  EXISTS (
+    SELECT 1
+    FROM pg_attribute attribute_row
+    JOIN pg_class table_row ON table_row.oid = attribute_row.attrelid
+    JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+    JOIN pg_attrdef default_row
+      ON default_row.adrelid = attribute_row.attrelid
+     AND default_row.adnum = attribute_row.attnum
+    WHERE namespace_row.nspname = 'public'
+      AND table_row.relname = 'calendar_events'
+      AND attribute_row.attname = 'meeting_response_state_json'
+      AND NOT attribute_row.attisdropped
+      AND pg_get_expr(default_row.adbin, default_row.adrelid) = '''{}''::jsonb'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM pg_constraint constraint_row
+    WHERE constraint_row.conrelid = to_regclass('public.calendar_events')
+      AND constraint_row.conname =
+          'calendar_events_meeting_response_state_json_object_check'
+      AND constraint_row.contype = 'c'
+      AND constraint_row.convalidated
+      AND pg_get_expr(constraint_row.conbin, constraint_row.conrelid) =
+          '(jsonb_typeof(meeting_response_state_json) = ''object''::text)'
+  )
+THEN 1 ELSE 0 END;
+SQL
+}
+
+calendar_meeting_request_correlation_index_shape_ok() {
+  local database_url="$1"
+
+  psql "${database_url}" -X -v ON_ERROR_STOP=1 -At <<'SQL'
+SELECT CASE WHEN EXISTS (
+  SELECT 1
+  FROM pg_index index_row
+  JOIN pg_class index_class ON index_class.oid = index_row.indexrelid
+  JOIN pg_namespace index_namespace ON index_namespace.oid = index_class.relnamespace
+  JOIN pg_class table_class ON table_class.oid = index_row.indrelid
+  JOIN pg_am access_method ON access_method.oid = index_class.relam
+  WHERE index_namespace.nspname = 'public'
+    AND index_class.relname = 'calendar_events_active_uid_correlation_idx'
+    AND table_class.relname = 'calendar_events'
+    AND access_method.amname = 'btree'
+    AND index_row.indisvalid
+    AND index_row.indisready
+    AND NOT index_row.indisunique
+    AND index_row.indnatts = 4
+    AND index_row.indnkeyatts = 4
+    AND (
+      SELECT array_agg(attribute_row.attname::text ORDER BY key_row.ordinality)
+      FROM unnest(index_row.indkey::smallint[]) WITH ORDINALITY
+           AS key_row(attnum, ordinality)
+      JOIN pg_attribute attribute_row
+        ON attribute_row.attrelid = index_row.indrelid
+       AND attribute_row.attnum = key_row.attnum
+      WHERE key_row.ordinality <= index_row.indnkeyatts
+    ) = ARRAY['tenant_id', 'owner_account_id', 'uid', 'id']::text[]
+    AND pg_get_expr(index_row.indpred, index_row.indrelid) =
+        '(lifecycle_state = ''active''::text)'
 ) THEN 1 ELSE 0 END;
 SQL
 }
@@ -1318,6 +1400,9 @@ canonical_schema_shape_is_current() {
 
   [[ "$(schema_metadata_shape_ok "${database_url}" "${expected_schema_version}")" == "1" ]] || return 1
   [[ "$(canonical_required_relations_shape_ok "${database_url}")" == "1" ]] || return 1
+  [[ "$(calendar_mail_classification_shape_ok "${database_url}")" == "1" ]] || return 1
+  [[ "$(calendar_meeting_response_state_shape_ok "${database_url}")" == "1" ]] || return 1
+  [[ "$(calendar_meeting_request_correlation_index_shape_ok "${database_url}")" == "1" ]] || return 1
   [[ "$(delegation_projection_shape_ok "${database_url}")" == "1" ]] || return 1
   [[ "$(mapi_auxiliary_shape_ok "${database_url}")" == "1" ]] || return 1
   [[ "$(mapi_low_dynamic_property_shape_ok "${database_url}")" == "1" ]] || return 1
@@ -1334,12 +1419,12 @@ canonical_schema_shape_is_current() {
   [[ "$(mail_change_log_copy_kind_shape_ok "${database_url}")" == "1" ]] || return 1
 
   shape_counts="$(
-    psql "${database_url}" -X -v ON_ERROR_STOP=1 -At -F '|' -c "SELECT (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_object_identities' AND column_name IN ('mapi_change_number', 'predecessor_change_list') AND is_nullable = 'NO' AND data_type = CASE column_name WHEN 'mapi_change_number' THEN 'bigint' WHEN 'predecessor_change_list' THEN 'bytea' END), (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'calendar_events' AND column_name IN ('lifecycle_state', 'deleted_at') AND is_nullable = CASE column_name WHEN 'lifecycle_state' THEN 'NO' WHEN 'deleted_at' THEN 'YES' END AND data_type = CASE column_name WHEN 'lifecycle_state' THEN 'text' WHEN 'deleted_at' THEN 'timestamp with time zone' END), (SELECT to_regclass('public.mapi_calendar_event_identity_moves')), (SELECT COUNT(DISTINCT table_row.relname) FROM pg_constraint constraint_row JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace WHERE namespace_row.nspname = 'public' AND table_row.relname IN ('mail_change_log', 'mapi_object_identities') AND constraint_row.contype = 'c' AND pg_get_constraintdef(constraint_row.oid) LIKE '%deleted_calendar_event%');"
+    psql "${database_url}" -X -v ON_ERROR_STOP=1 -At -F '|' -c "SELECT (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_object_identities' AND column_name IN ('mapi_change_number', 'predecessor_change_list') AND is_nullable = 'NO' AND data_type = CASE column_name WHEN 'mapi_change_number' THEN 'bigint' WHEN 'predecessor_change_list' THEN 'bytea' END), (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'calendar_events' AND column_name IN ('lifecycle_state', 'deleted_at', 'meeting_response_state_json') AND is_nullable = CASE column_name WHEN 'deleted_at' THEN 'YES' ELSE 'NO' END AND data_type = CASE column_name WHEN 'lifecycle_state' THEN 'text' WHEN 'deleted_at' THEN 'timestamp with time zone' ELSE 'jsonb' END), (SELECT to_regclass('public.mapi_calendar_event_identity_moves')), (SELECT COUNT(DISTINCT table_row.relname) FROM pg_constraint constraint_row JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace WHERE namespace_row.nspname = 'public' AND table_row.relname IN ('mail_change_log', 'mapi_object_identities') AND constraint_row.contype = 'c' AND pg_get_constraintdef(constraint_row.oid) LIKE '%deleted_calendar_event%');"
   )" || return 1
   IFS='|' read -r identity_version_column_count calendar_event_lifecycle_column_count calendar_event_identity_moves_table deleted_calendar_event_constraint_count <<<"${shape_counts}" || return 1
 
   [[ "${identity_version_column_count}" == "2" \
-    && "${calendar_event_lifecycle_column_count}" == "2" \
+    && "${calendar_event_lifecycle_column_count}" == "3" \
     && "${calendar_event_identity_moves_table}" == "mapi_calendar_event_identity_moves" \
     && "${deleted_calendar_event_constraint_count}" == "2" ]]
 }

@@ -18,7 +18,7 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE TABLE schema_metadata (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton = TRUE),
-    schema_version TEXT NOT NULL CHECK (schema_version = '0.5.3-sql'),
+    schema_version TEXT NOT NULL CHECK (schema_version = '0.5.2-sql'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -927,6 +927,12 @@ CREATE TABLE messages (
     blob_kind TEXT NOT NULL DEFAULT 'raw_message' CHECK (blob_kind = 'raw_message'),
     internet_message_id TEXT,
     message_hash TEXT NOT NULL CHECK (message_hash ~ '^[0-9a-f]{64}$'),
+    authorized_calendar_response_content_sha256 TEXT,
+    calendar_response_processed BOOLEAN NOT NULL DEFAULT FALSE,
+    CONSTRAINT messages_authorized_calendar_response_content_sha256_check CHECK (
+            authorized_calendar_response_content_sha256 IS NULL
+            OR authorized_calendar_response_content_sha256 ~ '^[0-9a-f]{64}$'
+        ),
     normalized_subject TEXT NOT NULL DEFAULT '',
     sent_at TIMESTAMPTZ,
     received_at TIMESTAMPTZ NOT NULL,
@@ -938,6 +944,10 @@ CREATE TABLE messages (
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, id, domain_id),
     CHECK (retained_until IS NULL OR retained_until >= created_at),
+    CONSTRAINT messages_calendar_response_processed_check CHECK (
+        NOT calendar_response_processed
+        OR authorized_calendar_response_content_sha256 IS NOT NULL
+    ),
     FOREIGN KEY (tenant_id, domain_id) REFERENCES domains (tenant_id, id) ON DELETE RESTRICT,
     FOREIGN KEY (tenant_id, domain_id, blob_id, blob_kind)
         REFERENCES blobs (tenant_id, domain_id, id, blob_kind)
@@ -1018,6 +1028,7 @@ CREATE TABLE mime_parts (
     ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
     content_type TEXT NOT NULL CHECK (btrim(content_type) <> ''),
     content_disposition TEXT CHECK (content_disposition IS NULL OR content_disposition IN ('inline', 'attachment')),
+    is_scheduling_body BOOLEAN NOT NULL DEFAULT FALSE,
     content_id TEXT,
     file_name TEXT,
     transfer_encoding TEXT,
@@ -1031,6 +1042,14 @@ CREATE TABLE mime_parts (
     UNIQUE (tenant_id, message_id, domain_id, id, blob_id, blob_kind),
     UNIQUE (tenant_id, message_id, part_path),
     CHECK ((blob_id IS NULL AND blob_kind IS NULL) OR (blob_id IS NOT NULL AND blob_kind IS NOT NULL)),
+    CONSTRAINT mime_parts_scheduling_body_check CHECK (
+        NOT is_scheduling_body
+        OR (
+            lower(btrim(split_part(content_type, ';', 1))) = 'text/calendar'
+            AND content_disposition IS DISTINCT FROM 'attachment'
+            AND blob_id IS NOT NULL
+        )
+    ),
     FOREIGN KEY (tenant_id, message_id, domain_id) REFERENCES messages (tenant_id, id, domain_id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, message_id, parent_part_id)
         REFERENCES mime_parts (tenant_id, message_id, id)
@@ -1042,6 +1061,79 @@ CREATE TABLE mime_parts (
 
 CREATE INDEX mime_parts_message_idx
     ON mime_parts (tenant_id, message_id, ordinal);
+
+CREATE UNIQUE INDEX mime_parts_one_scheduling_body_idx
+    ON mime_parts (tenant_id, message_id)
+    WHERE is_scheduling_body;
+
+CREATE TABLE calendar_mail_classifications (
+    tenant_id UUID NOT NULL,
+    message_id UUID NOT NULL,
+    parser_revision INTEGER NOT NULL,
+    classification_generation BIGINT NOT NULL DEFAULT 1,
+    requires_projection_rotation BOOLEAN NOT NULL DEFAULT FALSE,
+    needs_reclassification BOOLEAN NOT NULL DEFAULT FALSE,
+    classification TEXT NOT NULL,
+    scheduling_mime_part_id UUID,
+    metadata_json JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, message_id),
+    CONSTRAINT calendar_mail_classifications_parser_revision_check
+        CHECK (parser_revision > 0),
+    CONSTRAINT calendar_mail_classifications_generation_check
+        CHECK (classification_generation > 0),
+    CONSTRAINT calendar_mail_classifications_classification_check
+        CHECK (classification IN ('none', 'request', 'response')),
+    CONSTRAINT calendar_mail_classifications_metadata_object_check
+        CHECK (jsonb_typeof(metadata_json) = 'object'),
+    CONSTRAINT calendar_mail_classifications_metadata_shape_check CHECK (
+        (needs_reclassification AND scheduling_mime_part_id IS NULL)
+        OR (NOT needs_reclassification AND (
+        (classification = 'none'
+            AND scheduling_mime_part_id IS NULL
+            AND metadata_json = '{"kind":"none"}'::jsonb)
+        OR (classification = 'request'
+            AND scheduling_mime_part_id IS NOT NULL
+            AND (metadata_json ->> 'kind' = 'request') IS TRUE
+            AND metadata_json ? 'request'
+            AND (jsonb_typeof(metadata_json -> 'request') = 'object') IS TRUE)
+        OR (classification = 'response'
+            AND scheduling_mime_part_id IS NOT NULL
+            AND (metadata_json ->> 'kind' = 'response') IS TRUE
+            AND metadata_json ? 'response'
+            AND (jsonb_typeof(metadata_json -> 'response') = 'object') IS TRUE)
+        ))
+    ),
+    CONSTRAINT calendar_mail_classifications_message_fkey
+        FOREIGN KEY (tenant_id, message_id)
+        REFERENCES messages (tenant_id, id)
+        ON DELETE CASCADE,
+    CONSTRAINT calendar_mail_classifications_mime_part_fkey
+        FOREIGN KEY (tenant_id, message_id, scheduling_mime_part_id)
+        REFERENCES mime_parts (tenant_id, message_id, id)
+        ON DELETE CASCADE
+);
+
+CREATE TABLE calendar_mail_classification_projections (
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    message_id UUID NOT NULL,
+    applied_generation BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, account_id, message_id),
+    CONSTRAINT calendar_mail_classification_projections_generation_check
+        CHECK (applied_generation > 0),
+    CONSTRAINT calendar_mail_classification_projections_account_fkey
+        FOREIGN KEY (tenant_id, account_id)
+        REFERENCES accounts (tenant_id, id)
+        ON DELETE CASCADE,
+    CONSTRAINT calendar_mail_classification_projections_classification_fkey
+        FOREIGN KEY (tenant_id, message_id)
+        REFERENCES calendar_mail_classifications (tenant_id, message_id)
+        ON DELETE CASCADE
+);
 
 CREATE TABLE message_bodies (
     id UUID PRIMARY KEY,
@@ -2872,6 +2964,7 @@ CREATE TABLE calendar_events (
     status TEXT NOT NULL DEFAULT 'confirmed' CHECK (status IN ('confirmed', 'tentative', 'cancelled')),
     organizer_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     attendees_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    meeting_response_state_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     recurrence_rule TEXT,
     recurrence_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     recurrence_exceptions_json JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -2897,6 +2990,8 @@ CREATE TABLE calendar_events (
     CHECK ((NOT reminder_set) OR reminder_at IS NOT NULL),
     CHECK (jsonb_typeof(organizer_json) = 'object'),
     CHECK (jsonb_typeof(attendees_json) = 'object'),
+    CONSTRAINT calendar_events_meeting_response_state_json_object_check
+        CHECK (jsonb_typeof(meeting_response_state_json) = 'object'),
     CHECK (jsonb_typeof(recurrence_json) = 'object'),
     CHECK (jsonb_typeof(recurrence_exceptions_json) = 'array'),
     CHECK (jsonb_typeof(source_payload_json) = 'object'),
@@ -2914,6 +3009,10 @@ CREATE TABLE calendar_events (
 
 CREATE INDEX calendar_events_owner_time_idx
     ON calendar_events (tenant_id, owner_account_id, starts_at, ends_at)
+    WHERE lifecycle_state = 'active';
+
+CREATE INDEX calendar_events_active_uid_correlation_idx
+    ON calendar_events (tenant_id, owner_account_id, uid, id)
     WHERE lifecycle_state = 'active';
 
 CREATE INDEX calendar_events_owner_reminder_idx
@@ -3907,6 +4006,6 @@ SELECT
 FROM mail_search_documents msd;
 
 INSERT INTO schema_metadata (singleton, schema_version)
-VALUES (TRUE, '0.5.3-sql');
+VALUES (TRUE, '0.5.2-sql');
 
 COMMIT;

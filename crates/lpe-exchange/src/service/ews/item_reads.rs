@@ -13,7 +13,10 @@ where
         let ids = match requested_get_item_ids(request) {
             Ok(ids) => ids,
             Err(error) => {
-                return Ok(get_item_error_response("ErrorItemNotFound", &error.to_string()));
+                return Ok(get_item_error_response(
+                    "ErrorItemNotFound",
+                    &error.to_string(),
+                ));
             }
         };
         let include_mime_content = requested_mime_content(request);
@@ -72,11 +75,7 @@ where
             .store
             .fetch_public_folder_items_by_ids(principal.account_id, &public_folder_item_ids)
             .await?;
-        if contacts.len()
-            + events.len()
-            + tasks.len()
-            + emails.len()
-            + public_folder_items.len()
+        if contacts.len() + events.len() + tasks.len() + emails.len() + public_folder_items.len()
             != ids.len()
         {
             return Ok(get_item_error_response(
@@ -342,8 +341,7 @@ where
                 ))
             }
             FolderKind::PublicFolders => {
-                let Some(folder_id) = requested_public_folder_ids(parent).into_iter().next()
-                else {
+                let Some(folder_id) = requested_public_folder_ids(parent).into_iter().next() else {
                     return Ok(find_item_folder_not_found_response());
                 };
                 if self
@@ -379,13 +377,18 @@ fn requested_get_item_ids(request: &str) -> Result<Vec<String>> {
         let Some((kind, id)) = reference.id.split_once(':') else {
             bail!("GetItem item id is not supported");
         };
-        if !matches!(kind, "contact" | "event" | "task" | "message" | "public-folder-item")
-            || Uuid::parse_str(id).is_err()
+        if !matches!(
+            kind,
+            "contact" | "event" | "task" | "message" | "public-folder-item"
+        ) || Uuid::parse_str(id).is_err()
         {
             bail!("GetItem item id is not supported");
         }
     }
-    Ok(references.into_iter().map(|reference| reference.id).collect())
+    Ok(references
+        .into_iter()
+        .map(|reference| reference.id)
+        .collect())
 }
 
 fn requested_find_item_parent(request: &str) -> Result<(FolderKind, &str)> {

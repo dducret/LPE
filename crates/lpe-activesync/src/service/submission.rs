@@ -283,6 +283,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                 media_type: content.media_type,
                 disposition: Some("attachment".to_string()),
                 content_id: None,
+                is_scheduling_body: false,
                 blob_bytes: content.blob_bytes,
             });
         }

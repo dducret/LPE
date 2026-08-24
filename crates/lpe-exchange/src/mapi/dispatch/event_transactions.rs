@@ -1455,6 +1455,15 @@ pub(super) fn staged_event_commit_input(
             apply_calendar_pending_recipients(input, &event.event, &canonical_values, recipients);
         }
     }
+    if transaction.imported_identity.is_none() {
+        if let Some(input) = event_input.as_mut() {
+            materialize_owner_meeting_organizer(
+                input,
+                &event.event.owner_email,
+                &event.event.owner_display_name,
+            );
+        }
+    }
     let mut custom_property_upserts = custom_values
         .into_iter()
         .map(|(property_tag, value)| {

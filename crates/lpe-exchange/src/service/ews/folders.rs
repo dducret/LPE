@@ -515,7 +515,9 @@ where
         target: GetFolderTarget,
     ) -> Result<String> {
         match target {
-            GetFolderTarget::Root => Ok(root_folder_xml(self.root_child_folder_count(principal).await?)),
+            GetFolderTarget::Root => Ok(root_folder_xml(
+                self.root_child_folder_count(principal).await?,
+            )),
             GetFolderTarget::Mailbox(id) => {
                 let mailbox = self
                     .store
@@ -537,31 +539,43 @@ where
                 Ok(mailbox_folder_xml(&mailbox))
             }
             GetFolderTarget::PublicFolder(id) => {
-                let folder = self.store.fetch_public_folder(principal.account_id, id).await?;
+                let folder = self
+                    .store
+                    .fetch_public_folder(principal.account_id, id)
+                    .await?;
                 self.public_folder_projection(principal, &folder).await
             }
             GetFolderTarget::Collection(kind, id) => match kind {
-                FolderKind::Contacts => self.get_collection_folder_xml(
-                    principal,
-                    &id,
-                    FolderKind::Contacts,
-                    CONTACTS_FOLDER_ID,
-                    "Contacts",
-                ).await,
-                FolderKind::Calendar => self.get_collection_folder_xml(
-                    principal,
-                    &id,
-                    FolderKind::Calendar,
-                    CALENDAR_FOLDER_ID,
-                    "Calendar",
-                ).await,
-                FolderKind::Tasks => self.get_collection_folder_xml(
-                    principal,
-                    &id,
-                    FolderKind::Tasks,
-                    TASKS_FOLDER_ID,
-                    "Task",
-                ).await,
+                FolderKind::Contacts => {
+                    self.get_collection_folder_xml(
+                        principal,
+                        &id,
+                        FolderKind::Contacts,
+                        CONTACTS_FOLDER_ID,
+                        "Contacts",
+                    )
+                    .await
+                }
+                FolderKind::Calendar => {
+                    self.get_collection_folder_xml(
+                        principal,
+                        &id,
+                        FolderKind::Calendar,
+                        CALENDAR_FOLDER_ID,
+                        "Calendar",
+                    )
+                    .await
+                }
+                FolderKind::Tasks => {
+                    self.get_collection_folder_xml(
+                        principal,
+                        &id,
+                        FolderKind::Tasks,
+                        TASKS_FOLDER_ID,
+                        "Task",
+                    )
+                    .await
+                }
                 _ => bail!("GetFolder collection is not supported"),
             },
         }
@@ -576,16 +590,29 @@ where
         class: &str,
     ) -> Result<String> {
         let collections = match kind {
-            FolderKind::Contacts => self.store.fetch_accessible_contact_collections(principal.account_id).await?,
-            FolderKind::Calendar => self.store.fetch_accessible_calendar_collections(principal.account_id).await?,
-            FolderKind::Tasks => self.store.fetch_accessible_task_collections(principal.account_id).await?,
+            FolderKind::Contacts => {
+                self.store
+                    .fetch_accessible_contact_collections(principal.account_id)
+                    .await?
+            }
+            FolderKind::Calendar => {
+                self.store
+                    .fetch_accessible_calendar_collections(principal.account_id)
+                    .await?
+            }
+            FolderKind::Tasks => {
+                self.store
+                    .fetch_accessible_task_collections(principal.account_id)
+                    .await?
+            }
             _ => unreachable!("GetFolder collection kind was validated"),
         };
         let collection = collections
             .into_iter()
             .find(|collection| collection.id == id)
             .ok_or_else(|| anyhow!("requested {class} collection is not exposed by EWS"))?;
-        self.collection_folder_xml(&collection, distinguished_id, class).await
+        self.collection_folder_xml(&collection, distinguished_id, class)
+            .await
     }
 
     pub(in crate::service) async fn root_child_folder_count(
@@ -1079,5 +1106,4 @@ mod tests {
         )
         .is_err());
     }
-
 }

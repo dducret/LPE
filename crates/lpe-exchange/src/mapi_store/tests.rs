@@ -2307,6 +2307,8 @@ fn meeting_request_snapshot_hides_only_inline_calendar_transport_part() {
     email.calendar_meeting_request = Some(lpe_storage::CalendarMeetingRequest {
         uid: "probe-7@example.test".to_string(),
         transport_attachment_id: Some(inline_calendar_id),
+        organizer: None,
+        attendees: Vec::new(),
         response_requested: true,
         sent_at: Some("2026-08-23T18:00:00Z".to_string()),
         meeting_start: "2026-08-24T06:30:00Z".to_string(),
@@ -2319,7 +2321,10 @@ fn meeting_request_snapshot_hides_only_inline_calendar_transport_part() {
         id: inline_calendar_id,
         message_id,
         file_name: "calendar-1.ics".to_string(),
-        media_type: "text/calendar; method=REQUEST".to_string(),
+        // The durable blob can have inherited a generic media type from an
+        // earlier deduplicated write. The exact classified MIME-part identity,
+        // not blob metadata, owns transport-part suppression.
+        media_type: "application/octet-stream".to_string(),
         disposition: Some("inline".to_string()),
         content_id: None,
         size_octets: 256,
@@ -2392,7 +2397,60 @@ fn meeting_request_snapshot_hides_only_inline_calendar_transport_part() {
     );
     assert!(inline_only.messages()[0].attachments.is_empty());
     assert!(!inline_only.messages()[0].email.has_attachments);
+
+    let response_message_id = Uuid::from_u128(0xbbbbbbbb_bbbb_4bbb_8bbb_bbbbbbbbbbbb);
+    let response_transport_id = Uuid::from_u128(0xcccccccc_cccc_4ccc_8ccc_cccccccccccc);
+    crate::mapi::identity::remember_mapi_identity(
+        response_message_id,
+        crate::mapi::identity::mapi_store_id(0x708),
+    );
+    let mut response_email = test_email(response_message_id, mailbox_id, "Accepted: Probe 7");
+    response_email.has_attachments = true;
+    response_email.calendar_meeting_response = Some(lpe_storage::CalendarMeetingResponse {
+        method: "REPLY".to_string(),
+        transport_attachment_id: Some(response_transport_id),
+        server_processed: false,
+        organizer: None,
+        attendee_email: "attendee@example.test".to_string(),
+        attendee_name: "Attendee".to_string(),
+        partstat: "accepted".to_string(),
+        uid: "probe-7@example.test".to_string(),
+        response_sent_at: Some("2026-08-23T18:30:00Z".to_string()),
+        meeting_start: None,
+        meeting_end: None,
+        meeting_location: None,
+        meeting_sequence: None,
+        proposed_start: None,
+        proposed_end: None,
+        original_start: None,
+        original_end: None,
+    });
+    let response_transport = ActiveSyncAttachment {
+        id: response_transport_id,
+        message_id: response_message_id,
+        file_name: "calendar-2.ics".to_string(),
+        media_type: "application/octet-stream".to_string(),
+        disposition: Some("inline".to_string()),
+        content_id: None,
+        size_octets: 192,
+        file_reference: "response-transport-ref".to_string(),
+    };
+    let response_snapshot = MapiMailStoreSnapshot::new(
+        vec![test_mailbox(mailbox_id)],
+        vec![response_email],
+        vec![(response_message_id, vec![response_transport])],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert!(response_snapshot.messages()[0].attachments.is_empty());
+    assert!(!response_snapshot.messages()[0].email.has_attachments);
     crate::mapi::identity::forget_mapi_identity(&message_id);
+    crate::mapi::identity::forget_mapi_identity(&response_message_id);
 }
 
 #[test]

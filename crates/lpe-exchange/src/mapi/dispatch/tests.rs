@@ -6,6 +6,33 @@ mod execute;
 mod folders;
 
 #[test]
+fn canonical_submit_success_arm_cannot_return_a_retryable_rop_error() {
+    let source = include_str!("submission.rs");
+    let committed = source
+        .split_once("        Ok(submitted) => {")
+        .expect("canonical submit success arm")
+        .1
+        .split_once("        // Canonical submission failed before commit")
+        .expect("canonical submit failure boundary")
+        .0;
+
+    assert!(!committed.contains("rop_error_response("));
+    assert!(committed.contains("result=degraded_success"));
+    assert!(committed.contains("session.forget_handle(handle)"));
+    assert!(committed.contains("responses.extend_from_slice(&submit_success_response(request))"));
+
+    let replay = source
+        .split_once("async fn optimized_send_replay_email")
+        .expect("optimized replay helper")
+        .1
+        .split_once("pub(super) async fn mapi_submit_from_existing_email")
+        .expect("optimized replay helper boundary")
+        .0;
+    assert!(replay.contains("abort_submit_source_is_sent(email)"));
+    assert!(!replay.contains("outbox_mailbox_id"));
+}
+
+#[test]
 fn fast_transfer_destination_accepts_named_property_split_across_put_buffers() {
     let mut session = test_mapi_session();
     let property = MapiNamedProperty {
@@ -3734,11 +3761,12 @@ pub(super) fn test_mapi_session() -> MapiSession {
         message_save_generations: HashMap::new(),
         message_handle_generations: HashMap::new(),
         pending_message_recipient_replacements: HashMap::new(),
+        pending_message_property_deletions: HashMap::new(),
         pending_message_attachments: HashMap::new(),
         pending_contact_photo_attachments: HashMap::new(),
         pending_attachment_parent_messages: HashMap::new(),
         pending_event_attachment_transactions: HashMap::new(),
-        pending_attachment_deletions: HashSet::new(),
+        pending_attachment_deletions: HashMap::new(),
         pending_embedded_message_ids: HashMap::new(),
         pending_embedded_message_attachments: HashMap::new(),
         saved_embedded_messages: HashMap::new(),

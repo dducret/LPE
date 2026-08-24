@@ -80,11 +80,14 @@ pub(crate) use notification_metrics::{
     record_mapi_new_mail_notification_deliveries, record_mapi_notification_wait_completion,
     MapiNotificationWaitOutcome,
 };
+pub(crate) use tables::{message_recipients, MapiRecipient};
 
 #[cfg(test)]
 pub(crate) use crate::mapi::session::begin_active_session_request_for_test;
 #[cfg(test)]
 pub(crate) use crate::mapi::store_adapter::load_mapi_identity_codec_for_test;
+#[cfg(test)]
+pub(crate) use tables::MESSAGE_RECIPIENT_COLUMNS;
 
 #[cfg(test)]
 pub(crate) fn mapi_http_session_last_seen_for_test(

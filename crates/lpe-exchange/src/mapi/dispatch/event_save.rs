@@ -31,18 +31,27 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
         .get(&handle)
         .cloned()
         .unwrap_or_default();
-    let collection_id = match snapshot.collaboration_folder_for_id(folder_id) {
-        Some(folder) => folder.collection.id.clone(),
-        None if folder_id == CALENDAR_FOLDER_ID => DEFAULT_CALENDAR_COLLECTION_ID.to_string(),
-        None => {
-            responses.extend_from_slice(&rop_error_response(
-                0x0C,
-                request.response_handle_index(),
-                0x8004_010F,
-            ));
-            return;
-        }
-    };
+    let (collection_id, owner_email, owner_display_name) =
+        match snapshot.collaboration_folder_for_id(folder_id) {
+            Some(folder) => (
+                folder.collection.id.clone(),
+                folder.collection.owner_email.clone(),
+                folder.collection.owner_display_name.clone(),
+            ),
+            None if folder_id == CALENDAR_FOLDER_ID => (
+                DEFAULT_CALENDAR_COLLECTION_ID.to_string(),
+                principal.email.clone(),
+                principal.display_name.clone(),
+            ),
+            None => {
+                responses.extend_from_slice(&rop_error_response(
+                    0x0C,
+                    request.response_handle_index(),
+                    0x8004_010F,
+                ));
+                return;
+            }
+        };
     let (properties, reminder_set, reminder_at) =
         match split_reminder_property_values(properties.into_iter().collect()) {
             Ok(values) => values,
@@ -113,6 +122,9 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
     };
     if recipients_modified {
         apply_calendar_pending_recipients(&mut input, &existing, &properties, &recipients);
+    }
+    if imported_identity.is_none() {
+        materialize_owner_meeting_organizer(&mut input, &owner_email, &owner_display_name);
     }
     let imported_event = imported_identity.is_some();
     let custom_property_upserts =

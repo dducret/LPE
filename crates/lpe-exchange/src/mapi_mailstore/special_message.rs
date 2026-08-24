@@ -508,9 +508,7 @@ pub(super) fn write_special_message_property(
 pub(super) fn write_fast_transfer_property(
     buffer: &mut Vec<u8>,
     message_class: &str,
-    named_property_definitions: Option<
-        &HashMap<u16, crate::mapi::properties::MapiNamedProperty>,
-    >,
+    named_property_definitions: Option<&HashMap<u16, crate::mapi::properties::MapiNamedProperty>>,
     property_tag: u32,
     value: &SpecialMessagePropertyValue,
 ) -> bool {
@@ -579,9 +577,7 @@ pub(super) fn write_fast_transfer_property(
 pub(super) fn write_fast_transfer_property_info(
     buffer: &mut Vec<u8>,
     message_class: &str,
-    named_property_definitions: Option<
-        &HashMap<u16, crate::mapi::properties::MapiNamedProperty>,
-    >,
+    named_property_definitions: Option<&HashMap<u16, crate::mapi::properties::MapiNamedProperty>>,
     property_tag: u32,
 ) -> bool {
     let property_id = (property_tag >> 16) as u16;
@@ -593,9 +589,7 @@ pub(super) fn write_fast_transfer_property_info(
     let property = named_property_definitions
         .and_then(|definitions| definitions.get(&property_id))
         .cloned()
-        .or_else(|| {
-            fast_transfer_named_property_for_message_tag(message_class, property_tag)
-        });
+        .or_else(|| fast_transfer_named_property_for_message_tag(message_class, property_tag));
     let Some(property) = property else {
         tracing::error!(
             adapter = "mapi",

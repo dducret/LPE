@@ -168,7 +168,9 @@ membership `visibility = 'expunged'`, preserves the original source
 membership receives a new UID from the target mailbox `uid_next`. Protocol
 replay uses the move change row plus tombstone to report JMAP `Email/changes`,
 mailbox count changes, IMAP QRESYNC-style expunge state, and MAPI checkpoint
-replay without rewriting historical UIDs.
+replay without rewriting historical UIDs. The move row and its paired source
+expunge both represent an `updated` JMAP Email while a target membership remains
+visible; only a non-move terminal expunge represents Email destruction.
 Move or expunge removes only the source membership's search document in the
 same transaction; the historical membership and tombstone remain, and search
 documents for other visible memberships are preserved.
@@ -649,7 +651,14 @@ organization/title fields, notes, raw vCard text, and source/import metadata so
 JMAP, DAV, EWS, and MAPI can project from one canonical row. Calendar events
 store `UID`, `SEQUENCE`, organizer, attendees, recurrence, recurrence
 exceptions, timezone, location, reminder metadata, and body fields without
-adapter-local event tables. Calendar event attachments live in
+adapter-local event tables. `meeting_response_state_json` is private canonical
+replay state keyed by attendee address; it keeps the accepted response sequence
+and timestamp outside public participant JSON so protocol rewrites cannot erase
+the anti-replay watermark. The partial
+`calendar_events_active_uid_correlation_idx` index on tenant, owner, UID, and
+Event ID supports deterministic transactional correlation of outbound meeting
+requests to active canonical state; runtime and installer guards require its
+exact key order and active-row predicate. Calendar event attachments live in
 `calendar_event_attachments`, point at durable attachment blobs, and participate
 in calendar-category change logging; protocol adapters must project them from
 that table instead of keeping Outlook or JMAP-local attachment state. Tasks
@@ -931,15 +940,19 @@ compatible. They do not replace canonical mail or collaboration tables.
 
 ## Implementation Notes
 
-- `schema.sql` creates the fresh `0.5.3-sql` baseline.
+- `schema.sql` creates the fresh `0.5.2-sql` baseline.
 - `schema.sql` is the dense canonical DDL definition and is the documented
   source-size exception. Before adding another schema-contract family, split
   `schema_contract.rs` into feature-scoped checks (core ownership, mail and
   collaboration, and MAPI cache/identity) while retaining one central public
   contract runner.
+- `core.rs` is over the production source threshold. Before adding another
+  startup-schema guard family, move the physical-shape predicates and their
+  mutation tests into `core/schema_validation.rs`, leaving connection and
+  bootstrap orchestration in the parent module.
 - New `0.5.3` test installations start from an empty SQL database initialized by
   `init-schema.sh`. There is no in-place schema upgrade path to this baseline.
-  `update-lpe.sh` accepts only the exact canonical `0.5.3-sql` label with its
+  `update-lpe.sh` accepts only the exact canonical `0.5.2-sql` label with its
   required canonical physical shape and rejects every other label or incomplete
   same-label database before stopping LPE or changing the database.
 - The `0.5.0` and `0.5.1` SQL update artifacts remain preserved as historical

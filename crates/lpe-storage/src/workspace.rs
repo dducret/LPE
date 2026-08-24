@@ -6,9 +6,9 @@ use std::collections::BTreeMap;
 use uuid::Uuid;
 
 use crate::{
-    normalize_email, CanonicalChangeCategory, ClientAttachment, ClientContactRow, ClientEventRow,
-    ClientTask, CollaborationCollection, ContactNameFields, ContactSourceFields, JmapMailbox,
-    Storage,
+    external_calendar_uid, normalize_calendar_meeting_uid, normalize_email,
+    CanonicalChangeCategory, ClientAttachment, ClientContactRow, ClientEventRow, ClientTask,
+    CollaborationCollection, ContactNameFields, ContactSourceFields, JmapMailbox, Storage,
 };
 
 mod client_workspace;
@@ -572,6 +572,10 @@ impl Storage {
         input: UpsertClientEventInput,
         calendar_id: Option<Uuid>,
     ) -> Result<ClientEvent> {
+        let mut input = input;
+        if !input.uid.trim().is_empty() {
+            input.uid = normalize_calendar_meeting_uid(&input.uid);
+        }
         if input.date.trim().is_empty()
             || input.time.trim().is_empty()
             || input.title.trim().is_empty()
@@ -1379,7 +1383,7 @@ fn client_folder(role: &str) -> String {
 fn map_event(row: ClientEventRow) -> ClientEvent {
     ClientEvent {
         id: row.id,
-        uid: row.uid,
+        uid: external_calendar_uid(&row.uid),
         date: row.date,
         time: row.time,
         time_zone: row.time_zone,

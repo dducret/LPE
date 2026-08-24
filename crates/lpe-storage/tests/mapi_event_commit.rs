@@ -426,6 +426,7 @@ fn attachment_upsert(attach_num: u32, file_name: &str) -> MapiEventAttachmentUps
             media_type: "application/pdf".to_string(),
             disposition: Some("attachment".to_string()),
             content_id: None,
+            is_scheduling_body: false,
             blob_bytes: b"%PDF-1.7\ncalendar attachment\n".to_vec(),
         },
         custom_property_upserts: vec![MapiEventCustomPropertyValue {
@@ -929,6 +930,7 @@ async fn mapi_message_mutations_rotate_durable_mapi_version_without_rekeying_ide
                 media_type: "text/plain".to_string(),
                 disposition: Some("attachment".to_string()),
                 content_id: None,
+                is_scheduling_body: false,
                 blob_bytes: b"message attachment".to_vec(),
             },
             AuditEntryInput {

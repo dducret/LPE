@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use sha2::{Digest, Sha256};
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Postgres, Row};
 use uuid::Uuid;
 
 use crate::storage_backend::{
@@ -27,6 +27,52 @@ impl PostgresBlobStore {
         else {
             self.error_if_durable_blob_lacks_active_placement(
                 pool, tenant_id, domain_id, kind, blob_id,
+            )
+            .await?;
+            return Ok(None);
+        };
+
+        let bytes = match &placement.backend {
+            StorageBackendSelection::Postgres => placement
+                .blob_bytes
+                .clone()
+                .ok_or_else(|| anyhow!("database storage placement has no database blob bytes"))?,
+            StorageBackendSelection::S3Compatible(config) => {
+                let bytes = s3_read_object(config, placement.placement_id).await?;
+                let actual_hash = format!("{:x}", Sha256::digest(&bytes));
+                if actual_hash != placement.content_sha256 {
+                    return Err(anyhow!("storage backend read checksum verification failed"));
+                }
+                if bytes.len() as i64 != placement.size_octets {
+                    return Err(anyhow!("storage backend read size verification failed"));
+                }
+                bytes
+            }
+        };
+
+        Ok(Some(StoredBlobBytes {
+            id: placement.id,
+            media_type: placement.media_type,
+            size_octets: placement.size_octets,
+            content_sha256: placement.content_sha256,
+            bytes,
+        }))
+    }
+
+    pub(crate) async fn read_durable_blob_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        domain_id: Uuid,
+        kind: DurableBlobKind,
+        blob_id: Uuid,
+    ) -> Result<Option<StoredBlobBytes>> {
+        let Some(placement) = self
+            .load_active_blob_placement_in_tx(tx, tenant_id, domain_id, kind, blob_id)
+            .await?
+        else {
+            self.error_if_durable_blob_lacks_active_placement_in_tx(
+                tx, tenant_id, domain_id, kind, blob_id,
             )
             .await?;
             return Ok(None);
@@ -323,6 +369,67 @@ impl PostgresBlobStore {
         .transpose()
     }
 
+    async fn load_active_blob_placement_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        domain_id: Uuid,
+        kind: DurableBlobKind,
+        blob_id: Uuid,
+    ) -> Result<Option<ActiveBlobPlacement>> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                b.id,
+                b.media_type,
+                b.size_octets,
+                b.content_sha256,
+                b.blob_bytes,
+                bp.id AS placement_id,
+                sp.pool_kind,
+                sp.config_json
+            FROM blobs b
+            JOIN blob_placements bp
+              ON bp.tenant_id = b.tenant_id
+             AND bp.domain_id = b.domain_id
+             AND bp.blob_id = b.id
+             AND bp.blob_kind = b.blob_kind
+             AND bp.verified_content_sha256 = b.content_sha256
+             AND bp.verified_size_octets = b.size_octets
+             AND bp.placement_status = 'active'
+            JOIN storage_pools sp
+              ON sp.id = bp.storage_pool_id
+             AND sp.status = 'active'
+            WHERE b.tenant_id = $1
+              AND b.domain_id = $2
+              AND b.blob_kind = $3
+              AND b.id = $4
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(domain_id)
+        .bind(kind.as_str())
+        .bind(blob_id)
+        .fetch_optional(&mut **tx)
+        .await?;
+
+        row.map(|row| {
+            let pool_kind: String = row.try_get("pool_kind")?;
+            let config_json: serde_json::Value = row.try_get("config_json")?;
+            Ok(ActiveBlobPlacement {
+                placement_id: row.try_get("placement_id")?,
+                backend: select_storage_backend(&pool_kind, &config_json)?,
+                id: row.try_get("id")?,
+                media_type: row.try_get("media_type")?,
+                size_octets: row.try_get("size_octets")?,
+                content_sha256: row.try_get("content_sha256")?,
+                blob_bytes: row.try_get("blob_bytes")?,
+            })
+        })
+        .transpose()
+    }
+
     async fn error_if_durable_blob_lacks_active_placement(
         &self,
         pool: &PgPool,
@@ -348,6 +455,41 @@ impl PostgresBlobStore {
         .bind(kind.as_str())
         .bind(blob_id)
         .fetch_one(pool)
+        .await?;
+
+        if exists {
+            return Err(anyhow!(
+                "durable blob {blob_id} has no active storage placement"
+            ));
+        }
+        Ok(())
+    }
+
+    async fn error_if_durable_blob_lacks_active_placement_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        domain_id: Uuid,
+        kind: DurableBlobKind,
+        blob_id: Uuid,
+    ) -> Result<()> {
+        let exists = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM blobs
+                WHERE tenant_id = $1
+                  AND domain_id = $2
+                  AND blob_kind = $3
+                  AND id = $4
+            )
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(domain_id)
+        .bind(kind.as_str())
+        .bind(blob_id)
+        .fetch_one(&mut **tx)
         .await?;
 
         if exists {

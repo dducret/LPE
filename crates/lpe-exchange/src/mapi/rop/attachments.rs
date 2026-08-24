@@ -1,13 +1,13 @@
 use super::{rop_error_response, write_u32, RopRequest};
 use crate::mapi::session::MapiObject;
 use crate::mapi_store::MapiMailStoreSnapshot;
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 pub(in crate::mapi) fn rop_get_valid_attachments_response(
     request: &RopRequest,
     object: Option<&MapiObject>,
     snapshot: &MapiMailStoreSnapshot,
-    pending_attachment_deletions: &HashSet<(u64, u64, u32)>,
+    pending_attachment_deletions: &HashMap<(u64, u64, u32), uuid::Uuid>,
 ) -> Vec<u8> {
     let (folder_id, message_id) = match object {
         Some(MapiObject::Message {
@@ -33,7 +33,11 @@ pub(in crate::mapi) fn rop_get_valid_attachments_response(
     let valid_attachments = attachments
         .iter()
         .filter(|attachment| {
-            !pending_attachment_deletions.contains(&(folder_id, message_id, attachment.attach_num))
+            !pending_attachment_deletions.contains_key(&(
+                folder_id,
+                message_id,
+                attachment.attach_num,
+            ))
         })
         .collect::<Vec<_>>();
     rop_get_valid_attachment_numbers_response(

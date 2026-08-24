@@ -114,6 +114,7 @@ pub(in crate::mapi) fn rop_get_properties_all_response_with_custom(
     }
 
     let effective_event = effective_event_properties(object, snapshot);
+    let message_class = message_enumeration_class(object, snapshot);
     let mut tags = effective_event
         .as_ref()
         .map(|effective| effective.tags.clone())
@@ -130,9 +131,10 @@ pub(in crate::mapi) fn rop_get_properties_all_response_with_custom(
     response.extend_from_slice(&(tags.len() as u16).to_le_bytes());
     for storage_tag in tags {
         let storage_response_tag = get_properties_all_response_tag(storage_tag, want_unicode);
-        let response_tag = event_enumeration_response_tag(
+        let response_tag = enumeration_response_tag(
             session,
             effective_event.is_some(),
+            message_class,
             storage_response_tag,
         );
         let custom_value = custom_values.get(&storage_tag).map(|encoded| {
@@ -230,7 +232,7 @@ pub(in crate::mapi) fn rop_get_properties_list_response_with_custom_tags(
     }
     let mut tags = effective_event_properties(object, snapshot)
         .map(|effective| effective.tags)
-        .unwrap_or_else(|| get_properties_list_tags(object));
+        .unwrap_or_else(|| get_properties_list_tags(object, snapshot));
     if matches!(object, MapiObject::DelegateFreeBusyMessage { .. }) {
         tags.extend_from_slice(custom_property_tags);
         tags.sort_unstable();
@@ -243,31 +245,40 @@ pub(in crate::mapi) fn rop_get_properties_list_response_with_custom_tags(
         object,
         MapiObject::Event { .. } | MapiObject::PendingEvent { .. }
     );
+    let message_class = message_enumeration_class(object, snapshot);
     for tag in tags {
         write_u32(
             &mut response,
-            event_enumeration_response_tag(session, event_enumeration, tag),
+            enumeration_response_tag(session, event_enumeration, message_class, tag),
         );
     }
     response
 }
 
-fn event_enumeration_response_tag(
+fn enumeration_response_tag(
     session: &MapiSession,
     event_enumeration: bool,
+    message_class: Option<&str>,
     property_tag: u32,
 ) -> u32 {
     let tag = MapiPropertyTag::new(property_tag);
-    if !event_enumeration || tag.property_id() < MIN_NAMED_PROPERTY_ID {
+    if (!event_enumeration && message_class.is_none()) || tag.property_id() < MIN_NAMED_PROPERTY_ID
+    {
         return property_tag;
     }
 
-    let canonical_definition = (property_tag == PID_LID_APPOINTMENT_COLOR_TAG
-        || !crate::mapi::dispatch::custom_properties::is_calendar_passthrough_property_tag(
-            property_tag,
-        ))
-    .then(|| fast_transfer_named_property_for_message_tag("IPM.Appointment", property_tag))
-    .flatten();
+    let canonical_definition = if event_enumeration {
+        (property_tag == PID_LID_APPOINTMENT_COLOR_TAG
+            || !crate::mapi::dispatch::custom_properties::is_calendar_passthrough_property_tag(
+                property_tag,
+            ))
+        .then(|| fast_transfer_named_property_for_message_tag("IPM.Appointment", property_tag))
+        .flatten()
+    } else {
+        message_class.and_then(|message_class| {
+            fast_transfer_named_property_for_message_tag(message_class, property_tag)
+        })
+    };
     let definition = canonical_definition
         .or_else(|| session.named_property_ids.get(&tag.property_id()).cloned());
     let Some(property_id) = definition
@@ -460,8 +471,8 @@ fn get_properties_all_tags(object: &MapiObject, snapshot: &MapiMailStoreSnapshot
         MapiObject::Attachment { .. }
         | MapiObject::PendingAttachment { .. }
         | MapiObject::SavedAttachment { .. } => default_attachment_columns(),
-        MapiObject::Message { .. }
-        | MapiObject::NavigationShortcut { .. }
+        MapiObject::Message { .. } => message_property_tags(object, snapshot),
+        MapiObject::NavigationShortcut { .. }
         | MapiObject::CommonViewNamedView { .. }
         | MapiObject::SearchFolderDefinitionMessage { .. }
         | MapiObject::DelegateFreeBusyMessage { .. }
@@ -503,7 +514,7 @@ fn get_properties_all_tags(object: &MapiObject, snapshot: &MapiMailStoreSnapshot
     }
 }
 
-fn get_properties_list_tags(object: &MapiObject) -> Vec<u32> {
+fn get_properties_list_tags(object: &MapiObject, snapshot: &MapiMailStoreSnapshot) -> Vec<u32> {
     match object {
         MapiObject::Logon => default_store_property_tags(),
         MapiObject::PublicFolderLogon => vec![PID_TAG_PRIVATE],
@@ -525,8 +536,8 @@ fn get_properties_list_tags(object: &MapiObject) -> Vec<u32> {
         MapiObject::ConversationAction { .. } | MapiObject::PendingConversationAction { .. } => {
             default_conversation_action_property_tags()
         }
-        MapiObject::Message { .. }
-        | MapiObject::NavigationShortcut { .. }
+        MapiObject::Message { .. } => message_property_tags(object, snapshot),
+        MapiObject::NavigationShortcut { .. }
         | MapiObject::PendingNavigationShortcut { .. }
         | MapiObject::CommonViewNamedView { .. }
         | MapiObject::SearchFolderDefinitionMessage { .. }
@@ -564,6 +575,10 @@ pub(in crate::mapi) fn get_properties_specific_candidate_tags(
         Some(MapiObject::Attachment { .. })
         | Some(MapiObject::PendingAttachment { .. })
         | Some(MapiObject::SavedAttachment { .. }) => default_attachment_columns(),
+        Some(MapiObject::Message {
+            saved_email: Some(saved_email),
+            ..
+        }) => message_property_tags_for_email(&saved_email.email),
         Some(
             MapiObject::Message { .. }
             | MapiObject::NavigationShortcut { .. }
@@ -582,6 +597,61 @@ pub(in crate::mapi) fn get_properties_specific_candidate_tags(
         ) => default_conversation_action_property_tags(),
         _ => default_folder_property_tags(),
     }
+}
+
+fn message_property_tags(object: &MapiObject, snapshot: &MapiMailStoreSnapshot) -> Vec<u32> {
+    message_enumeration_email(object, snapshot)
+        .map(message_property_tags_for_email)
+        .unwrap_or_else(default_message_property_tags)
+}
+
+fn message_property_tags_for_email(email: &JmapEmail) -> Vec<u32> {
+    let meeting_tags = email_meeting_property_tags(email);
+    let mut tags = default_message_property_tags();
+    tags.retain(|property_tag| {
+        if matches!(
+            *property_tag,
+            PID_TAG_START_DATE
+                | PID_TAG_END_DATE
+                | PID_LID_COMMON_START_TAG
+                | PID_LID_COMMON_END_TAG
+        ) {
+            meeting_tags.contains(property_tag)
+        } else {
+            email_property_value(email, *property_tag).is_some()
+        }
+    });
+    tags.extend(email_generated_property_tags(email));
+    tags.sort_unstable();
+    tags.dedup();
+    tags
+}
+
+fn message_enumeration_class<'a>(
+    object: &'a MapiObject,
+    snapshot: &'a MapiMailStoreSnapshot,
+) -> Option<&'static str> {
+    message_enumeration_email(object, snapshot).map(message_class_for_email)
+}
+
+fn message_enumeration_email<'a>(
+    object: &'a MapiObject,
+    snapshot: &'a MapiMailStoreSnapshot,
+) -> Option<&'a JmapEmail> {
+    let MapiObject::Message {
+        folder_id,
+        message_id,
+        saved_email,
+        ..
+    } = object
+    else {
+        return None;
+    };
+    saved_email.as_ref().map(|saved| &saved.email).or_else(|| {
+        snapshot
+            .message_for_id(*folder_id, *message_id)
+            .map(|message| &message.email)
+    })
 }
 
 fn request_get_properties_all_want_unicode(request: &RopRequest) -> bool {

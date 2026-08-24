@@ -66,9 +66,14 @@ and compatibility tests. Calendar and task reminders with `DAILY`, `WEEKLY`,
 `MONTHLY`, or `YEARLY` recurrence rules are expanded as computed occurrences
 over the next 90 days. The bounded Reminders evaluator applies `INTERVAL`,
 `COUNT`, `UNTIL`, `BYDAY`, and `BYMONTHDAY` filters, and calendar recurrence
-exception metadata can suppress cancelled occurrences. The reminder signal time
+exception metadata can suppress cancelled occurrences. `COUNT` bounds the
+recurrence set after `BYDAY` and `BYMONTHDAY` rule filtering; occurrence
+exceptions are then removed from that bounded set. The reminder signal time
 keeps the same offset from each occurrence anchor as the canonical base reminder
 has from the base event start, task due time, or task reminder time.
+Candidate generation remains anchored to `DTSTART` at the selected frequency;
+multi-day weekly `BYDAY` sets and monthly/yearly selectors that move away from
+the `DTSTART` day remain outside this bounded evaluator.
 Occurrence-level dismissal records suppress only the matching generated
 occurrence. Snoozing records a replacement reminder time for that same key and
 does not shift the rest of a recurring series.

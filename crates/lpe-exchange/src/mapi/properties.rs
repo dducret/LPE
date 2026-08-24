@@ -26,7 +26,10 @@ mod attachments;
 mod calendar;
 mod contact;
 mod folder;
+mod meeting_property_tags;
+mod meeting_submission;
 mod message;
+mod message_computed;
 mod named;
 mod navigation_shortcut;
 mod notes;
@@ -48,11 +51,17 @@ pub(in crate::mapi) use attachments::*;
 pub(in crate::mapi) use calendar::*;
 pub(in crate::mapi) use contact::*;
 pub(crate) use folder::*;
-pub(crate) use message::{
-    email_property_value, EMAIL_MEETING_REQUEST_FAST_TRANSFER_TAGS,
-};
+pub(in crate::mapi) use meeting_submission::*;
 pub(crate) use message::message_class_for_email;
 pub(in crate::mapi) use message::*;
+pub(crate) use message::{
+    email_meeting_property_tags, email_property_value, email_sender_address, email_sender_name,
+    email_sent_representing_address, email_sent_representing_name,
+};
+pub(crate) use message_computed::{
+    email_generated_property_tags, email_has_named_properties, email_normalized_subject,
+    email_subject_prefix,
+};
 pub(crate) use named::*;
 pub(in crate::mapi) use navigation_shortcut::*;
 pub(in crate::mapi) use notes::*;
@@ -66,8 +75,8 @@ pub(in crate::mapi) use streams::*;
 use streams::{pending_body_text_property, property_tag_type};
 pub(crate) use tags::*;
 pub(in crate::mapi) use task::*;
-pub(super) use values::*;
 pub(crate) use values::MapiValue;
+pub(super) use values::*;
 pub(in crate::mapi) use views::*;
 
 pub(in crate::mapi) const NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID: [u8; 16] = [
@@ -110,7 +119,7 @@ pub(in crate::mapi) fn rop_read_recipients_response(
                     (
                         offset as u32,
                         recipient.recipient_type,
-                        serialize_recipient_row(recipient.address),
+                        serialize_recipient_row(&recipient, &MESSAGE_RECIPIENT_COLUMNS),
                     )
                 })
                 .collect::<Vec<_>>()
@@ -306,30 +315,8 @@ pub(in crate::mapi) fn restriction_matches_email_with_attachments(
     }
 }
 
-fn recipient_property_value(recipient: &MapiRecipient<'_>, property_tag: u32) -> Option<MapiValue> {
-    let property_tag = canonical_property_storage_tag(property_tag);
-    let display_name = recipient
-        .address
-        .display_name
-        .as_deref()
-        .unwrap_or(&recipient.address.address);
-    match property_tag {
-        PID_TAG_RECIPIENT_TYPE => Some(MapiValue::U32(u32::from(recipient.recipient_type))),
-        PID_TAG_RECIPIENT_ORDER => Some(MapiValue::U32(recipient.order)),
-        PID_TAG_RECIPIENT_FLAGS => Some(MapiValue::U32(1)),
-        PID_TAG_RECIPIENT_TRACK_STATUS => Some(MapiValue::U32(0)),
-        PID_TAG_DISPLAY_NAME_W | PID_TAG_RECIPIENT_DISPLAY_NAME_W => {
-            Some(MapiValue::String(display_name.to_string()))
-        }
-        PID_TAG_EMAIL_ADDRESS_W | PID_TAG_SMTP_ADDRESS_W => {
-            Some(MapiValue::String(recipient.address.address.clone()))
-        }
-        PID_TAG_ADDRESS_BOOK_DISPLAY_NAME_PRINTABLE_W => {
-            Some(MapiValue::String(display_name.to_string()))
-        }
-        0x3002_001F => Some(MapiValue::String("SMTP".to_string())),
-        _ => None,
-    }
+fn recipient_property_value(recipient: &MapiRecipient, property_tag: u32) -> Option<MapiValue> {
+    recipient.property_value(canonical_property_storage_tag(property_tag))
 }
 
 pub(in crate::mapi) fn restriction_matches_contact_in_folder(

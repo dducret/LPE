@@ -1,11 +1,12 @@
 use anyhow::{anyhow, bail, Result};
 use lpe_magika::{IngressContext, PolicyDecision, ValidationRequest};
 use lpe_storage::{
-    calendar_attendee_labels, normalize_calendar_email, normalize_calendar_participation_status,
-    parse_calendar_participants_metadata, serialize_calendar_participants_metadata,
-    AccessibleEvent, AttachmentUploadInput, AuthenticatedAccount, CalendarEventAttachment,
-    CalendarOrganizerMetadata, CalendarParticipantMetadata, CalendarParticipantsMetadata,
-    CollaborationCollection, UpsertClientEventInput,
+    calendar_attendee_labels, external_calendar_uid, normalize_calendar_email,
+    normalize_calendar_participation_status, parse_calendar_participants_metadata,
+    serialize_calendar_participants_metadata, AccessibleEvent, AttachmentUploadInput,
+    AuthenticatedAccount, CalendarEventAttachment, CalendarOrganizerMetadata,
+    CalendarParticipantMetadata, CalendarParticipantsMetadata, CollaborationCollection,
+    UpsertClientEventInput,
 };
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -710,6 +711,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         media_type,
                         disposition: Some("attachment".to_string()),
                         content_id: None,
+                        is_scheduling_body: false,
                         blob_bytes: upload.blob_bytes,
                     },
                     lpe_storage::AuditEntryInput {
@@ -820,7 +822,12 @@ fn calendar_event_to_value(
 ) -> Value {
     let mut object = Map::new();
     insert_if(properties, &mut object, "id", event.id.to_string());
-    insert_if(properties, &mut object, "uid", event.uid.clone());
+    insert_if(
+        properties,
+        &mut object,
+        "uid",
+        external_calendar_uid(&event.uid),
+    );
     insert_if(properties, &mut object, "@type", "Event");
     insert_if(properties, &mut object, "title", event.title.clone());
     insert_if(

@@ -538,14 +538,18 @@ where
         let result = async {
             let item_references = requested_operation_item_references(request, "SendItem")?;
             if item_references.len() != 1 {
-                bail!("SendItem supports exactly one ItemId until canonical atomic submission exists");
+                bail!(
+                    "SendItem supports exactly one ItemId until canonical atomic submission exists"
+                );
             }
             self.validate_mutating_item_change_keys(principal, request)
                 .await?;
             let draft_ids = item_references
                 .iter()
                 .map(|reference| {
-                    reference.id.strip_prefix("message:")
+                    reference
+                        .id
+                        .strip_prefix("message:")
                         .ok_or_else(|| anyhow!("SendItem requires canonical message ItemIds."))
                         .and_then(|id| {
                             Uuid::parse_str(id).map_err(|_| {

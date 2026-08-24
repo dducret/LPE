@@ -114,6 +114,8 @@ use reputation::{load_reputation_score, update_reputation};
 
 mod outbound_delivery;
 mod outbound_policy;
+#[cfg(test)]
+use outbound_delivery::dot_stuff_smtp_data;
 use outbound_delivery::{relay_message, sanitize_outbound_ehlo_name};
 use outbound_policy::{
     default_queue_for_status, evaluate_outbound_throttle, outbound_handoff_response_from_spool,

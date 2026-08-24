@@ -128,15 +128,18 @@ fn parse_get_distinguished_folder_id(id: &str) -> Result<GetFolderTarget> {
             FolderKind::Tasks,
             DEFAULT_COLLECTION_ID.to_string(),
         )),
-        id if id.starts_with("shared-contacts-") => {
-            Ok(GetFolderTarget::Collection(FolderKind::Contacts, id.to_string()))
-        }
-        id if id.starts_with("shared-calendar-") => {
-            Ok(GetFolderTarget::Collection(FolderKind::Calendar, id.to_string()))
-        }
-        id if id.starts_with("shared-tasks-") => {
-            Ok(GetFolderTarget::Collection(FolderKind::Tasks, id.to_string()))
-        }
+        id if id.starts_with("shared-contacts-") => Ok(GetFolderTarget::Collection(
+            FolderKind::Contacts,
+            id.to_string(),
+        )),
+        id if id.starts_with("shared-calendar-") => Ok(GetFolderTarget::Collection(
+            FolderKind::Calendar,
+            id.to_string(),
+        )),
+        id if id.starts_with("shared-tasks-") => Ok(GetFolderTarget::Collection(
+            FolderKind::Tasks,
+            id.to_string(),
+        )),
         id => ews_distinguished_mailbox_role(id)
             .map(GetFolderTarget::MailboxRole)
             .ok_or_else(|| anyhow!("GetFolder distinguished folder is not supported")),

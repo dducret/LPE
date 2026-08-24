@@ -6,18 +6,33 @@ const CHECK_LPE: &str = include_str!("../../../installation/debian-trixie/check-
 const INIT_LPE: &str = include_str!("../../../installation/debian-trixie/init-schema.sh");
 const INSTALL_COMMON: &str =
     include_str!("../../../installation/debian-trixie/lib/install-common.sh");
+const CALENDAR_MAIL_CLASSIFICATION_SHAPE: &str =
+    include_str!("../../../installation/debian-trixie/lib/calendar-mail-classification-shape.sql");
+const ROOT_README: &str = include_str!("../../../README.md");
+const INSTALLATION_README: &str = include_str!("../../../installation/README.md");
+const AGENT_INSTRUCTIONS: &str = include_str!("../../../AGENTS.md");
+const SQL_SCHEMA_ARCHITECTURE: &str = include_str!("../../../docs/architecture/sql-schema-v2.md");
+const RELEASE_053: &str = include_str!("../../../docs/releases/0.5.3.md");
 
 #[test]
-fn canonical_schema_uses_053_release_label() {
+fn canonical_schema_and_release_contract_use_052_schema_label() {
     assert!(
-        SCHEMA.contains("schema_version = '0.5.3-sql'")
-            && SCHEMA.contains("VALUES (TRUE, '0.5.3-sql')"),
-        "the canonical schema must use the exact 0.5.3-sql release label"
+        SCHEMA.contains("schema_version = '0.5.2-sql'")
+            && SCHEMA.contains("VALUES (TRUE, '0.5.2-sql')"),
+        "the canonical schema must use the exact 0.5.2-sql release label"
     );
-    assert!(
-        !SCHEMA.contains("0.5.2-sql"),
-        "the canonical 0.5.3 schema must not retain the old release label"
-    );
+    for (name, contract) in [
+        ("README.md", ROOT_README),
+        ("installation/README.md", INSTALLATION_README),
+        ("AGENTS.md", AGENT_INSTRUCTIONS),
+        ("sql-schema-v2.md", SQL_SCHEMA_ARCHITECTURE),
+        ("0.5.3 release notes", RELEASE_053),
+    ] {
+        assert!(
+            contract.contains("0.5.2-sql") && !contract.contains("0.5.3-sql"),
+            "{name} must agree with the canonical 0.5.2-sql deployment contract"
+        );
+    }
 }
 
 #[test]
@@ -43,6 +58,13 @@ fn update_script_rejects_noncanonical_schema_before_service_stop_or_mutation() {
             "canonical_schema_shape_is_current()",
             "local expected_schema_version=\"$2\"",
             "schema_metadata_shape_ok \"${database_url}\" \"${expected_schema_version}\"",
+            "calendar_meeting_response_state_shape_ok \"${database_url}\"",
+            "calendar_meeting_request_correlation_index_shape_ok \"${database_url}\"",
+            "calendar_events_meeting_response_state_json_object_check",
+            "calendar_events_active_uid_correlation_idx",
+            "pg_get_expr(default_row.adbin, default_row.adrelid) = '''{}''::jsonb'",
+            "constraint_row.convalidated",
+            "pg_get_expr(constraint_row.conbin, constraint_row.conrelid) =",
             "mapi_store_identity_shape_ok \"${database_url}\"",
         ],
     );
@@ -107,6 +129,30 @@ fn update_script_rejects_noncanonical_schema_before_service_stop_or_mutation() {
 }
 
 #[test]
+fn installer_validates_calendar_request_correlation_index_shape() {
+    for (name, script) in [("init-schema.sh", INIT_LPE), ("check-lpe.sh", CHECK_LPE)] {
+        assert_contains_all(
+            name,
+            script,
+            &[
+                "calendar_meeting_request_correlation_index_shape_ok",
+                "calendar_meeting_request_correlation_index_shape_status",
+            ],
+        );
+    }
+    assert_contains_all(
+        "install-common.sh meeting-request correlation index guard",
+        INSTALL_COMMON,
+        &[
+            "calendar_events_active_uid_correlation_idx",
+            "index_row.indnatts = 4",
+            "ARRAY['tenant_id', 'owner_account_id', 'uid', 'id']::text[]",
+            "(lifecycle_state = ''active''::text)",
+        ],
+    );
+}
+
+#[test]
 fn canonical_schema_guard_requires_recovery_and_search_membership_semantics() {
     assert_contains_all(
         "shared recoverable-item shape guard",
@@ -136,6 +182,103 @@ fn canonical_schema_guard_requires_recovery_and_search_membership_semantics() {
             "canonical_schema_shape_is_current \"${DATABASE_URL}\" \"${expected_schema_version}\"",
         ),
         "update, initialization, and installation checks must all use the shared canonical shape guard"
+    );
+}
+
+#[test]
+fn canonical_schema_guard_rejects_incomplete_calendar_mail_classification_state() {
+    assert_contains_all(
+        "shared calendar-mail classification shape guard",
+        INSTALL_COMMON,
+        &[
+            "('calendar_mail_classifications', 'r')",
+            "('calendar_mail_classification_projections', 'r')",
+            "calendar_mail_classification_shape_ok()",
+            "calendar-mail-classification-shape.sql",
+            "psql \"${database_url}\" -X -v ON_ERROR_STOP=1 -At -f \"${predicate_file}\"",
+            "calendar_mail_classification_shape_ok \"${database_url}\"",
+        ],
+    );
+    assert_contains_all(
+        "read-only calendar-mail classification catalog predicate",
+        CALENDAR_MAIL_CLASSIFICATION_SHAPE,
+        &[
+            "WITH relation_oids AS",
+            "'mime_parts' AND table_row.relkind = 'r'",
+            "'calendar_mail_classifications'",
+            "'calendar_mail_classification_projections'",
+            "'is_scheduling_body'",
+            "'classification_generation'",
+            "'requires_projection_rotation'",
+            "'needs_reclassification'",
+            "'applied_generation'",
+            "pg_get_expr(default_row.adbin, default_row.adrelid) = 'false'",
+            "pg_get_expr(default_row.adbin, default_row.adrelid) = '1'",
+            "pg_get_expr(default_row.adbin, default_row.adrelid) = 'now()'",
+            "mime_parts_scheduling_body_check",
+            "lower(btrim(split_part(content_type, '';''::text, 1))) = ''text/calendar''::text",
+            "mime_parts_one_scheduling_body_idx",
+            "index_row.indisunique",
+            "index_row.indisvalid",
+            "index_row.indisready",
+            "index_row.indislive",
+            "pg_get_expr(index_row.indpred, index_row.indrelid, FALSE) = 'is_scheduling_body'",
+            "calendar_mail_classifications_generation_check",
+            "calendar_mail_classifications_metadata_shape_check",
+            "constraint_row.definition LIKE '%metadata_json%request%IS TRUE%'",
+            "constraint_row.definition LIKE '%metadata_json%response%IS TRUE%'",
+            "constraint_row.definition LIKE '%jsonb_typeof%request%object%IS TRUE%'",
+            "constraint_row.definition LIKE '%jsonb_typeof%response%object%IS TRUE%'",
+            "calendar_mail_classifications_message_fkey",
+            "calendar_mail_classifications_mime_part_fkey",
+            "calendar_mail_classification_projections_generation_check",
+            "calendar_mail_classification_projections_account_fkey",
+            "calendar_mail_classification_projections_classification_fkey",
+            "array_agg(attribute_row.attname::text ORDER BY key_column.ordinality)",
+            "constraint_row.confdeltype = 'c'",
+            "constraint_row.convalidated",
+            "THEN 1 ELSE 0 END;",
+        ],
+    );
+    for forbidden in [
+        "ALTER TABLE",
+        "CREATE TABLE",
+        "DROP TABLE",
+        "INSERT INTO",
+        "UPDATE public.",
+        "DELETE FROM",
+        "TRUNCATE",
+        "LIKE '1%'",
+        "LIKE 'false%'",
+        "LIKE 'now()%'",
+    ] {
+        assert!(
+            !CALENDAR_MAIL_CLASSIFICATION_SHAPE.contains(forbidden),
+            "the installer calendar-mail classification predicate must remain read-only: {forbidden}"
+        );
+    }
+    assert!(
+        CALENDAR_MAIL_CLASSIFICATION_SHAPE
+            .matches("array_agg(attribute_row.attname::text ORDER BY key_column.ordinality)")
+            .count()
+            == 2,
+        "the installer guard must compare local and referenced FK columns as text arrays"
+    );
+    assert!(
+        CALENDAR_MAIL_CLASSIFICATION_SHAPE
+            .contains("pg_get_expr(default_row.adbin, default_row.adrelid) = '1'")
+            && !CALENDAR_MAIL_CLASSIFICATION_SHAPE.contains("LIKE '1%"),
+        "the installer guard must reject ALTER COLUMN classification_generation SET DEFAULT 100"
+    );
+    assert!(
+        !CALENDAR_MAIL_CLASSIFICATION_SHAPE.contains("split_part(content_type, '';''::text, 2)"),
+        "the installer guard must inspect the base media type rather than a parameter"
+    );
+    assert_before(
+        UPDATE_LPE,
+        "canonical_schema_shape_is_current \"${DATABASE_URL}\" \"${EXPECTED_SCHEMA_VERSION}\"",
+        "systemctl stop \"${SERVICE_NAME}\"",
+        "the updater must reject a same-label database with mutated calendar-mail state before stopping LPE",
     );
 }
 

@@ -49,6 +49,39 @@
   - client autodiscovery must publish only implemented and exposed endpoints
   - no adapter may implement parallel `Sent` or `Outbox` logic
 - Canonical submission flow at `/api/mail/messages/submit`:
+  - a source-backed protocol submit first locks the canonical parent message,
+    then every visible membership in deterministic order, and finally claims
+    exactly one visible `Drafts` or `Outbox` source before reading message
+    fields, recipients, protected `Bcc`, or exact MIME attachments
+  - JMAP, EWS, and saved-message MAPI submits send that locked persisted version;
+    the web composer atomically applies its complete editor payload to the
+    claimed draft and submits the resulting version in the same transaction
+  - draft saves and recipient or attachment mutations lock every visible
+    membership for the message in deterministic order before changing shared
+    message or MIME state, so they serialize with a submission source claim
+  - cross-account copies share immutable canonical message content; body,
+    recipient, attachment, or editor-overlay mutation fails closed while the
+    same message remains visible in another account, while account-scoped flags
+    remain independently mutable
+  - cross-account copy takes the same parent-message lock before inserting its
+    membership; source claims use PostgreSQL `READ COMMITTED`, so a claim that
+    waited for a copier observes the newly committed membership before applying
+    the cross-account mutation guard
+  - new web-editor attachment bytes remain in the exact claimed submission
+    payload until commit; submission does not attempt to reload their
+    uncommitted blob placement through another database connection
+  - a saved-client overlay may atomically delete exact claimed-source
+    attachments, append staged attachments, and apply canonical follow-up and
+    provider custom-property changes after verifying the claimed source modseq;
+    the resulting effective attachment, follow-up, and custom Message-property
+    bags are preserved on the new canonical `Sent` item before the source is
+    expunged
+  - new `Drafts` and canonical `Sent` messages persist the scheduling MIME
+    classification and acknowledge its first visible-account projection in the
+    same transaction that creates the membership
+  - calendar-classification projection repair locks parent messages in UUID
+    order before account mail-sync state, then rechecks the pending generation
+    under both locks before rotating or acknowledging it
   - verify the submitting account
   - ensure the `Sent` mailbox exists
   - create the canonical message in `messages`

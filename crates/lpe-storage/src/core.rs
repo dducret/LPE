@@ -71,6 +71,8 @@ impl Storage {
         for table in [
             "accounts",
             "calendar_events",
+            "calendar_mail_classifications",
+            "calendar_mail_classification_projections",
             "delegation_projection_state",
             "mapi_calendar_event_identity_moves",
             "mapi_store_identity",
@@ -108,6 +110,21 @@ impl Storage {
                     "required table {schema_name}.{table} is missing; LPE 0.5.3 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
                 );
             }
+        }
+
+        let calendar_mail_classification_shape_is_current = sqlx::query_scalar::<_, bool>(
+            include_str!("core/calendar_mail_classification_schema.sql"),
+        )
+        .bind(schema_name)
+        .fetch_one(&self.pool)
+        .await
+        .with_context(|| {
+            format!("unable to inspect durable calendar-mail classification shape in {schema_name}")
+        })?;
+        if !calendar_mail_classification_shape_is_current {
+            bail!(
+                "required durable calendar-mail classification shape is missing or incompatible in {schema_name}; LPE 0.5.3 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+            );
         }
 
         let delegation_projection_shape_is_current = sqlx::query_scalar::<_, bool>(
@@ -908,6 +925,7 @@ impl Storage {
         for (column, data_type, is_nullable) in [
             ("lifecycle_state", "text", "NO"),
             ("deleted_at", "timestamp with time zone", "YES"),
+            ("meeting_response_state_json", "jsonb", "NO"),
         ] {
             let present = sqlx::query_scalar::<_, bool>(
                 r#"
@@ -940,6 +958,68 @@ impl Storage {
             bail!(
                 "required column shapes {} are missing or incompatible in {schema_name}.calendar_events; LPE 0.5.3 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
                 invalid_calendar_lifecycle_columns.join(", ")
+            );
+        }
+
+        let calendar_meeting_response_state_shape_is_current = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT
+                EXISTS (
+                    SELECT 1
+                    FROM pg_attribute attribute_row
+                    JOIN pg_class table_row ON table_row.oid = attribute_row.attrelid
+                    JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+                    JOIN pg_attrdef default_row
+                      ON default_row.adrelid = attribute_row.attrelid
+                     AND default_row.adnum = attribute_row.attnum
+                    WHERE namespace_row.nspname = $1
+                      AND table_row.relname = 'calendar_events'
+                      AND attribute_row.attname = 'meeting_response_state_json'
+                      AND NOT attribute_row.attisdropped
+                      AND pg_get_expr(default_row.adbin, default_row.adrelid) = '''{}''::jsonb'
+                )
+                AND EXISTS (
+                    SELECT 1
+                    FROM pg_constraint constraint_row
+                    JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid
+                    JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+                    WHERE namespace_row.nspname = $1
+                      AND table_row.relname = 'calendar_events'
+                      AND constraint_row.conname =
+                          'calendar_events_meeting_response_state_json_object_check'
+                      AND constraint_row.contype = 'c'
+                      AND constraint_row.convalidated
+                      AND pg_get_expr(constraint_row.conbin, constraint_row.conrelid) =
+                          '(jsonb_typeof(meeting_response_state_json) = ''object''::text)'
+                )
+            "#,
+        )
+        .bind(schema_name)
+        .fetch_one(&self.pool)
+        .await
+        .with_context(|| {
+            format!("unable to inspect meeting-response replay state shape in schema {schema_name}")
+        })?;
+        if !calendar_meeting_response_state_shape_is_current {
+            bail!(
+                "required Calendar meeting-response replay default or object constraint is missing or incompatible in {schema_name}; LPE 0.5.3 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+            );
+        }
+
+        let calendar_request_correlation_index_is_current = sqlx::query_scalar::<_, bool>(
+            include_str!("core/calendar_meeting_request_correlation_schema.sql"),
+        )
+        .bind(schema_name)
+        .fetch_one(&self.pool)
+        .await
+        .with_context(|| {
+            format!(
+                "unable to inspect Calendar meeting-request correlation index in schema {schema_name}"
+            )
+        })?;
+        if !calendar_request_correlation_index_is_current {
+            bail!(
+                "required Calendar meeting-request correlation index is missing or incompatible in {schema_name}; LPE 0.5.3 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
             );
         }
 
@@ -984,7 +1064,7 @@ mod tests {
     const SCHEMA_SQL: &str = include_str!("../sql/schema.sql");
 
     #[tokio::test]
-    async fn startup_rejects_tagged_schema_without_required_mapi_shape() -> Result<()> {
+    async fn startup_rejects_tagged_schema_without_required_protocol_shapes() -> Result<()> {
         let Some(database_url) = env::var("TEST_DATABASE_URL")
             .ok()
             .filter(|value| !value.trim().is_empty())
@@ -1023,6 +1103,214 @@ mod tests {
                 .execute(&pool)
                 .await
                 .context("apply crates/lpe-storage/sql/schema.sql")?;
+
+            sqlx::query(
+                "ALTER TABLE calendar_mail_classification_projections RENAME TO calendar_mail_classification_projections_missing",
+            )
+            .execute(&pool)
+            .await
+            .context("temporarily hide calendar classification projection state")?;
+            let error = Storage::new(pool.clone())
+                .assert_required_schema_objects(&schema_name)
+                .await
+                .expect_err("startup must reject missing calendar classification projection state");
+            anyhow::ensure!(
+                format!("{error:#}").contains("calendar_mail_classification_projections"),
+                "startup rejection must identify missing calendar projection state: {error:#}"
+            );
+            sqlx::query(
+                "ALTER TABLE calendar_mail_classification_projections_missing RENAME TO calendar_mail_classification_projections",
+            )
+            .execute(&pool)
+            .await
+            .context("restore calendar classification projection state")?;
+
+            sqlx::query(
+                "ALTER TABLE calendar_mail_classifications ALTER COLUMN needs_reclassification DROP DEFAULT",
+            )
+            .execute(&pool)
+            .await
+            .context("remove the calendar reclassification default")?;
+            let error = Storage::new(pool.clone())
+                .assert_required_schema_objects(&schema_name)
+                .await
+                .expect_err("startup must reject missing calendar reclassification default");
+            anyhow::ensure!(
+                format!("{error:#}").contains("durable calendar-mail classification shape"),
+                "startup rejection must identify the incompatible classification default: {error:#}"
+            );
+            sqlx::query(
+                "ALTER TABLE calendar_mail_classifications ALTER COLUMN needs_reclassification SET DEFAULT FALSE",
+            )
+            .execute(&pool)
+            .await
+            .context("restore the calendar reclassification default")?;
+
+            sqlx::query(
+                "ALTER TABLE calendar_mail_classifications ALTER COLUMN classification_generation SET DEFAULT 100",
+            )
+            .execute(&pool)
+            .await
+            .context("replace the calendar classification generation default")?;
+            let error = Storage::new(pool.clone())
+                .assert_required_schema_objects(&schema_name)
+                .await
+                .expect_err("startup must reject an incorrect classification generation default");
+            anyhow::ensure!(
+                format!("{error:#}").contains("durable calendar-mail classification shape"),
+                "startup rejection must identify the incorrect classification generation default: {error:#}"
+            );
+            sqlx::query(
+                "ALTER TABLE calendar_mail_classifications ALTER COLUMN classification_generation SET DEFAULT 1",
+            )
+            .execute(&pool)
+            .await
+            .context("restore the calendar classification generation default")?;
+
+            sqlx::query(
+                r#"
+                ALTER TABLE mime_parts
+                    DROP CONSTRAINT mime_parts_scheduling_body_check,
+                    ADD CONSTRAINT mime_parts_scheduling_body_check CHECK (
+                        NOT is_scheduling_body
+                        OR (
+                            lower(btrim(split_part(content_type, ';', 2))) = 'text/calendar'
+                            AND content_disposition IS DISTINCT FROM 'attachment'
+                            AND blob_id IS NOT NULL
+                        )
+                    )
+                "#,
+            )
+            .execute(&pool)
+            .await
+            .context("replace the exact scheduling base-media-type constraint")?;
+            let error = Storage::new(pool.clone())
+                .assert_required_schema_objects(&schema_name)
+                .await
+                .expect_err("startup must reject a scheduling constraint that checks parameters");
+            anyhow::ensure!(
+                format!("{error:#}").contains("durable calendar-mail classification shape"),
+                "startup rejection must identify the inexact scheduling media-type constraint: {error:#}"
+            );
+            sqlx::query(
+                r#"
+                ALTER TABLE mime_parts
+                    DROP CONSTRAINT mime_parts_scheduling_body_check,
+                    ADD CONSTRAINT mime_parts_scheduling_body_check CHECK (
+                        NOT is_scheduling_body
+                        OR (
+                            lower(btrim(split_part(content_type, ';', 1))) = 'text/calendar'
+                            AND content_disposition IS DISTINCT FROM 'attachment'
+                            AND blob_id IS NOT NULL
+                        )
+                    )
+                "#,
+            )
+            .execute(&pool)
+            .await
+            .context("restore the exact scheduling base-media-type constraint")?;
+
+            sqlx::query(
+                r#"
+                ALTER TABLE calendar_mail_classification_projections
+                    DROP CONSTRAINT calendar_mail_classification_projections_classification_fkey
+                "#,
+            )
+            .execute(&pool)
+            .await
+            .context("remove the calendar projection-to-classification foreign key")?;
+            let error = Storage::new(pool.clone())
+                .assert_required_schema_objects(&schema_name)
+                .await
+                .expect_err("startup must reject missing calendar projection foreign key");
+            anyhow::ensure!(
+                format!("{error:#}").contains("durable calendar-mail classification shape"),
+                "startup rejection must identify the missing classification projection foreign key: {error:#}"
+            );
+            sqlx::query(
+                r#"
+                ALTER TABLE calendar_mail_classification_projections
+                    ADD CONSTRAINT calendar_mail_classification_projections_classification_fkey
+                    FOREIGN KEY (tenant_id, message_id)
+                    REFERENCES calendar_mail_classifications (tenant_id, message_id)
+                    ON DELETE CASCADE
+                "#,
+            )
+            .execute(&pool)
+            .await
+            .context("restore the calendar projection-to-classification foreign key")?;
+
+            sqlx::query(
+                "ALTER TABLE calendar_events ALTER COLUMN meeting_response_state_json DROP DEFAULT",
+            )
+            .execute(&pool)
+            .await
+            .context("remove the meeting-response replay state default")?;
+            let error = Storage::new(pool.clone())
+                .assert_required_schema_objects(&schema_name)
+                .await
+                .expect_err("startup must reject a missing meeting-response replay default");
+            anyhow::ensure!(
+                format!("{error:#}").contains("meeting-response replay default or object constraint"),
+                "startup rejection must identify the missing replay default: {error:#}"
+            );
+            sqlx::query(
+                "ALTER TABLE calendar_events ALTER COLUMN meeting_response_state_json SET DEFAULT '{}'::jsonb",
+            )
+            .execute(&pool)
+            .await
+            .context("restore the meeting-response replay state default")?;
+
+            sqlx::query(
+                r#"
+                ALTER TABLE calendar_events
+                    DROP CONSTRAINT calendar_events_meeting_response_state_json_object_check
+                "#,
+            )
+            .execute(&pool)
+            .await
+            .context("remove the meeting-response replay object constraint")?;
+            let error = Storage::new(pool.clone())
+                .assert_required_schema_objects(&schema_name)
+                .await
+                .expect_err("startup must reject a missing meeting-response replay constraint");
+            anyhow::ensure!(
+                format!("{error:#}").contains("meeting-response replay default or object constraint"),
+                "startup rejection must identify the missing replay constraint: {error:#}"
+            );
+            sqlx::query(
+                r#"
+                ALTER TABLE calendar_events
+                    ADD CONSTRAINT calendar_events_meeting_response_state_json_object_check
+                    CHECK (jsonb_typeof(meeting_response_state_json) = 'object')
+                "#,
+            )
+            .execute(&pool)
+            .await
+            .context("restore the meeting-response replay object constraint")?;
+
+            sqlx::query("DROP INDEX calendar_events_active_uid_correlation_idx")
+                .execute(&pool)
+                .await
+                .context("remove the meeting-request correlation index")?;
+            let error = Storage::new(pool.clone())
+                .assert_required_schema_objects(&schema_name)
+                .await
+                .expect_err("startup must reject a missing meeting-request correlation index");
+            anyhow::ensure!(
+                format!("{error:#}").contains("meeting-request correlation index"),
+                "startup rejection must identify the missing request-correlation index: {error:#}"
+            );
+            sqlx::query(
+                r#"
+                CREATE INDEX calendar_events_active_uid_correlation_idx
+                    ON calendar_events (tenant_id, owner_account_id, uid, id)
+                    WHERE lifecycle_state = 'active'
+                "#,
+            )
+            .execute(&pool)
+            .await
+            .context("restore the meeting-request correlation index")?;
 
             for table in [
                 "mapi_local_replica_id_ranges",

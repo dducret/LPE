@@ -2,7 +2,10 @@ use super::super::*;
 
 enum AttachmentReference {
     Message(String),
-    Calendar { file_reference: String, event_id: Uuid },
+    Calendar {
+        file_reference: String,
+        event_id: Uuid,
+    },
 }
 
 struct ParsedFileAttachment {
@@ -418,6 +421,7 @@ pub(in crate::service) fn parse_file_attachment_upload(
         media_type,
         disposition: Some(disposition.to_string()),
         content_id,
+        is_scheduling_body: false,
         blob_bytes,
     })
 }

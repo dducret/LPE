@@ -8,6 +8,7 @@ use crate::mapi::properties::*;
 use crate::mapi::session::MapiObject;
 use crate::mapi::tables::{
     message_recipients, serialize_recipient_row, write_standard_property_row,
+    MESSAGE_RECIPIENT_COLUMNS,
 };
 use crate::mapi::wire::RopId;
 use crate::mapi_store::MapiMailStoreSnapshot;
@@ -60,16 +61,23 @@ pub(in crate::mapi) fn rop_open_message_response_with_recipients(
     let recipients = message_recipients(email);
     let mut response = vec![0x03, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
-    response.push(0);
-    write_typed_string(&mut response, "");
-    write_typed_string(&mut response, subject);
+    // [MS-OXCMSG] section 2.2.3.1.2 requires this byte to advertise named
+    // properties that RopGetPropertiesAll can enumerate on the opened message.
+    response.push(u8::from(email_has_named_properties(email)));
+    let subject_prefix = email_subject_prefix(email);
+    debug_assert_eq!(subject, email.subject);
+    write_typed_string(&mut response, subject_prefix);
+    write_typed_string(&mut response, email_normalized_subject(email));
     response.extend_from_slice(&(recipients.len().min(u16::MAX as usize) as u16).to_le_bytes());
-    // [MS-OXCROPS] 2.2.6.1.2 permits an empty RecipientColumns array;
-    // the intrinsic fields in each RecipientRow still carry its address and name.
-    response.extend_from_slice(&0u16.to_le_bytes());
+    // [MS-OXCROPS] sections 2.2.6.1.2 and 2.2.6.6.2.1: ReadRecipients
+    // reuses the RecipientColumns advertised while opening the Message.
+    response.extend_from_slice(&(MESSAGE_RECIPIENT_COLUMNS.len() as u16).to_le_bytes());
+    for property_tag in MESSAGE_RECIPIENT_COLUMNS {
+        write_u32(&mut response, property_tag);
+    }
     response.push(recipients.len().min(u8::MAX as usize) as u8);
     for recipient in recipients.into_iter().take(u8::MAX as usize) {
-        let row = serialize_recipient_row(recipient.address);
+        let row = serialize_recipient_row(&recipient, &MESSAGE_RECIPIENT_COLUMNS);
         response.push(recipient.recipient_type);
         response.extend_from_slice(&0x0FFFu16.to_le_bytes());
         response.extend_from_slice(&0u16.to_le_bytes());

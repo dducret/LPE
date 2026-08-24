@@ -285,9 +285,8 @@ fn serialize_message_row_with_table_instance(
             PID_TAG_INSTANCE_NUM => write_u32(&mut row, instance_num),
             PID_TAG_ROW_TYPE => write_u32(&mut row, TABLE_LEAF_ROW),
             PID_TAG_DEPTH => write_u32(&mut row, depth),
-            PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
-                write_utf16z(&mut row, &email.subject)
-            }
+            PID_TAG_SUBJECT_W => write_utf16z(&mut row, &email.subject),
+            PID_TAG_NORMALIZED_SUBJECT_W => write_utf16z(&mut row, email_normalized_subject(email)),
             PID_TAG_MESSAGE_CLASS_W | PID_TAG_ORIGINAL_MESSAGE_CLASS_W => {
                 write_utf16z(&mut row, message_class_for_email(email))
             }
@@ -310,7 +309,7 @@ fn serialize_message_row_with_table_instance(
             PID_TAG_ACCESS_LEVEL => write_u32(&mut row, 1),
             PID_TAG_IMPORTANCE => write_u32(&mut row, 1),
             PID_TAG_PRIORITY | PID_TAG_SENSITIVITY => write_u32(&mut row, 0),
-            PID_TAG_SUBJECT_PREFIX_W => write_utf16z(&mut row, ""),
+            PID_TAG_SUBJECT_PREFIX_W => write_utf16z(&mut row, email_subject_prefix(email)),
             PID_TAG_MESSAGE_FLAGS => write_u32(&mut row, message_flags(email)),
             PID_TAG_READ => row.push((!email.unread) as u8),
             PID_TAG_MESSAGE_SIZE => {
@@ -322,12 +321,20 @@ fn serialize_message_row_with_table_instance(
             PID_TAG_SENDER_EMAIL_ADDRESS_W | PID_TAG_SENDER_SMTP_ADDRESS_W => {
                 write_utf16z(&mut row, email_sender_address(email))
             }
+            PID_TAG_SENDER_ENTRY_ID => write_u16_prefixed_bytes(&mut row, &sender_entry_id(email)),
+            PID_TAG_SENDER_SEARCH_KEY => {
+                write_u16_prefixed_bytes(&mut row, &smtp_search_key(email_sender_address(email)))
+            }
             PID_TAG_SENT_REPRESENTING_NAME_W => {
                 write_utf16z(&mut row, email_sent_representing_name(email))
             }
             PID_TAG_SENT_REPRESENTING_ENTRY_ID => {
                 write_u16_prefixed_bytes(&mut row, &sent_representing_entry_id(email))
             }
+            PID_TAG_SENT_REPRESENTING_SEARCH_KEY => write_u16_prefixed_bytes(
+                &mut row,
+                &smtp_search_key(email_sent_representing_address(email)),
+            ),
             PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W => write_utf16z(&mut row, "SMTP"),
             PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W
             | PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W => {

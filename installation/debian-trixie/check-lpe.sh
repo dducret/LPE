@@ -312,11 +312,23 @@ mapi_identity_version_column_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -t
   || fail "MAPI identity version column shapes are invalid; expected bigint/bytea NOT NULL. Initialize a fresh LPE ${expected_release_version} database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "MAPI identity version column shapes are current"
 
-calendar_event_lifecycle_column_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'calendar_events' AND column_name IN ('lifecycle_state', 'deleted_at') AND is_nullable = CASE column_name WHEN 'lifecycle_state' THEN 'NO' WHEN 'deleted_at' THEN 'YES' END AND data_type = CASE column_name WHEN 'lifecycle_state' THEN 'text' WHEN 'deleted_at' THEN 'timestamp with time zone' END;")" \
-  || fail "Unable to inspect Calendar Event lifecycle column shapes"
-[[ "$calendar_event_lifecycle_column_count" == "2" ]] \
-  || fail "Calendar Event Deleted Items lifecycle columns are missing or invalid. Initialize a fresh LPE ${expected_release_version} database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
-pass "Calendar Event Deleted Items lifecycle columns are current"
+calendar_event_lifecycle_column_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'calendar_events' AND column_name IN ('lifecycle_state', 'deleted_at', 'meeting_response_state_json') AND is_nullable = CASE column_name WHEN 'deleted_at' THEN 'YES' ELSE 'NO' END AND data_type = CASE column_name WHEN 'lifecycle_state' THEN 'text' WHEN 'deleted_at' THEN 'timestamp with time zone' ELSE 'jsonb' END;")" \
+  || fail "Unable to inspect Calendar Event lifecycle and meeting-response replay column shapes"
+[[ "$calendar_event_lifecycle_column_count" == "3" ]] \
+  || fail "Calendar Event Deleted Items lifecycle or meeting-response replay columns are missing or invalid. Initialize a fresh LPE ${expected_release_version} database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
+pass "Calendar Event Deleted Items lifecycle and meeting-response replay columns are current"
+
+calendar_meeting_response_state_shape_status="$(calendar_meeting_response_state_shape_ok "$DATABASE_URL")" \
+  || fail "Unable to inspect the Calendar meeting-response replay default and constraint"
+[[ "$calendar_meeting_response_state_shape_status" == "1" ]] \
+  || fail "Calendar meeting-response replay default or object constraint is missing or invalid. Initialize a fresh LPE ${expected_release_version} database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
+pass "Calendar meeting-response replay default and object constraint are current"
+
+calendar_meeting_request_correlation_index_shape_status="$(calendar_meeting_request_correlation_index_shape_ok "$DATABASE_URL")" \
+  || fail "Unable to inspect the Calendar meeting-request correlation index"
+[[ "$calendar_meeting_request_correlation_index_shape_status" == "1" ]] \
+  || fail "Calendar meeting-request correlation index is missing or invalid. Initialize a fresh LPE ${expected_release_version} database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
+pass "Calendar meeting-request correlation index is current"
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_calendar_event_identity_moves');" | grep -qx 'mapi_calendar_event_identity_moves' \
   || fail "Calendar Event identity-move table is missing. Initialize a fresh LPE ${expected_release_version} database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."

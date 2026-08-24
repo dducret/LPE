@@ -416,6 +416,7 @@ sections = [
   "2.2.5.12.1 QueryRows Request Type Request Body",
   "2.2.5.12.2 QueryRows Request Type Success Response Body",
   "2.2.5.14 ResolveNames Request Type",
+  "2.2.5.14.1 ResolveNames Request Type Request Body",
   "2.2.6 PING Request Type",
   "3.1.1 Abstract Data Model",
   "3.1.5.1 Creating a Session Context by Using the Connect or Bind Request Type",
@@ -977,6 +978,7 @@ sections = [
   "2.2.1.9 PidTagSubjectPrefix Property",
   "2.2.1.10 PidTagNormalizedSubject Property",
   "2.2.1.11 PidTagImportance Property",
+  "2.2.1.39 PidTagHasNamedProperties Property",
   "2.2.1.46 PidTagSubject Property",
   "2.2.1.48 PidNameContentClass Property",
   "2.2.1.49 PidTagLocalCommitTime Property",
@@ -1715,8 +1717,9 @@ local_cache = "docs/microsoft/cache/MS-OXCMAIL.pdf"
 sha256 = "e60151f56a6a48dce36cd7244357fc713c51ce8fe49680efc6dca548ef029b40"
 used_for = [
   "MIME generation and canonical mail object projection across ActiveSync, MAPI submission, and IMAP fetch",
+  "Inbound RFC From and distinct Sender preservation for MAPI sender and sent-representing identity",
   "Inbound text/calendar body recognition without a legacy top-level Content-Class prerequisite",
-  "Exact inline scheduling-body correlation while preserving explicitly attached calendar files in MAPI",
+  "Exact selected scheduling-body correlation while preserving explicitly attached calendar files in MAPI",
 ]
 sections = [
   "2.1 MIME Generation Algorithm Details",
@@ -1724,7 +1727,9 @@ sections = [
   "2.1.3.2 Envelope Elements",
   "2.1.3.3 Body Text",
   "2.1.3.4 Attachments",
-  "2.2.3.3.2 Calendaring and vCard Body Parts",
+  "2.2.3.1.3 From",
+  "2.2.3.1.4 Sender",
+  "2.2.3.3.2 Determining Which MIME Element Is the Message Body",
 ]
 
 [[protocol]]
@@ -1739,6 +1744,9 @@ used_for = [
   "Internet calendar projection across DAV, ActiveSync, and MAPI calendar views",
   "Inbound METHOD:REQUEST classification as an Outlook Meeting Request",
   "Inbound REQUEST RSVP flags, intended busy status, and native or third-party UID to GlobalObjectId mapping",
+  "Fail-closed inbound occurrence-response handling until RECURRENCE-ID correlation is canonical",
+  "Inbound Microsoft VTIMEZONE STANDARD and DAYLIGHT transition resolution for actionable meeting-request dates",
+  "Outbound MAPI meeting-response REPLY and COUNTER scheduling MIME generation with spec-compliant GlobalObjectId-to-UID export and original/proposed intervals",
   "Zero-length Calendar subject semantics after PidTagSubject is deleted",
   "Calendar organizer and attendee recipient-row identity and response-status mapping",
   "Calendar RSVP agreement and the distinct delegated X-MS-OLK-SENDER identity case",
@@ -1750,13 +1758,38 @@ sections = [
   "2.1.3.1.1 Component: VCALENDAR",
   "2.1.3.1.1.1 Property: METHOD",
   "2.1.3.1.1.19 Component: VTIMEZONE",
+  "2.1.3.1.1.19.2 Component: STANDARD",
+  "2.1.3.1.1.19.2.1 Property: DTSTART",
+  "2.1.3.1.1.19.2.2 Property: RRULE",
+  "2.1.3.1.1.19.2.4 Property: TZOFFSETFROM",
+  "2.1.3.1.1.19.2.5 Property: TZOFFSETTO",
+  "2.1.3.1.1.19.3 Component: DAYLIGHT",
+  "2.1.3.1.1.19.3.1 Property: DTSTART",
+  "2.1.3.1.1.19.3.2 Property: RRULE",
+  "2.1.3.1.1.19.3.4 Property: TZOFFSETFROM",
+  "2.1.3.1.1.19.3.5 Property: TZOFFSETTO",
+  "2.1.3.2.1 iCalendar Recurrence Syntax",
+  "2.1.3.2.1.5 Recurrence Part: BYMONTHDAY",
+  "2.1.3.2.1.6 Recurrence Part: BYDAY",
   "2.1.3.1.1.20 Component: VEVENT",
   "2.1.3.1.1.20.2 Property: ATTENDEE",
+  "2.1.3.1.1.20.2.1 Parameter: CN",
+  "2.1.3.1.1.20.2.2 Parameter: CUTYPE",
+  "2.1.3.1.1.20.2.3 Parameter: PARTSTAT",
+  "2.1.3.1.1.20.2.4 Parameter: ROLE",
   "2.1.3.1.1.20.2.5 Parameter: RSVP",
+  "2.1.3.1.1.20.5 Property: COMMENT",
+  "2.1.3.1.1.20.8 Property: DTEND",
+  "2.1.3.1.1.20.9 Property: DTSTAMP",
+  "2.1.3.1.1.20.10 Property: DTSTART",
   "2.1.3.1.1.20.16 Property: ORGANIZER",
+  "2.1.3.1.1.20.16.1 Parameter: CN",
+  "2.1.3.1.1.20.20 Property: RECURRENCE-ID",
   "2.1.3.1.1.20.24 Property: SUMMARY",
   "2.1.3.1.1.20.26 Property: UID",
   "2.1.3.1.1.20.34 Property: X-MICROSOFT-CDO-INTENDEDSTATUS",
+  "2.1.3.1.1.20.59 Property: X-MS-OLK-ORIGINALEND",
+  "2.1.3.1.1.20.60 Property: X-MS-OLK-ORIGINALSTART",
   "2.1.3.1.1.20.61 Property: X-MS-OLK-SENDER",
 ]
 
@@ -1935,6 +1968,7 @@ used_for = [
   "PidTagRecipientType originator rows when classifying Outlook calendar organizer and attendee recipients",
   "Canonical Calendar reply-requested, Sender, and SentRepresenting identity-family projection",
   "Inbound Meeting Request ReplyRequested and ResponseRequested action gating",
+  "RopSubmitMessage save-on-submit semantics for handle-local pending Message changes",
   "Exact private-Logon ownership for transport-folder, spooler-advisory, transport-new-mail, and abort-submit ROPs",
   "Exact Logon-object input for RopGetAddressTypes even though the server ignores that object's value",
 ]
@@ -1973,7 +2007,9 @@ sections = [
   "2.2.1.76 PidTagTargetEntryId Property",
   "2.2.3.1 PidTagRecipientType Property",
   "2.2.3.9 PidTagMessageDeliveryTime Property",
+  "3.2.4.1 Sending a Message",
   "3.2.4.4 Optimizing Send",
+  "3.3.5.1 Receiving a RopSubmitMessage ROP Request",
   "3.3.5.1.3 Properties Read and/or Set Upon Submission",
   "2.2.4.3 RopGetAddressTypes ROP",
   "2.2.4.3.1 RopGetAddressTypes ROP Request Buffer",
@@ -2064,6 +2100,8 @@ used_for = [
   "Calendar recipient response-status, side-effect, and appointment-sequence projection",
   "Canonical Calendar response-requested and appointment/meeting icon-index projection",
   "Actionable inbound Meeting Request state across direct property reads, CopyTo, and cached-mode contents synchronization",
+  "Meeting Response server-processing marker that prevents Outlook from recording an already-correlated response again",
+  "Organizer Event save-before-Request submission ordering and Meeting Update sequence correlation",
   "Client-authored PidLidAppointmentColor validation and durable Calendar passthrough",
   "Probe H PidLidIntendedBusyStatus signed-value preservation across import, canonical update, and full ICS replay",
 ]
@@ -2112,9 +2150,12 @@ sections = [
   "2.2.12.5 PidTagScheduleInfoAppointmentTombstone Property",
   "2.2.12.5.1 Record Structure",
   "3.1.4.2 Converting an Appointment Object to a Meeting Object",
-  "3.1.4.7.1 Processing a Meeting Request Object",
+  "3.1.4.7.1 Sending a Meeting Request",
   "3.1.4.7.2 Receiving a New Meeting Request",
+  "3.1.4.7.3 Sending a Meeting Update",
   "3.1.4.8.4 Sending a Meeting Response",
+  "3.1.4.8.5.1 Deciding to Record the Response",
+  "3.1.5.4 Incrementing the Sequence Number",
   "3.1.5.5 Time Display Adjustments",
   "3.1.5.5.1 Data Interpretation for Floating Appointments",
   "4.2.2.1 Creating the Meeting",
@@ -3959,11 +4000,13 @@ published_version = "2024-08-20"
 local_cache = "docs/microsoft/cache/MS-STANOICAL.pdf"
 sha256 = "db092f49385578036514c0a39e5f2715fbafb58cfdcb1459001db6f1f957a20e"
 used_for = [
-  "Outlook iCalendar standards-support reference inventory and preservation of inbound scheduling MIME parts; not a standalone LPE implementation claim",
+  "Outlook iCalendar standards-support reference inventory and preservation of inbound scheduling MIME parts",
+  "Outlook 2010 and later first-iMIP selection across all multipart/mixed children while retaining later candidates as attachments",
 ]
 sections = [
   "Revision Summary",
   "RFC5545 3.7.2 Method",
+  "V0334 multipart/mixed iMIP import behavior",
 ]
 
 [[standard]]

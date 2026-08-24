@@ -21,7 +21,14 @@ pub(crate) const IM_CONTACT_LIST_ROLE: &str = "im_contact_list";
 pub(crate) const DEFAULT_TASK_LIST_NAME: &str = "Tasks";
 pub(crate) const DEFAULT_TASK_LIST_ROLE: &str = "inbox";
 pub(crate) const CANONICAL_CHANGE_CHANNEL: &str = "lpe_canonical_changes";
-pub(crate) const EXPECTED_SCHEMA_VERSION: &str = "0.5.3-sql";
+pub(crate) const EXPECTED_SCHEMA_VERSION: &str = "0.5.2-sql";
+
+const LOCK_ACCOUNT_SYNC_STATE_SQL: &str = r#"
+    SELECT current_modseq
+    FROM account_sync_state
+    WHERE tenant_id = $1 AND account_id = $2 AND category = $3
+    FOR UPDATE
+"#;
 
 impl Storage {
     pub async fn fetch_account_category_modseq(
@@ -55,6 +62,35 @@ impl Storage {
     ) -> Result<i64> {
         self.allocate_account_modseq_in_tx(tx, tenant_id, account_id, "mail")
             .await
+    }
+
+    pub(crate) async fn lock_account_sync_state_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        account_id: Uuid,
+        category: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO account_sync_state (tenant_id, account_id, category, current_modseq)
+            VALUES ($1, $2, $3, 1)
+            ON CONFLICT (tenant_id, account_id, category) DO NOTHING
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(category)
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query_scalar::<_, i64>(LOCK_ACCOUNT_SYNC_STATE_SQL)
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(category)
+            .fetch_optional(&mut **tx)
+            .await?
+            .ok_or_else(|| anyhow!("account sync state could not be locked"))?;
+        Ok(())
     }
 
     pub(crate) async fn allocate_account_modseq_in_tx(
@@ -478,31 +514,80 @@ impl Storage {
         body_text: &str,
         body_html_sanitized: Option<&str>,
     ) -> Result<()> {
+        self.lock_message_for_mime_graph_in_tx(tx, tenant_id, message_id)
+            .await?;
+        // Preserve the previous generation while invalidating its MIME-part
+        // reference. Every account that cached a shared message can then
+        // independently observe an actionable-to-none (or changed actionable)
+        // repair after a draft/content rewrite.
+        sqlx::query(
+            r#"
+            UPDATE calendar_mail_classifications
+            SET needs_reclassification = TRUE,
+                scheduling_mime_part_id = NULL,
+                updated_at = NOW()
+            WHERE tenant_id = $1 AND message_id = $2
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(message_id)
+        .execute(&mut **tx)
+        .await?;
         sqlx::query("DELETE FROM message_bodies WHERE tenant_id = $1 AND message_id = $2")
             .bind(tenant_id)
             .bind(message_id)
             .execute(&mut **tx)
             .await?;
-        sqlx::query("DELETE FROM mime_parts WHERE tenant_id = $1 AND message_id = $2")
-            .bind(tenant_id)
-            .bind(message_id)
-            .execute(&mut **tx)
-            .await?;
+        sqlx::query(
+            r#"
+            WITH RECURSIVE retained_parts (id, parent_part_id) AS (
+                SELECT part.id, part.parent_part_id
+                FROM mime_parts part
+                JOIN attachments attachment
+                  ON attachment.tenant_id = part.tenant_id
+                 AND attachment.message_id = part.message_id
+                 AND attachment.mime_part_id = part.id
+                WHERE part.tenant_id = $1 AND part.message_id = $2
+
+                UNION
+
+                SELECT parent.id, parent.parent_part_id
+                FROM mime_parts parent
+                JOIN retained_parts child
+                  ON child.parent_part_id = parent.id
+                WHERE parent.tenant_id = $1 AND parent.message_id = $2
+            )
+            DELETE FROM mime_parts part
+            WHERE part.tenant_id = $1
+              AND part.message_id = $2
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM retained_parts retained
+                  WHERE retained.id = part.id
+              )
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(message_id)
+        .execute(&mut **tx)
+        .await?;
 
         let text_part_id = Uuid::new_v4();
+        let text_part_path = format!("body.text.{text_part_id}");
         sqlx::query(
             r#"
             INSERT INTO mime_parts (
                 id, tenant_id, message_id, domain_id, part_path, ordinal,
                 content_type, size_octets
             )
-            VALUES ($1, $2, $3, $4, '1', 0, 'text/plain; charset=utf-8', $5)
+            VALUES ($1, $2, $3, $4, $5, 0, 'text/plain; charset=utf-8', $6)
             "#,
         )
         .bind(text_part_id)
         .bind(tenant_id)
         .bind(message_id)
         .bind(domain_id)
+        .bind(text_part_path)
         .bind(body_text.len() as i64)
         .execute(&mut **tx)
         .await?;
@@ -526,19 +611,21 @@ impl Storage {
 
         if let Some(html) = body_html_sanitized.filter(|value| !value.trim().is_empty()) {
             let html_part_id = Uuid::new_v4();
+            let html_part_path = format!("body.html.{html_part_id}");
             sqlx::query(
                 r#"
                 INSERT INTO mime_parts (
                     id, tenant_id, message_id, domain_id, part_path, ordinal,
                     content_type, size_octets
                 )
-                VALUES ($1, $2, $3, $4, '2', 1, 'text/html; charset=utf-8', $5)
+                VALUES ($1, $2, $3, $4, $5, 1, 'text/html; charset=utf-8', $6)
                 "#,
             )
             .bind(html_part_id)
             .bind(tenant_id)
             .bind(message_id)
             .bind(domain_id)
+            .bind(html_part_path)
             .bind(html.len() as i64)
             .execute(&mut **tx)
             .await?;
@@ -561,6 +648,92 @@ impl Storage {
             .await?;
         }
 
+        Ok(())
+    }
+
+    pub(crate) async fn lock_visible_message_memberships_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        account_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Vec<Uuid>> {
+        self.lock_message_for_mime_graph_in_tx(tx, tenant_id, message_id)
+            .await?;
+        let rows = sqlx::query(
+            r#"
+            SELECT id, account_id
+            FROM mailbox_messages
+            WHERE tenant_id = $1
+              AND message_id = $2
+              AND visibility = 'visible'
+            ORDER BY id
+            FOR UPDATE
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(message_id)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        let mut account_memberships = Vec::new();
+        for row in rows {
+            if row.try_get::<Uuid, _>("account_id")? == account_id {
+                account_memberships.push(row.try_get("id")?);
+            }
+        }
+        Ok(account_memberships)
+    }
+
+    pub(crate) async fn lock_message_for_mime_graph_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        message_id: Uuid,
+    ) -> Result<()> {
+        sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT id
+            FROM messages
+            WHERE tenant_id = $1 AND id = $2
+            FOR UPDATE
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(message_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or_else(|| anyhow!("message not found"))?;
+        Ok(())
+    }
+
+    pub(crate) async fn ensure_message_shared_state_is_private_to_account_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        account_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<()> {
+        let visible_in_another_account = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM mailbox_messages
+                WHERE tenant_id = $1
+                  AND message_id = $2
+                  AND account_id <> $3
+                  AND visibility = 'visible'
+            )
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(message_id)
+        .bind(account_id)
+        .fetch_one(&mut **tx)
+        .await?;
+        if visible_in_another_account {
+            bail!("message shared state cannot be mutated while visible in another account");
+        }
         Ok(())
     }
 
@@ -848,6 +1021,22 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
     use uuid::Uuid;
+
+    #[test]
+    fn account_sync_state_lock_is_row_locking_and_nonadvancing() {
+        assert!(super::LOCK_ACCOUNT_SYNC_STATE_SQL.contains("FOR UPDATE"));
+
+        let source = include_str!("shared.rs");
+        let helper = source
+            .split("pub(crate) async fn lock_account_sync_state_in_tx")
+            .nth(1)
+            .expect("account sync state lock helper exists")
+            .split("pub(crate) async fn allocate_account_modseq_in_tx")
+            .next()
+            .expect("account sync state lock helper has a bounded body");
+        assert!(helper.contains("ON CONFLICT (tenant_id, account_id, category) DO NOTHING"));
+        assert!(!helper.contains("current_modseq + 1"));
+    }
 
     fn submit_input() -> SubmitMessageInput {
         SubmitMessageInput {

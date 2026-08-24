@@ -1,6 +1,4 @@
 use super::*;
-use crate::store::ExchangeAddressBookEntryDetails;
-
 const FOLDER_IPM_SUBTREE_VALID: u32 = 0x0000_0001;
 const FOLDER_IPM_INBOX_VALID: u32 = 0x0000_0002;
 const FOLDER_IPM_OUTBOX_VALID: u32 = 0x0000_0004;
@@ -264,17 +262,30 @@ pub(crate) fn mailbox_owner_entry_id(principal: &AccountPrincipal) -> Vec<u8> {
     value
 }
 
-pub(in crate::mapi) fn sent_representing_entry_id(email: &JmapEmail) -> Vec<u8> {
-    let entry = ExchangeAddressBookEntry {
-        id: email.submitted_by_account_id,
-        display_name: email_sent_representing_name(email).to_string(),
-        email: email_sent_representing_address(email).to_string(),
-        entry_kind: ExchangeAddressBookEntryKind::Account,
-        directory_kind: ExchangeAddressBookDirectoryKind::Person,
-        member_emails: Vec::new(),
-        details: ExchangeAddressBookEntryDetails::default(),
-    };
-    super::nspi::nspi_entry_permanent_entry_id(&entry)
+pub(crate) fn sent_representing_entry_id(email: &JmapEmail) -> Vec<u8> {
+    email_address_entry_id(
+        email_sent_representing_name(email),
+        email_sent_representing_address(email),
+    )
+}
+
+pub(crate) fn sender_entry_id(email: &JmapEmail) -> Vec<u8> {
+    email_address_entry_id(email_sender_name(email), email_sender_address(email))
+}
+
+fn email_address_entry_id(display_name: &str, address: &str) -> Vec<u8> {
+    // [MS-OXCICAL] section 2.1.3.1.1.20.16 and [MS-OXCDATA]
+    // section 2.2.5.1 require an unresolved Internet participant to use a
+    // one-off EntryID. JmapEmail carries the RFC identity but no resolved GAL
+    // object for that address, so using the submitting/viewing account's NSPI
+    // identity can alias Sender and SentRepresenting in send-on-behalf mail.
+    super::calendar::calendar_one_off_entry_id(display_name, address)
+}
+
+pub(crate) fn smtp_search_key(address: &str) -> Vec<u8> {
+    let mut value = format!("SMTP:{}", address.to_ascii_uppercase()).into_bytes();
+    value.push(0);
+    value
 }
 
 pub(in crate::mapi) fn hierarchy_display_name(

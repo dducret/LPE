@@ -643,6 +643,8 @@ pub(super) async fn append_delete_properties_response<S>(
             );
         }
         result.map(|_| ())
+    } else if matches!(object, Some(MapiObject::Message { .. })) {
+        stage_message_property_deletions(session, handle_slots, request, &property_tags)
     } else {
         let custom_delete_result = delete_custom_property_values(
             store,

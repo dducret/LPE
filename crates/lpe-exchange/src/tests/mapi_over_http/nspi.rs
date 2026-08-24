@@ -1049,6 +1049,40 @@ async fn mapi_over_http_resolve_names_honors_requested_rca_columns() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_resolve_names_accepts_outlook_null_terminated_name_values() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let request = BASE64_STANDARD
+        .decode(concat!(
+            "AAAAgP8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADkBAAACQQAAAkIAAD/DgAAAAIB/w8fAAEw",
+            "HwACMAMA/g8DAAA5HwADMAMAcToLAEA6AgELMB8AIDofAP85HwD+OQMABTkCAfkP/wEAAAA9",
+            "AFMATQBUAFAAOgBkAGUAbgBpAHMALgBkAHUAYwByAGUAdABAAHMAZABpAGMALgBjAGgAAAAAAAAA",
+        ))
+        .unwrap();
+    assert_eq!(request.len(), 165);
+    let name_offset = 107;
+    assert_eq!(&request[name_offset..name_offset + 2], &[b'=', 0]);
+    let headers = nspi_bound_headers(&service, "ResolveNames").await;
+
+    // Captured Outlook request shape: Reserved is ignored and NameValues starts
+    // directly with the UTF-16LE `=SMTP:` value, without a private u16 length.
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 0);
+    assert_eq!(body[21], 0);
+}
+
+#[tokio::test]
 async fn mapi_over_http_resolve_names_rejects_trailing_input_without_directory_side_effects() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

@@ -115,6 +115,9 @@ impl Storage {
             bail!("source and target mailbox accounts must belong to the same tenant");
         }
         let mut tx = self.pool.begin().await?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            .execute(&mut *tx)
+            .await?;
         let target_role = sqlx::query_scalar::<_, String>(
             r#"
             SELECT role
@@ -129,6 +132,8 @@ impl Storage {
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| anyhow::anyhow!("target mailbox not found"))?;
+        self.lock_message_for_mime_graph_in_tx(&mut tx, &tenant_id, message_id)
+            .await?;
         let source = sqlx::query(
             r#"
             SELECT id, message_id, thread_id, is_seen, is_flagged,
@@ -187,6 +192,13 @@ impl Storage {
                 "created",
             )
             .await?;
+        self.mark_calendar_mail_classification_applied_for_first_visible_membership_in_tx(
+            &mut tx,
+            &tenant_id,
+            target_account_id,
+            message_id,
+        )
+        .await?;
         sqlx::query(
             r#"
             INSERT INTO mail_search_documents (
@@ -784,22 +796,10 @@ impl Storage {
                 .next()
                 .ok_or_else(|| anyhow::anyhow!("message not found"));
         }
-        if let Some(status) = update.followup_flag_status.as_deref() {
-            if !matches!(status, "none" | "flagged" | "complete") {
-                bail!("invalid follow-up flag status");
-            }
-        }
-        // [MS-OXOFLAG] section 2.2.1.2 defines follow-up icon colors 1..=6;
-        // zero is LPE's cleared canonical projection. Keep this storage
-        // boundary aligned for every protocol that mutates canonical mail.
-        if update
-            .followup_icon
-            .is_some_and(|value| !(0..=6).contains(&value))
-            || update.todo_item_flags.is_some_and(|value| value < 0)
-        {
-            bail!("invalid follow-up flag value");
-        }
-        let categories = update.categories.map(normalize_mail_categories);
+        crate::mail_followup::validate_followup_update(&update)?;
+        let categories = update
+            .categories
+            .map(crate::mail_followup::normalize_mail_categories);
         let reminder_changed = update.reminder_set.is_some()
             || update.reminder_at.is_some()
             || update.reminder_dismissed_at.is_some();
@@ -1021,6 +1021,19 @@ impl Storage {
         let domain_id: Uuid = message.try_get("domain_id")?;
 
         let mut tx = self.pool.begin().await?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            .execute(&mut *tx)
+            .await?;
+        let memberships = self
+            .lock_visible_message_memberships_in_tx(&mut tx, &tenant_id, account_id, message_id)
+            .await?;
+        if memberships.is_empty() {
+            bail!("message not found");
+        }
+        self.ensure_message_shared_state_is_private_to_account_in_tx(
+            &mut tx, &tenant_id, account_id, message_id,
+        )
+        .await?;
         let modseq = self
             .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
             .await?;
@@ -1060,8 +1073,8 @@ impl Storage {
         .bind(modseq)
         .fetch_all(&mut *tx)
         .await?;
-        if rows.is_empty() {
-            bail!("message not found");
+        if rows.len() != memberships.len() {
+            bail!("visible message memberships changed while updating content");
         }
         // [MS-OXCFXICS] sections 2.2.1.2.3, 2.2.1.2.7, and 2.2.1.2.8 require
         // a server-side message change to receive a new local CN/ChangeKey and
@@ -1520,15 +1533,4 @@ fn imported_message_move_destination_global_counter(
         bail!("imported message move destination GLOBCNT is outside the dynamic local range");
     }
     Ok(global_counter)
-}
-
-fn normalize_mail_categories(categories: Vec<String>) -> Vec<String> {
-    let mut categories = categories
-        .into_iter()
-        .map(|category| category.trim().to_string())
-        .filter(|category| !category.is_empty())
-        .collect::<Vec<_>>();
-    categories.sort();
-    categories.dedup();
-    categories
 }

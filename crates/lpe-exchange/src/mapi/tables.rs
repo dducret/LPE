@@ -75,7 +75,7 @@ pub(in crate::mapi) use pending::*;
 pub(in crate::mapi) use public_folders::*;
 use query::*;
 pub(in crate::mapi) use query_rows::*;
-pub(in crate::mapi) use recipients::*;
+pub(crate) use recipients::*;
 pub(in crate::mapi) use recoverable_items::*;
 pub(super) use row_codecs::*;
 pub(in crate::mapi) use row_keys::*;

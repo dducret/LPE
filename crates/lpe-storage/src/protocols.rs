@@ -9,70 +9,15 @@ use uuid::Uuid;
 use crate::{
     submission,
     submission::{AttachmentUploadInput, SubmittedRecipientInput},
-    AuditEntryInput, CalendarMeetingRequest, CalendarMeetingResponse, JmapEmailRecipientRow,
-    JmapEmailRow, JmapEmailSubmissionRow, MessageBccRecipientRecordRow, Storage,
-    DEFAULT_TASK_LIST_ROLE,
+    AuditEntryInput, JmapEmailRecipientRow, JmapEmailRow, JmapEmailSubmissionRow,
+    MessageBccRecipientRecordRow, Storage, DEFAULT_TASK_LIST_ROLE,
 };
 
+mod calendar_classification;
 mod calendar_mail;
+mod email_types;
 
-#[derive(Debug, Clone, Serialize)]
-pub struct JmapEmailAddress {
-    pub address: String,
-    pub display_name: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct JmapEmail {
-    pub id: Uuid,
-    pub thread_id: Uuid,
-    pub mailbox_ids: Vec<Uuid>,
-    pub mailbox_states: Vec<JmapEmailMailboxState>,
-    pub mailbox_id: Uuid,
-    pub mailbox_role: String,
-    pub mailbox_name: String,
-    pub modseq: u64,
-    pub received_at: String,
-    pub sent_at: Option<String>,
-    pub from_address: String,
-    pub from_display: Option<String>,
-    pub sender_address: Option<String>,
-    pub sender_display: Option<String>,
-    pub sender_authorization_kind: String,
-    pub submitted_by_account_id: Uuid,
-    pub to: Vec<JmapEmailAddress>,
-    pub cc: Vec<JmapEmailAddress>,
-    pub bcc: Vec<JmapEmailAddress>,
-    pub subject: String,
-    pub preview: String,
-    pub body_text: String,
-    pub body_html_sanitized: Option<String>,
-    pub unread: bool,
-    pub flagged: bool,
-    pub followup_flag_status: String,
-    pub followup_icon: i32,
-    pub todo_item_flags: i32,
-    pub followup_request: String,
-    pub followup_start_at: Option<String>,
-    pub followup_due_at: Option<String>,
-    pub followup_completed_at: Option<String>,
-    pub reminder_set: bool,
-    pub reminder_at: Option<String>,
-    pub reminder_dismissed_at: Option<String>,
-    pub swapped_todo_store_id: Option<Uuid>,
-    pub swapped_todo_data: Option<Vec<u8>>,
-    pub categories: Vec<String>,
-    pub has_attachments: bool,
-    pub calendar_invitation: bool,
-    #[serde(skip)]
-    pub calendar_meeting_request: Option<CalendarMeetingRequest>,
-    #[serde(skip)]
-    pub calendar_meeting_response: Option<CalendarMeetingResponse>,
-    pub size_octets: i64,
-    pub internet_message_id: Option<String>,
-    pub mime_blob_ref: Option<String>,
-    pub delivery_status: String,
-}
+pub use email_types::{JmapEmail, JmapEmailAddress, JmapEmailMailboxState};
 
 #[derive(Debug, Clone, Default)]
 pub struct JmapEmailFollowupUpdate {
@@ -91,30 +36,6 @@ pub struct JmapEmailFollowupUpdate {
     pub swapped_todo_store_id: Option<Uuid>,
     pub swapped_todo_data: Option<Vec<u8>>,
     pub categories: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct JmapEmailMailboxState {
-    pub mailbox_id: Uuid,
-    pub role: String,
-    pub name: String,
-    pub modseq: u64,
-    pub unread: bool,
-    pub flagged: bool,
-    pub followup_flag_status: String,
-    pub followup_icon: i32,
-    pub todo_item_flags: i32,
-    pub followup_request: String,
-    pub followup_start_at: Option<String>,
-    pub followup_due_at: Option<String>,
-    pub followup_completed_at: Option<String>,
-    pub reminder_set: bool,
-    pub reminder_at: Option<String>,
-    pub reminder_dismissed_at: Option<String>,
-    pub swapped_todo_store_id: Option<Uuid>,
-    pub swapped_todo_data: Option<Vec<u8>>,
-    pub categories: Vec<String>,
-    pub draft: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -272,7 +193,7 @@ impl Storage {
                     changes.push(JmapMailObjectChange {
                         cursor,
                         object_id: message_id,
-                        change_kind: jmap_change_kind(&change_kind),
+                        change_kind: jmap_email_change_kind(&change_kind, &summary_json),
                     });
                 }
                 "Thread" => {
@@ -289,7 +210,7 @@ impl Storage {
                     changes.push(JmapMailObjectChange {
                         cursor,
                         object_id: thread_id,
-                        change_kind: jmap_change_kind(&change_kind),
+                        change_kind: jmap_email_change_kind(&change_kind, &summary_json),
                     });
                 }
                 "Mailbox" => match object_kind.as_str() {
@@ -695,6 +616,9 @@ impl Storage {
             return Ok(Vec::new());
         }
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let (mut calendar_invitations, mut calendar_responses) = self
+            .fetch_or_repair_calendar_mail_metadata(tenant_id, account_id, ids)
+            .await?;
 
         let rows = sqlx::query_as::<_, JmapEmailRow>(
             r#"
@@ -819,7 +743,7 @@ impl Storage {
                 NULLIF(fr.display_name, '') AS from_display,
                 NULLIF(sr.address, '') AS sender_address,
                 NULLIF(sr.display_name, '') AS sender_display,
-                'self' AS sender_authorization_kind,
+                COALESCE(sq.authorization_kind, 'external') AS sender_authorization_kind,
                 account.id AS submitted_by_account_id,
                 m.normalized_subject AS subject,
                 LEFT(COALESCE(tb.body_text, hb.body_text, ''), 160) AS preview,
@@ -870,11 +794,15 @@ impl Storage {
                 LIMIT 1
             ) hb ON TRUE
             LEFT JOIN LATERAL (
-                SELECT status
+                SELECT q.status, q.authorization_kind
                 FROM submission_queue q
+                JOIN mailbox_messages submitted_membership
+                  ON submitted_membership.tenant_id = q.tenant_id
+                 AND submitted_membership.account_id = q.account_id
+                 AND submitted_membership.id = q.sent_mailbox_message_id
                 WHERE q.tenant_id = m.tenant_id
                   AND q.account_id = $2
-                  AND q.sent_mailbox_message_id = ANY(rollup.mailbox_message_ids)
+                  AND submitted_membership.message_id = m.id
                 ORDER BY q.created_at DESC
                 LIMIT 1
             ) sq ON TRUE
@@ -916,15 +844,6 @@ impl Storage {
         .bind(ids)
         .fetch_all(&self.pool)
         .await?;
-
-        let (mut calendar_invitations, mut calendar_responses) =
-            calendar_mail::fetch_calendar_mail_metadata(
-                &self.pool,
-                tenant_id,
-                account_id,
-                ids,
-            )
-            .await?;
 
         let mut emails = Vec::with_capacity(ids.len());
         for id in ids {
@@ -1363,6 +1282,18 @@ fn jmap_change_kind(change_kind: &str) -> String {
     .to_string()
 }
 
+fn jmap_email_change_kind(change_kind: &str, summary_json: &Value) -> String {
+    if matches!(change_kind, "destroyed" | "expunged")
+        && summary_json
+            .get("targetMailboxId")
+            .and_then(Value::as_str)
+            .is_some()
+    {
+        return "updated".to_string();
+    }
+    jmap_change_kind(change_kind)
+}
+
 fn jmap_exact_object_kind(data_type: &str) -> Option<&'static str> {
     match data_type {
         "AddressBook" => Some("contact_book"),
@@ -1435,8 +1366,8 @@ fn summary_json_reminder_changed(summary_json: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_mapi_only_change, jmap_change_kind, jmap_exact_object_kind, jmap_object_replay_kinds,
-        jmap_replay_object_id,
+        is_mapi_only_change, jmap_change_kind, jmap_email_change_kind, jmap_exact_object_kind,
+        jmap_object_replay_kinds, jmap_replay_object_id,
     };
     use serde_json::json;
     use uuid::Uuid;
@@ -1452,6 +1383,13 @@ mod tests {
     fn jmap_replay_treats_folder_copies_as_new_objects() {
         assert_eq!(jmap_change_kind("copied"), "created");
         assert_eq!(jmap_change_kind("moved"), "updated");
+    }
+
+    #[test]
+    fn jmap_replay_keeps_mailbox_move_source_expunges_as_email_updates() {
+        let move_summary = json!({ "targetMailboxId": Uuid::new_v4() });
+        assert_eq!(jmap_email_change_kind("expunged", &move_summary), "updated");
+        assert_eq!(jmap_email_change_kind("expunged", &json!({})), "destroyed");
     }
 
     #[test]

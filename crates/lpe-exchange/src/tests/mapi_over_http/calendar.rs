@@ -7170,6 +7170,7 @@ async fn mapi_over_http_calendar_sync_projects_postgresql_canonical_event_proper
                 media_type: "application/pdf".to_string(),
                 content_id: None,
                 disposition: Some("attachment".to_string()),
+                is_scheduling_body: false,
                 blob_bytes: b"calendar attachment".to_vec(),
             },
             lpe_storage::AuditEntryInput {

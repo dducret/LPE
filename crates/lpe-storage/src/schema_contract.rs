@@ -13,6 +13,7 @@ const COLLABORATION_TYPES_STORAGE: &str = include_str!("collaboration/types.rs")
 const CONVERSATION_ACTIONS_STORAGE: &str = include_str!("conversation_actions.rs");
 const CORE_STORAGE: &str = include_str!("core.rs");
 const INBOUND_STORAGE: &str = include_str!("inbound.rs");
+const INBOUND_MEETING_RESPONSE_STORAGE: &str = include_str!("inbound/meeting_response.rs");
 const IMAP_STORAGE: &str = include_str!("imap.rs");
 const JMAP_BLOBS_STORAGE: &str = include_str!("jmap_blobs.rs");
 const JMAP_QUERIES_STORAGE: &str = include_str!("jmap_queries.rs");
@@ -22,7 +23,17 @@ const MAPI_EVENTS_STORAGE: &str = include_str!("mapi_events.rs");
 const MESSAGE_OPS_STORAGE: &str = include_str!("message_ops.rs");
 const NOTES_JOURNAL_STORAGE: &str = include_str!("notes_journal.rs");
 const OUTBOUND_STORAGE: &str = include_str!("outbound.rs");
-const PROTOCOLS_STORAGE: &str = include_str!("protocols.rs");
+const PROTOCOLS_STORAGE: &str = concat!(
+    include_str!("protocols.rs"),
+    "\n",
+    include_str!("protocols/email_types.rs")
+);
+const CALENDAR_CLASSIFICATION_STORAGE: &str = include_str!("protocols/calendar_classification.rs");
+const CALENDAR_MAIL_STORAGE: &str = include_str!("protocols/calendar_mail.rs");
+const CALENDAR_CLASSIFICATION_SCHEMA_CHECK: &str =
+    include_str!("core/calendar_mail_classification_schema.sql");
+const CALENDAR_REQUEST_CORRELATION_SCHEMA_CHECK: &str =
+    include_str!("core/calendar_meeting_request_correlation_schema.sql");
 const PST_STORAGE: &str = include_str!("pst.rs");
 const PUBLIC_FOLDERS_STORAGE: &str = include_str!("public_folders.rs");
 const PUBLIC_FOLDERS_CHANGES_STORAGE: &str = include_str!("public_folders/changes.rs");
@@ -30,6 +41,13 @@ const RECOVERABLE_ITEMS_STORAGE: &str = include_str!("recoverable_items.rs");
 const SEARCH_FOLDERS_STORAGE: &str = include_str!("search_folders.rs");
 const SHARED_STORAGE: &str = include_str!("shared.rs");
 const SUBMISSION_STORAGE: &str = include_str!("submission.rs");
+const SUBMISSION_MEETING_REQUEST_STORAGE: &str = include_str!("submission/meeting_request.rs");
+const SUBMISSION_SOURCE_MUTATION_STORAGE: &str = include_str!("submission/source_mutation.rs");
+const SUBMISSION_SOURCE_STORAGE: &str = concat!(
+    include_str!("submission/source.rs"),
+    "\n",
+    include_str!("submission/source_patch.rs")
+);
 const SUBMISSION_DELEGATION_STORAGE: &str = include_str!("submission/delegation.rs");
 const SUBMISSION_TYPES_STORAGE: &str = include_str!("submission/types.rs");
 const TASKS_STORAGE: &str = include_str!("tasks.rs");
@@ -193,6 +211,9 @@ fn collaboration_objects_have_canonical_projection_fields() {
         "CREATE TABLE calendars",
         "CREATE TABLE calendar_events",
         "CREATE TABLE calendar_event_attachments",
+        "CREATE INDEX calendar_events_active_uid_correlation_idx",
+        "ON calendar_events (tenant_id, owner_account_id, uid, id)",
+        "WHERE lifecycle_state = 'active'",
         "FOREIGN KEY (tenant_id, owner_account_id, calendar_id, event_id)",
         "REFERENCES calendar_events (tenant_id, owner_account_id, calendar_id, id)",
         "FOREIGN KEY (tenant_id, domain_id, blob_id, blob_kind)",
@@ -203,6 +224,9 @@ fn collaboration_objects_have_canonical_projection_fields() {
         "sequence INTEGER NOT NULL DEFAULT 0 CHECK (sequence >= 0)",
         "organizer_json JSONB NOT NULL DEFAULT '{}'::jsonb",
         "attendees_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+        "meeting_response_state_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+        "CONSTRAINT calendar_events_meeting_response_state_json_object_check",
+        "CHECK (jsonb_typeof(meeting_response_state_json) = 'object')",
         "recurrence_rule TEXT",
         "recurrence_exceptions_json JSONB NOT NULL DEFAULT '[]'::jsonb",
         "time_zone TEXT NOT NULL DEFAULT ''",
@@ -1548,6 +1572,11 @@ fn updater_rejects_an_incomplete_current_schema_before_stopping_lpe() {
             "schema_version' AND data_type = 'text'",
             "schema_version = :'expected_schema_version'",
             "canonical_required_relations_shape_ok()",
+            "calendar_meeting_response_state_shape_ok()",
+            "calendar_events_meeting_response_state_json_object_check",
+            "pg_get_expr(default_row.adbin, default_row.adrelid) = '''{}''::jsonb'",
+            "constraint_row.convalidated",
+            "pg_get_expr(constraint_row.conbin, constraint_row.conrelid)",
             "delegation_projection_shape_ok()",
             "mapi_auxiliary_shape_ok()",
             "mapi_low_dynamic_property_shape_ok()",
@@ -2050,6 +2079,185 @@ fn attachment_metadata_changes_write_mail_change_log_entries() {
 }
 
 #[test]
+fn message_mutations_lock_visible_memberships_before_shared_state() {
+    let lock_start = SHARED_STORAGE
+        .find("pub(crate) async fn lock_visible_message_memberships_in_tx")
+        .expect("visible-membership lock helper is missing");
+    let lock_rest = &SHARED_STORAGE[lock_start..];
+    let lock_end = lock_rest
+        .find("pub(crate) async fn lock_message_for_mime_graph_in_tx")
+        .expect("MIME-graph lock helper must follow the visible-membership lock helper");
+    let lock_body = &lock_rest[..lock_end];
+    assert!(
+        lock_body.contains("lock_message_for_mime_graph_in_tx")
+            && lock_body.contains("SELECT id, account_id")
+            && !lock_body.contains("AND account_id =")
+            && lock_body.contains("ORDER BY id")
+            && lock_body.contains("FOR UPDATE")
+            && lock_body.contains("== account_id"),
+        "message mutation locks must take every visible tenant/message membership in deterministic order, then return only caller-account memberships"
+    );
+    assert_contains_before(
+        lock_body,
+        "lock_message_for_mime_graph_in_tx",
+        "SELECT id, account_id",
+        "shared mutation lock order must take the parent message before visible memberships",
+    );
+    for (body, lock, label) in [
+        (
+            function_body(
+                SUBMISSION_SOURCE_MUTATION_STORAGE,
+                "pub async fn replace_message_recipients",
+            ),
+            "lock_visible_message_memberships_in_tx",
+            "recipient replacement",
+        ),
+        (
+            function_body(ATTACHMENTS_STORAGE, "pub async fn add_message_attachment"),
+            "lock_visible_message_memberships_in_tx",
+            "attachment creation",
+        ),
+        (
+            function_body(
+                ATTACHMENTS_STORAGE,
+                "pub async fn delete_message_attachment",
+            ),
+            "lock_visible_message_memberships_in_tx",
+            "attachment deletion",
+        ),
+        (
+            function_body(
+                MESSAGE_OPS_STORAGE,
+                "pub async fn update_jmap_email_content",
+            ),
+            "lock_visible_message_memberships_in_tx",
+            "JMAP content update",
+        ),
+    ] {
+        assert_contains_before(
+            body,
+            "SET TRANSACTION ISOLATION LEVEL READ COMMITTED",
+            lock,
+            &format!(
+                "{label} must use a fresh post-wait snapshot before locking visible memberships"
+            ),
+        );
+    }
+    assert_contains_before(
+        function_body(
+            SUBMISSION_SOURCE_MUTATION_STORAGE,
+            "pub async fn replace_message_recipients",
+        ),
+        "lock_visible_message_memberships_in_tx",
+        "DELETE FROM message_recipients",
+        "recipient replacement must lock visible memberships before rewriting shared recipients",
+    );
+    assert_contains_before(
+        function_body(SUBMISSION_STORAGE, "pub async fn save_draft_message"),
+        "claim_submission_source_in_tx",
+        "store_message_blob_in_tx",
+        "draft replacement must enter the globally ordered source claim before rewriting message state",
+    );
+    assert_contains_before(
+        function_body(ATTACHMENTS_STORAGE, "pub async fn add_message_attachment"),
+        "lock_visible_message_memberships_in_tx",
+        "ingest_message_attachments_in_tx",
+        "attachment creation must lock visible memberships before the MIME graph",
+    );
+    assert_contains_before(
+        function_body(
+            ATTACHMENTS_STORAGE,
+            "pub async fn delete_message_attachment",
+        ),
+        "lock_visible_message_memberships_in_tx",
+        "lock_message_for_mime_graph_in_tx",
+        "attachment deletion must lock visible memberships before the MIME graph",
+    );
+}
+
+#[test]
+fn shared_message_content_mutations_fail_closed_across_accounts() {
+    assert!(
+        SHARED_STORAGE.contains("ensure_message_shared_state_is_private_to_account_in_tx")
+            && SHARED_STORAGE.contains("AND account_id <> $3")
+            && SHARED_STORAGE.contains("visible in another account"),
+        "shared message content must not change while another account has a visible projection"
+    );
+    for (body, lock, mutation, label) in [
+        (
+            function_body(SUBMISSION_STORAGE, "pub async fn save_draft_message"),
+            "claim_submission_source_in_tx",
+            "store_message_blob_in_tx",
+            "saved Draft replacement",
+        ),
+        (
+            function_body(
+                SUBMISSION_SOURCE_MUTATION_STORAGE,
+                "pub async fn replace_message_recipients",
+            ),
+            "lock_visible_message_memberships_in_tx",
+            "DELETE FROM message_recipients",
+            "recipient replacement",
+        ),
+        (
+            function_body(ATTACHMENTS_STORAGE, "pub async fn add_message_attachment"),
+            "lock_visible_message_memberships_in_tx",
+            "ingest_message_attachments_in_tx",
+            "attachment creation",
+        ),
+        (
+            function_body(
+                ATTACHMENTS_STORAGE,
+                "pub async fn delete_message_attachment",
+            ),
+            "lock_visible_message_memberships_in_tx",
+            "DELETE FROM attachments",
+            "attachment deletion",
+        ),
+        (
+            function_body(
+                MESSAGE_OPS_STORAGE,
+                "pub async fn update_jmap_email_content",
+            ),
+            "lock_visible_message_memberships_in_tx",
+            "UPDATE messages",
+            "JMAP content update",
+        ),
+    ] {
+        assert_contains_before(
+            body,
+            lock,
+            "ensure_message_shared_state_is_private_to_account_in_tx",
+            &format!(
+                "{label} must lock every visible membership before checking account isolation"
+            ),
+        );
+        assert_contains_before(
+            body,
+            "ensure_message_shared_state_is_private_to_account_in_tx",
+            mutation,
+            &format!("{label} must reject cross-account shared state before mutation"),
+        );
+    }
+    let submit_body = function_body(
+        SUBMISSION_STORAGE,
+        "async fn submit_message_with_source_behavior",
+    );
+    assert_contains_before(
+        submit_body,
+        "claim_submission_source_in_tx",
+        "ensure_message_shared_state_is_private_to_account_in_tx",
+        "atomic source replacement must claim globally before checking account isolation",
+    );
+    assert_contains_before(
+        submit_body,
+        "ensure_message_shared_state_is_private_to_account_in_tx",
+        "apply_claimed_submission_source_patch_in_tx",
+        "source overlays must fail account isolation before attachments or shared metadata change",
+    );
+}
+
+#[test]
 fn blob_placement_metadata_is_tenant_domain_and_blob_safe() {
     let storage_pools = table_definition("storage_pools");
     assert!(
@@ -2222,6 +2430,419 @@ fn blob_references_enforce_kind_and_attachment_ownership() {
             && ATTACHMENTS_STORAGE.contains("'attachment', $8"),
         "attachment ingestion must bind attachment blob kind explicitly"
     );
+}
+
+#[test]
+fn calendar_mail_classification_is_durable_versioned_and_mime_part_exact() {
+    let messages = table_definition("messages");
+    for required in [
+        "authorized_calendar_response_content_sha256 TEXT",
+        "calendar_response_processed BOOLEAN NOT NULL DEFAULT FALSE",
+        "CONSTRAINT messages_authorized_calendar_response_content_sha256_check",
+        "authorized_calendar_response_content_sha256 ~ '^[0-9a-f]{64}$'",
+        "CONSTRAINT messages_calendar_response_processed_check",
+        "NOT calendar_response_processed",
+        "authorized_calendar_response_content_sha256 IS NOT NULL",
+    ] {
+        assert!(
+            messages.contains(required),
+            "messages must retain exact response authorization and processing state: {required}"
+        );
+    }
+    let mime_parts = table_definition("mime_parts");
+    for required in [
+        "is_scheduling_body BOOLEAN NOT NULL DEFAULT FALSE",
+        "CONSTRAINT mime_parts_scheduling_body_check CHECK",
+        "lower(btrim(split_part(content_type, ';', 1))) = 'text/calendar'",
+        "content_disposition IS DISTINCT FROM 'attachment'",
+        "blob_id IS NOT NULL",
+    ] {
+        assert!(
+            mime_parts.contains(required),
+            "mime_parts must constrain the explicit scheduling-body role: {required}"
+        );
+    }
+    assert_schema_contains_all(&[
+        "CREATE UNIQUE INDEX mime_parts_one_scheduling_body_idx",
+        "ON mime_parts (tenant_id, message_id)",
+        "WHERE is_scheduling_body",
+    ]);
+
+    let classifications = table_definition("calendar_mail_classifications");
+    for required in [
+        "parser_revision INTEGER NOT NULL",
+        "classification_generation BIGINT NOT NULL DEFAULT 1",
+        "requires_projection_rotation BOOLEAN NOT NULL DEFAULT FALSE",
+        "needs_reclassification BOOLEAN NOT NULL DEFAULT FALSE",
+        "classification TEXT NOT NULL",
+        "scheduling_mime_part_id UUID",
+        "metadata_json JSONB NOT NULL",
+        "PRIMARY KEY (tenant_id, message_id)",
+        "CONSTRAINT calendar_mail_classifications_parser_revision_check",
+        "CHECK (parser_revision > 0)",
+        "CONSTRAINT calendar_mail_classifications_generation_check",
+        "CHECK (classification_generation > 0)",
+        "CONSTRAINT calendar_mail_classifications_classification_check",
+        "CHECK (classification IN ('none', 'request', 'response'))",
+        "CONSTRAINT calendar_mail_classifications_metadata_object_check",
+        "CHECK (jsonb_typeof(metadata_json) = 'object')",
+        "CONSTRAINT calendar_mail_classifications_metadata_shape_check",
+        "needs_reclassification AND scheduling_mime_part_id IS NULL",
+        "NOT needs_reclassification",
+        "classification = 'none'\n            AND scheduling_mime_part_id IS NULL",
+        "classification = 'request'\n            AND scheduling_mime_part_id IS NOT NULL",
+        "classification = 'response'\n            AND scheduling_mime_part_id IS NOT NULL",
+        "metadata_json = '{\"kind\":\"none\"}'::jsonb",
+        "(metadata_json ->> 'kind' = 'request') IS TRUE",
+        "metadata_json ? 'request'",
+        "(jsonb_typeof(metadata_json -> 'request') = 'object') IS TRUE",
+        "(metadata_json ->> 'kind' = 'response') IS TRUE",
+        "metadata_json ? 'response'",
+        "(jsonb_typeof(metadata_json -> 'response') = 'object') IS TRUE",
+        "CONSTRAINT calendar_mail_classifications_message_fkey",
+        "REFERENCES messages (tenant_id, id)",
+        "CONSTRAINT calendar_mail_classifications_mime_part_fkey",
+        "REFERENCES mime_parts (tenant_id, message_id, id)",
+        "ON DELETE CASCADE",
+    ] {
+        assert!(
+            classifications.contains(required),
+            "calendar_mail_classifications is missing durable projection shape: {required}"
+        );
+    }
+
+    let projections = table_definition("calendar_mail_classification_projections");
+    for required in [
+        "applied_generation BIGINT NOT NULL",
+        "PRIMARY KEY (tenant_id, account_id, message_id)",
+        "CONSTRAINT calendar_mail_classification_projections_generation_check",
+        "CHECK (applied_generation > 0)",
+        "CONSTRAINT calendar_mail_classification_projections_account_fkey",
+        "REFERENCES accounts (tenant_id, id)",
+        "CONSTRAINT calendar_mail_classification_projections_classification_fkey",
+        "REFERENCES calendar_mail_classifications (tenant_id, message_id)",
+        "ON DELETE CASCADE",
+    ] {
+        assert!(
+            projections.contains(required),
+            "calendar-mail per-account projection state is missing: {required}"
+        );
+    }
+
+    for required in [
+        "CALENDAR_MAIL_PARSER_REVISION",
+        "persist_new_calendar_mail_classification_in_tx",
+        "fetch_or_repair_calendar_mail_metadata",
+        "apply_calendar_mail_classification_projections",
+        "SELECT DISTINCT membership.account_id",
+        "projection.applied_generation IS DISTINCT FROM",
+        "projection_ready",
+        "calendar classification projections kept changing during metadata read",
+        "ON CONFLICT (tenant_id, account_id, message_id) DO NOTHING",
+        "lock_account_mail_sync_state_in_tx",
+        "classification_generation",
+        "needs_reclassification",
+        "FOR UPDATE",
+        "UPDATE mailbox_messages",
+        "rotate_active_mapi_message_identity_in_tx",
+        "\"message\"",
+        "\"mailbox_message\"",
+        "insert_mail_change_log_in_tx",
+        "emit_mail_change",
+        "part.is_scheduling_body",
+    ] {
+        assert!(
+            CALENDAR_CLASSIFICATION_STORAGE.contains(required),
+            "durable calendar-mail classification path is missing: {required}"
+        );
+    }
+    for required in [
+        "message.authorized_calendar_response_content_sha256",
+        "message.calendar_response_processed",
+        "blob.content_sha256 AS blob_content_sha256",
+        "parse_calendar_meeting_response_with_content_sha256",
+        "authorized_calendar_response_content_sha256.as_deref()",
+        "response.server_processed = calendar_response_processed",
+    ] {
+        assert!(
+            CALENDAR_MAIL_STORAGE.contains(required),
+            "lazy response classification must require exact durable authorization: {required}"
+        );
+    }
+    let deliver_body = function_body(INBOUND_STORAGE, "pub async fn deliver_inbound_message");
+    assert_contains_before(
+        deliver_body,
+        "normalized_inbound_recipients(&request.rcpt_to)",
+        "let mut tx = self.pool.begin()",
+        "inbound recipients must be normalized, deduplicated, and globally ordered before lock acquisition",
+    );
+    assert!(
+        INBOUND_STORAGE.contains("collect::<BTreeSet<_>>()"),
+        "inbound recipient ordering must deduplicate normalized recipients"
+    );
+    assert_contains_before(
+        deliver_body,
+        "let authorized_calendar_response =",
+        "store_inbound_message_in_tx",
+        "response authorization must be narrowed to the recipient organizer before storage",
+    );
+    assert_contains_before(
+        deliver_body,
+        "response_outcome.server_processed()",
+        "record_calendar_meeting_response_outcome_in_tx",
+        "only explicit handled outcomes may mark a response processed before its bounded audit",
+    );
+    for required in [
+        "MeetingResponseOutcome::Applied",
+        "MeetingResponseOutcome::Superseded",
+        "MeetingResponseOutcome::Idempotent",
+        "MeetingResponseOutcome::IgnoredOrganizerMismatch",
+        "MeetingResponseOutcome::IgnoredNoCandidate",
+        "MeetingResponseOutcome::IgnoredAmbiguousCandidate",
+        "MeetingResponseOutcome::IgnoredInvalidDurableState",
+        "actor: \"lpe-core\"",
+        "subject: format!(\"message:{message_id}\")",
+    ] {
+        assert!(
+            INBOUND_MEETING_RESPONSE_STORAGE.contains(required),
+            "meeting-response outcomes must be explicit and their audit opaque: {required}"
+        );
+    }
+    let repair_body = function_body(
+        CALENDAR_CLASSIFICATION_STORAGE,
+        "pub(super) async fn fetch_or_repair_calendar_mail_metadata",
+    );
+    assert_contains_before(
+        repair_body,
+        "FOR UPDATE",
+        "fetch_calendar_mail_fingerprints_in_tx",
+        "calendar response repair must lock canonical messages before rechecking authorization fingerprints",
+    );
+    assert_contains_before(
+        repair_body,
+        "fetch_calendar_mail_fingerprints_in_tx",
+        "parsed_fingerprints != current_fingerprints",
+        "calendar response repair must compare the complete post-lock authorization fingerprint",
+    );
+    let apply_body = function_body(
+        CALENDAR_CLASSIFICATION_STORAGE,
+        "async fn apply_calendar_mail_classification_projections",
+    );
+    assert_contains_before(
+        apply_body,
+        "FOR UPDATE OF message",
+        "lock_account_mail_sync_state_in_tx",
+        "classification projection repair must lock ordered parent messages before account mail state",
+    );
+    assert_contains_before(
+        apply_body,
+        "lock_account_mail_sync_state_in_tx",
+        "SELECT classification, classification_generation",
+        "classification projection repair must recheck the pending generation after acquiring parent and account locks",
+    );
+    assert_contains_before(
+        apply_body,
+        "SELECT classification, classification_generation",
+        "version_calendar_classification_repair_in_tx",
+        "classification projection repair must recheck before version rotation",
+    );
+    assert_contains_before(
+        apply_body,
+        "version_calendar_classification_repair_in_tx",
+        "INSERT INTO calendar_mail_classification_projections",
+        "a classification generation is acknowledged only after its version rotation",
+    );
+    let durable_load_body = function_body(
+        CALENDAR_CLASSIFICATION_STORAGE,
+        "async fn load_durable_calendar_mail_metadata",
+    );
+    for required in [
+        "FROM mailbox_messages visible_membership",
+        "visible_membership.visibility = 'visible'",
+        "projection.applied_generation IS DISTINCT FROM",
+        "classification.classification_generation",
+        "AS projection_ready",
+        "canonical_message.authorized_calendar_response_content_sha256",
+        "canonical_message.calendar_response_processed",
+        "scheduling_blob.content_sha256 AS scheduling_content_sha256",
+        "response.server_processed = server_processed",
+    ] {
+        assert!(
+            durable_load_body.contains(required),
+            "the final calendar metadata snapshot must verify every visible account generation: {required}"
+        );
+    }
+    let fetch_body = function_body(PROTOCOLS_STORAGE, "pub async fn fetch_jmap_emails");
+    assert_contains_before(
+        fetch_body,
+        "fetch_or_repair_calendar_mail_metadata",
+        "let rows = sqlx::query_as",
+        "calendar classification repair must precede JMAP/MAPI row assembly",
+    );
+    let inbound_body = function_body(INBOUND_STORAGE, "async fn store_inbound_message_in_tx");
+    assert_contains_before(
+        inbound_body,
+        "ingest_message_attachments_in_tx",
+        "persist_new_calendar_mail_classification_in_tx",
+        "new inbound classification must resolve the MIME part after attachment ingestion",
+    );
+    assert_contains_before(
+        inbound_body,
+        "persist_new_calendar_mail_classification_in_tx",
+        "allocate_mailbox_membership_in_tx",
+        "new inbound classification must be part of the original message transaction",
+    );
+    assert_contains_before(
+        inbound_body,
+        "allocate_mailbox_membership_in_tx",
+        "mark_calendar_mail_classification_applied_in_tx",
+        "the original inbound membership must acknowledge its initial classification generation",
+    );
+    let save_draft_body = function_body(SUBMISSION_STORAGE, "pub async fn save_draft_message");
+    for required in [
+        "effective_attachments",
+        "fetch_claimed_submission_source_attachment_inputs_in_tx",
+        "validate_outbound_response_envelope",
+        "authorized_calendar_response_content_sha256 = $11",
+        "&effective_attachments",
+        "SET needs_reclassification = TRUE",
+    ] {
+        assert!(
+            save_draft_body.contains(required),
+            "Draft response authorization must follow its effective MIME and envelope: {required}"
+        );
+    }
+    assert_contains_before(
+        save_draft_body,
+        "ingest_message_attachments_in_tx",
+        "persist_new_calendar_mail_classification_in_tx",
+        "a new Draft must classify the exact stored MIME graph before allocating its first membership",
+    );
+    assert_contains_before(
+        save_draft_body,
+        "persist_new_calendar_mail_classification_in_tx",
+        "allocate_mailbox_membership_in_tx",
+        "a new Draft classification must be durable before its first visible membership",
+    );
+    assert_contains_before(
+        save_draft_body,
+        "allocate_mailbox_membership_in_tx",
+        "mark_calendar_mail_classification_applied_in_tx",
+        "a new Draft's first visible membership must acknowledge its initial classification",
+    );
+    let submit_body = function_body(
+        SUBMISSION_STORAGE,
+        "async fn submit_message_with_source_behavior",
+    );
+    assert_contains_before(
+        submit_body,
+        "ingest_message_attachments_in_tx",
+        "persist_new_calendar_mail_classification_in_tx",
+        "a canonical Sent item must classify the exact stored scheduling MIME graph",
+    );
+    assert_contains_before(
+        submit_body,
+        "persist_new_calendar_mail_classification_in_tx",
+        "allocate_mailbox_membership_in_tx",
+        "a Sent classification must be durable before its first visible membership",
+    );
+    assert_contains_before(
+        submit_body,
+        "allocate_mailbox_membership_in_tx",
+        "mark_calendar_mail_classification_applied_in_tx",
+        "the original Sent membership must acknowledge its initial classification generation",
+    );
+    let copy_body = function_body(
+        MESSAGE_OPS_STORAGE,
+        "pub async fn copy_jmap_email_between_accounts",
+    );
+    assert!(
+        copy_body.contains(
+            "mark_calendar_mail_classification_applied_for_first_visible_membership_in_tx"
+        ),
+        "cross-account copy must acknowledge the classification through the first-membership guard"
+    );
+    let first_membership_body = function_body(
+        CALENDAR_CLASSIFICATION_STORAGE,
+        "pub(crate) async fn mark_calendar_mail_classification_applied_for_first_visible_membership_in_tx",
+    );
+    assert!(
+        first_membership_body.contains("SELECT COUNT(*) = 1")
+            && first_membership_body.contains("is_first_visible_membership")
+            && first_membership_body.contains("mark_calendar_mail_classification_applied_in_tx"),
+        "only an account's first visible copied membership may acknowledge its current classification generation"
+    );
+    assert_contains_before(
+        SHARED_STORAGE,
+        "SET needs_reclassification = TRUE",
+        "DELETE FROM mime_parts",
+        "MIME graph replacement must preserve and dirty the prior classification generation",
+    );
+    let body_upsert = function_body(
+        SHARED_STORAGE,
+        "pub(crate) async fn upsert_message_body_in_tx",
+    );
+    assert!(
+        body_upsert.contains("WITH RECURSIVE retained_parts")
+            && body_upsert.contains("JOIN attachments attachment")
+            && body_upsert.contains("attachment.mime_part_id = part.id")
+            && body_upsert.contains("child.parent_part_id = parent.id")
+            && body_upsert.contains("FROM retained_parts retained")
+            && body_upsert.contains("body.text.{text_part_id}")
+            && body_upsert.contains("body.html.{html_part_id}"),
+        "a body rewrite must retain exact attachment MIME ancestry and allocate body paths outside the retained graph"
+    );
+    assert!(
+        ATTACHMENTS_STORAGE.contains("attachment.is_scheduling_body")
+            && ATTACHMENTS_STORAGE.contains("UPDATE calendar_mail_classifications")
+            && ATTACHMENTS_STORAGE.contains("SET needs_reclassification = TRUE"),
+        "appending the first scheduling body must dirty any existing calendar-mail classification"
+    );
+    for required in [
+        "authorized_calendar_response_content_sha256 = NULL",
+        "calendar_response_processed = FALSE",
+        "UPDATE calendar_mail_classifications",
+        "SET needs_reclassification = TRUE",
+    ] {
+        assert!(
+            SUBMISSION_SOURCE_MUTATION_STORAGE.contains(required),
+            "recipient replacement must invalidate response authorization: {required}"
+        );
+    }
+    let delete_attachment_body = function_body(
+        ATTACHMENTS_STORAGE,
+        "pub async fn delete_message_attachment",
+    );
+    assert_contains_before(
+        delete_attachment_body,
+        "SET needs_reclassification = TRUE",
+        "DELETE FROM mime_parts",
+        "selected scheduling-part deletion must preserve and dirty the prior classification generation",
+    );
+    for required in [
+        "\"calendar_mail_classifications\"",
+        "\"calendar_mail_classification_projections\"",
+        "calendar_mail_classification_shape_is_current",
+        "mime_parts_scheduling_body_check",
+        "mime_parts_one_scheduling_body_idx",
+        "index_row.indisvalid",
+        "index_row.indisready",
+        "index_row.indislive",
+        "calendar_mail_classifications_metadata_shape_check",
+        "calendar_mail_classifications_generation_check",
+        "calendar_mail_classifications_mime_part_fkey",
+        "calendar_mail_classification_projections_generation_check",
+        "calendar_mail_classification_projections_classification_fkey",
+        "messages_authorized_calendar_response_content_sha256_check",
+        "messages_calendar_response_processed_check",
+        "lower(btrim(split_part(content_type, '';''::text, 1))) = ''text/calendar''::text",
+    ] {
+        assert!(
+            CORE_STORAGE.contains(required)
+                || CALENDAR_CLASSIFICATION_SCHEMA_CHECK.contains(required),
+            "startup validation must reject an incomplete same-label calendar classification schema: {required}"
+        );
+    }
 }
 
 #[test]
@@ -3011,32 +3632,307 @@ fn existing_draft_updates_write_mailbox_message_change_log_entries() {
 
 #[test]
 fn draft_destruction_removes_its_search_projection() {
-    let draft_destroy_body =
-        function_body(SUBMISSION_STORAGE, "async fn delete_draft_message_in_tx");
+    let strict_draft_wrapper = function_body(
+        SUBMISSION_SOURCE_STORAGE,
+        "async fn delete_draft_message_in_tx",
+    );
+    let source_expunge_body = function_body(
+        SUBMISSION_SOURCE_STORAGE,
+        "async fn delete_claimed_source_message_in_tx",
+    );
     assert!(
-        draft_destroy_body.contains("DELETE FROM mail_search_documents")
-            && draft_destroy_body
+        strict_draft_wrapper.contains("claim_submission_source_in_tx")
+            && strict_draft_wrapper.contains("message_id, false")
+            && source_expunge_body.contains("DELETE FROM mail_search_documents")
+            && source_expunge_body
                 .contains("WHERE tenant_id = $1 AND account_id = $2 AND mailbox_message_id = $3",),
-        "draft destruction must remove the exact mailbox membership search projection"
+        "public draft destruction must claim only Drafts and remove the exact claimed membership search projection"
+    );
+}
+
+#[test]
+fn submission_sources_are_claimed_once_and_expunged_conditionally() {
+    let claim_body = function_body(
+        SUBMISSION_SOURCE_STORAGE,
+        "async fn claim_submission_source_in_tx",
+    );
+    let source_expunge_body = function_body(
+        SUBMISSION_SOURCE_STORAGE,
+        "async fn delete_claimed_source_message_in_tx",
+    );
+    let submit_body = function_body(
+        SUBMISSION_STORAGE,
+        "async fn submit_message_with_source_behavior",
+    );
+    let save_draft_body = function_body(SUBMISSION_STORAGE, "pub async fn save_draft_message");
+    let delete_draft_body = function_body(SUBMISSION_STORAGE, "pub async fn delete_draft_message");
+    assert!(
+        submit_body.contains("Keep PostgreSQL READ COMMITTED here")
+            && !SUBMISSION_STORAGE.contains("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            && claim_body.contains("lock_visible_message_memberships_in_tx")
+            && claim_body.contains("FOR UPDATE OF mm")
+            && claim_body.contains("if rows.len() != 1"),
+        "source-backed submission must take the global visible-membership lock order, then require exactly one visible Drafts/Outbox source before hydration"
+    );
+    for (body, claim, label) in [
+        (
+            submit_body,
+            "claim_submission_source_in_tx",
+            "canonical source submission",
+        ),
+        (
+            save_draft_body,
+            "claim_submission_source_in_tx",
+            "saved Draft replacement",
+        ),
+        (
+            delete_draft_body,
+            "delete_draft_message_in_tx",
+            "strict Draft deletion",
+        ),
+    ] {
+        assert_contains_before(
+            body,
+            "SET TRANSACTION ISOLATION LEVEL READ COMMITTED",
+            claim,
+            &format!(
+                "{label} must use READ COMMITTED so a parent-lock wait sees a copier's committed membership"
+            ),
+        );
+    }
+    assert_contains_before(
+        claim_body,
+        "lock_visible_message_memberships_in_tx",
+        "SELECT mm.id",
+        "source claim must acquire the global tenant/message membership lock order before its account-specific Drafts/Outbox row",
+    );
+    let copy_body = function_body(
+        MESSAGE_OPS_STORAGE,
+        "pub async fn copy_jmap_email_between_accounts",
+    );
+    assert_contains_before(
+        copy_body,
+        "SET TRANSACTION ISOLATION LEVEL READ COMMITTED",
+        "lock_message_for_mime_graph_in_tx",
+        "cross-account copy must establish READ COMMITTED before taking the shared parent lock",
+    );
+    assert_contains_before(
+        copy_body,
+        "lock_message_for_mime_graph_in_tx",
+        "allocate_mailbox_membership_in_tx",
+        "cross-account copy must take the parent message lock before inserting a visible membership",
+    );
+    assert!(
+        source_expunge_body.contains("AND visibility = 'visible'")
+            && source_expunge_body.contains("if expunged.rows_affected() != 1")
+            && source_expunge_body.contains("claim.membership_id")
+            && source_expunge_body.contains("claim.message_id"),
+        "canonical source expunge must conditionally affect exactly the claimed visible membership"
+    );
+    assert!(
+        SUBMISSION_STORAGE.contains("SubmissionSourceBehavior::ReplaceWithInput")
+            && SUBMISSION_STORAGE.contains("SubmissionSourceBehavior::UsePersisted")
+            && SUBMISSION_STORAGE.contains("replace_claimed_submission_source_in_tx")
+            && SUBMISSION_STORAGE.contains("load_claimed_submission_source_input_in_tx")
+            && SUBMISSION_STORAGE.contains("exact_editor_submission_input"),
+        "web update-and-submit and protocol persisted-source submission must remain explicit distinct contracts"
+    );
+    assert_contains_before(
+        function_body(
+            SUBMISSION_STORAGE,
+            "async fn submit_message_with_source_behavior",
+        ),
+        "load_claimed_submission_source_input_in_tx",
+        "replace_claimed_submission_source_in_tx",
+        "web update-and-submit must hydrate committed source attachments before inserting editor attachments in its transaction",
+    );
+    assert!(
+        SUBMISSION_SOURCE_STORAGE.contains("FROM message_recipients")
+            && SUBMISSION_SOURCE_STORAGE.contains("FROM protected_bcc_recipients")
+            && SUBMISSION_SOURCE_STORAGE.contains("FROM message_bodies")
+            && SUBMISSION_SOURCE_STORAGE.contains("FROM attachments")
+            && SUBMISSION_SOURCE_STORAGE.contains("mp.content_type")
+            && SUBMISSION_SOURCE_STORAGE.contains("is_scheduling_body")
+            && SUBMISSION_SOURCE_STORAGE.contains("read_durable_blob_in_tx"),
+        "persisted-source hydration must cover message bodies, visible recipients, protected Bcc, and exact scheduling MIME attachment metadata"
+    );
+    let attachment_hydration_body = function_body(
+        SUBMISSION_SOURCE_STORAGE,
+        "pub(super) async fn fetch_claimed_submission_source_attachment_inputs_in_tx",
+    );
+    assert!(
+        !attachment_hydration_body.contains("read_durable_blob(&self.pool"),
+        "attachment hydration under a source transaction must not acquire a second pool connection"
+    );
+    assert_contains_before(
+        attachment_hydration_body,
+        "mp.content_type",
+        "unwrap_or(blob.media_type)",
+        "the canonical MIME part content type must win over deduplicated blob metadata",
+    );
+}
+
+#[test]
+fn meeting_response_correlation_locks_only_active_non_cancelled_events_deterministically() {
+    let body = function_body(
+        INBOUND_MEETING_RESPONSE_STORAGE,
+        "pub(super) async fn apply_calendar_meeting_response_in_tx",
+    );
+    for required in [
+        "lifecycle_state = 'active'",
+        "status <> 'cancelled'",
+        "exception_for_event_id IS NULL",
+        "exception_recurrence_id IS NULL",
+        "ORDER BY id",
+        "FOR UPDATE",
+    ] {
+        assert!(
+            body.contains(required),
+            "meeting-response correlation is missing required candidate-lock contract: {required}"
+        );
+    }
+    assert_contains_before(
+        body,
+        "lifecycle_state = 'active'",
+        "ORDER BY id",
+        "meeting-response correlation must filter active events before deterministic ordering",
+    );
+    assert_contains_before(
+        body,
+        "status <> 'cancelled'",
+        "ORDER BY id",
+        "meeting-response correlation must exclude cancelled events before deterministic ordering",
+    );
+    assert_contains_before(
+        body,
+        "ORDER BY id",
+        "FOR UPDATE",
+        "meeting-response correlation must lock candidates in deterministic event-id order",
+    );
+}
+
+#[test]
+fn meeting_request_submission_is_correlated_before_canonical_writes() {
+    assert!(
+        SUBMISSION_STORAGE.contains("validate_outbound_scheduling_body_in_tx")
+            && SUBMISSION_STORAGE.contains("let submission_attachments")
+            && SUBMISSION_MEETING_REQUEST_STORAGE
+                .contains("LOCK_REQUEST_EVENT_CANDIDATES_SQL")
+            && SUBMISSION_MEETING_REQUEST_STORAGE.contains("ORDER BY id")
+            && SUBMISSION_MEETING_REQUEST_STORAGE.contains("FOR UPDATE")
+            && SUBMISSION_MEETING_REQUEST_STORAGE.contains("status <> 'cancelled'")
+            && SUBMISSION_MEETING_REQUEST_STORAGE.contains("parse_calendar_meeting_response")
+            && SUBMISSION_MEETING_REQUEST_STORAGE.contains("invalid or uses an unsupported")
+            && SUBMISSION_MEETING_REQUEST_STORAGE
+                .contains("validate_outbound_response_envelope")
+            && SUBMISSION_MEETING_REQUEST_STORAGE
+                .contains("response.attendee_email")
+            && SUBMISSION_MEETING_REQUEST_STORAGE
+                .contains("responses do not support Bcc")
+            && SUBMISSION_MEETING_REQUEST_STORAGE
+                .contains("requires exactly one visible organizer recipient")
+            && SUBMISSION_MEETING_REQUEST_STORAGE.contains("request.meeting_sequence >= candidate.sequence")
+            && SUBMISSION_MEETING_REQUEST_STORAGE.contains("matching_candidate_count")
+            && SUBMISSION_MEETING_REQUEST_STORAGE.contains("!= 1")
+            && CORE_STORAGE.contains("calendar_meeting_request_correlation_schema.sql")
+            && CALENDAR_REQUEST_CORRELATION_SCHEMA_CHECK
+                .contains("calendar_events_active_uid_correlation_idx")
+            && CALENDAR_REQUEST_CORRELATION_SCHEMA_CHECK.contains("index_row.indnatts = 4")
+            && CALENDAR_REQUEST_CORRELATION_SCHEMA_CHECK
+                .contains("ARRAY['tenant_id', 'owner_account_id', 'uid', 'id']")
+            && CALENDAR_REQUEST_CORRELATION_SCHEMA_CHECK
+                .contains("(lifecycle_state = ''active''::text)"),
+        "an outbound REQUEST must lock and uniquely correlate its canonical Event before Sent/queue/source-expunge writes"
+    );
+    assert_contains_before(
+        function_body(
+            SUBMISSION_STORAGE,
+            "async fn submit_message_with_source_behavior",
+        ),
+        "validate_outbound_scheduling_body_in_tx",
+        "render_submission_raw_message",
+        "meeting-request correlation must complete before MIME, Sent, queue, or source-expunge writes",
+    );
+}
+
+#[test]
+fn submission_source_overlays_are_atomic_and_survive_in_sent() {
+    let patch_body = function_body(
+        SUBMISSION_SOURCE_STORAGE,
+        "async fn apply_claimed_submission_source_patch_in_tx",
+    );
+    let attachment_delete_body = function_body(
+        SUBMISSION_SOURCE_STORAGE,
+        "async fn delete_claimed_submission_source_attachments_in_tx",
+    );
+    let custom_copy_body = function_body(
+        SUBMISSION_SOURCE_STORAGE,
+        "async fn copy_claimed_submission_source_custom_properties_to_sent_in_tx",
+    );
+    let followup_copy_body = function_body(
+        SUBMISSION_SOURCE_STORAGE,
+        "async fn copy_claimed_submission_source_followup_to_sent_in_tx",
+    );
+    assert!(
+        SUBMISSION_STORAGE.contains("pub async fn submit_message_with_source_patch")
+            && SUBMISSION_STORAGE.contains("apply_claimed_submission_source_patch_in_tx")
+            && SUBMISSION_TYPES_STORAGE.contains("expected_source_modseq")
+            && SUBMISSION_TYPES_STORAGE.contains("delete_attachment_ids")
+            && SUBMISSION_TYPES_STORAGE.contains("custom_property_upserts")
+            && SUBMISSION_TYPES_STORAGE.contains("delete_custom_property_tags")
+            && SUBMISSION_TYPES_STORAGE.contains("canonical_followup_update"),
+        "saved-message overlays must enter the canonical transaction as an explicit complete source patch"
+    );
+    assert!(
+        patch_body.contains("expected != claim.modseq")
+            && patch_body.contains("validate_submission_source_patch")
+            && patch_body.contains("delete_claimed_submission_source_attachments_in_tx")
+            && patch_body.contains("DELETE FROM mapi_custom_property_values")
+            && patch_body.contains("INSERT INTO mapi_custom_property_values")
+            && patch_body.contains("apply_claimed_submission_source_followup_in_tx"),
+        "source patch attachment, custom-property, and canonical follow-up mutations must run under the claim"
+    );
+    assert!(
+        attachment_delete_body.contains("a.id = ANY")
+            && attachment_delete_body.contains("mm.id = $4")
+            && attachment_delete_body.contains("rows.len() != requested_ids.len()")
+            && attachment_delete_body.contains("FOR UPDATE OF a"),
+        "selective attachment deletes must validate and lock every exact claimed-source attachment"
+    );
+    assert!(
+        custom_copy_body.contains("value.object_kind = 'message'")
+            && custom_copy_body.contains("value.canonical_id = $3")
+            && custom_copy_body.contains("'message', $5")
+            && followup_copy_body.contains("UPDATE mailbox_messages sent")
+            && followup_copy_body.contains("FROM mailbox_messages source"),
+        "the effective custom property and canonical follow-up bags must copy from the claimed source to Sent"
+    );
+    assert!(
+        ATTACHMENTS_STORAGE.contains("SELECT COALESCE(MAX(ordinal) + 1, 0)::INTEGER")
+            && ATTACHMENTS_STORAGE.contains("checked_add(offset as i32)"),
+        "attachment append must allocate after the locked maximum ordinal so sparse MIME graphs cannot collide"
     );
 }
 
 #[test]
 fn mailbox_count_mutations_recalculate_from_visible_memberships() {
-    let draft_destroy_body =
-        function_body(SUBMISSION_STORAGE, "async fn delete_draft_message_in_tx");
+    let source_expunge_body = function_body(
+        SUBMISSION_SOURCE_STORAGE,
+        "async fn delete_claimed_source_message_in_tx",
+    );
     let imap_expunge_body = function_body(MAIL_ITEMS_STORAGE, "pub async fn expunge_imap_deleted");
     assert!(
         SUBMISSION_STORAGE
             .matches("recalculate_mailbox_counts_in_tx")
             .count()
-            >= 2,
+            >= 1,
         "draft creation/update paths must recalculate mailbox counters from visible memberships"
     );
     assert!(
-        draft_destroy_body.contains("visibility = 'expunged'")
-            && draft_destroy_body.contains("recalculate_mailbox_counts_in_tx"),
-        "draft membership destruction must recalculate counters after expunging the visible row"
+        source_expunge_body.contains("visibility = 'expunged'")
+            && source_expunge_body.contains("if expunged.rows_affected() != 1")
+            && source_expunge_body.contains("recalculate_mailbox_counts_in_tx"),
+        "Drafts/Outbox source destruction must recalculate counters after conditionally expunging the claimed visible row"
     );
     assert!(
         imap_expunge_body.contains("visibility = 'expunged'")
@@ -3177,12 +4073,24 @@ fn jmap_email_projection_preserves_multi_mailbox_memberships() {
 }
 
 #[test]
+fn jmap_email_submission_provenance_uses_the_historical_membership() {
+    let fetch_body = function_body(PROTOCOLS_STORAGE, "pub async fn fetch_jmap_emails");
+    assert!(
+        fetch_body.contains("JOIN mailbox_messages submitted_membership")
+            && fetch_body.contains("submitted_membership.id = q.sent_mailbox_message_id")
+            && fetch_body.contains("submitted_membership.message_id = m.id")
+            && !fetch_body.contains("q.sent_mailbox_message_id = ANY(rollup.mailbox_message_ids)"),
+        "JMAP Email/get must correlate submission provenance through the durable original membership even after a mailbox move"
+    );
+}
+
+#[test]
 fn imported_and_inbound_mail_persist_message_date_metadata() {
     let inbound_body = function_body(INBOUND_STORAGE, "async fn store_inbound_message_in_tx");
     let import_body = function_body(MESSAGE_OPS_STORAGE, "pub async fn import_jmap_email");
     assert!(
         inbound_body.contains("parse_message_date_header(&request.raw_message)")
-            && inbound_body.contains("COALESCE($8::timestamptz, NOW()), NOW()"),
+            && inbound_body.contains("COALESCE($9::timestamptz, NOW()), NOW()"),
         "inbound storage must persist RFC Date as messages.sent_at and fall back to receive time"
     );
     assert!(

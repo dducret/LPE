@@ -5078,7 +5078,11 @@ async fn item_operations_fetch_rejects_server_id_outside_the_named_collection() 
     let request = encode_wbxml(&{
         let mut root = WbxmlNode::new(20, "ItemOperations");
         let mut fetch = WbxmlNode::new(20, "Fetch");
-        fetch.push(WbxmlNode::with_text(0, "CollectionId", archive.id.to_string()));
+        fetch.push(WbxmlNode::with_text(
+            0,
+            "CollectionId",
+            archive.id.to_string(),
+        ));
         fetch.push(WbxmlNode::with_text(
             0,
             "ServerId",
@@ -6262,7 +6266,7 @@ async fn sync_contact_and_calendar_projection_includes_supported_application_dat
         }])),
         events: Arc::new(Mutex::new(vec![ClientEvent {
             id: event_id,
-            uid: "canonical-event-uid".to_string(),
+            uid: "mapi-goid:040000008200e00074c5b7101a82e00800000000c08470cd9e31dd0100000000000000001e0000007643616c2d556964010000006d6170692d637265617465642d6576656e74".to_string(),
             date: "2026-05-20".to_string(),
             time: "09:15".to_string(),
             time_zone: "UTC".to_string(),
@@ -6387,6 +6391,10 @@ async fn sync_contact_and_calendar_projection_includes_supported_application_dat
         .child("Add")
         .unwrap();
     let calendar_app = calendar_add.child("ApplicationData").unwrap();
+    assert_eq!(
+        calendar_app.child("UID").unwrap().text_value(),
+        "mapi-created-event"
+    );
     assert_eq!(calendar_app.child("TimeZone").unwrap().text_value(), "UTC");
     assert_eq!(
         calendar_app.child("EndTime").unwrap().text_value(),

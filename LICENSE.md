@@ -38,6 +38,8 @@ These exceptions are currently accepted because they are common in the Rust ecos
 
 `unicode-security` is acceptable for mailbox-name mixed-script and confusable detection because it is published under `Apache-2.0 OR MIT` and implements Unicode security checks instead of adding local confusable data handling.
 
+`chrono` is acceptable for calendar date-time and bounded `VTIMEZONE` transition resolution because it is published under `Apache-2.0 OR MIT` and is already present in the workspace dependency graph through `SQLx`.
+
 Google `Magika` is an acceptable candidate for file-type validation because its official project is published under `Apache-2.0`. As with every dependency, the selected integration path and its transitive dependencies must still be reviewed before adoption.
 
 ## External Reference Constraint

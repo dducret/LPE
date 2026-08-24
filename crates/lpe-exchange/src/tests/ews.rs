@@ -1000,7 +1000,9 @@ async fn get_folder_preserves_exact_supported_targets_in_request_order() {
         .unwrap();
 
     let body = response_text(response).await;
-    let mailbox = body.find("<t:DisplayName>RCA Sync</t:DisplayName>").unwrap();
+    let mailbox = body
+        .find("<t:DisplayName>RCA Sync</t:DisplayName>")
+        .unwrap();
     let root = body.find("<t:DisplayName>Root</t:DisplayName>").unwrap();
     let calendar = body.find("<t:CalendarFolder>").unwrap();
     assert!(mailbox < root && root < calendar);
@@ -3503,7 +3505,11 @@ async fn delete_item_rejects_soft_delete_without_mutating_canonical_mail() {
     assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
     assert!(moved_emails.lock().unwrap().is_empty());
     assert!(deleted_emails.lock().unwrap().is_empty());
-    assert!(emails.lock().unwrap().iter().any(|email| email.id == message_id));
+    assert!(emails
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|email| email.id == message_id));
 }
 
 #[tokio::test]
@@ -3847,9 +3853,7 @@ async fn get_sharing_metadata_returns_owned_calendar_metadata_without_exchange_t
             "default", "contacts", "Contacts",
         )])),
         calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
-            "default",
-            "calendar",
-            "Calendar",
+            "default", "calendar", "Calendar",
         )])),
         ..Default::default()
     };
@@ -3876,9 +3880,7 @@ async fn get_sharing_metadata_returns_owned_calendar_metadata_without_exchange_t
     assert!(body.contains("<m:GetSharingMetadataResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(body.contains("<t:DataType>Calendar</t:DataType>"));
-    assert!(
-        body.contains("<t:FolderId Id=\"default\" ChangeKey=\"ck-default\"/>")
-    );
+    assert!(body.contains("<t:FolderId Id=\"default\" ChangeKey=\"ck-default\"/>"));
     assert!(body.contains("<t:OwnerSmtpAddress>alice@example.test</t:OwnerSmtpAddress>"));
     assert!(!body.contains("<t:DataType>Contacts</t:DataType>"));
     assert!(!body.to_ascii_lowercase().contains("token"));
@@ -4060,7 +4062,8 @@ async fn get_sharing_metadata_rejects_shared_collection_without_leaking_owner_da
     let alice = FakeStore::account();
     let mut shared_calendar =
         FakeStore::collection("shared-calendar-bob", "calendar", "Bob Calendar");
-    shared_calendar.owner_account_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    shared_calendar.owner_account_id =
+        Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
     shared_calendar.owner_email = "bob@example.test".to_string();
     shared_calendar.owner_display_name = "Bob".to_string();
     shared_calendar.is_owned = false;
@@ -6619,9 +6622,7 @@ async fn send_item_requires_one_direct_nonempty_item_ids_collection_before_submi
     let drafts_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000022").unwrap();
 
     for item_ids in [
-        format!(
-            r#"<m:ItemIds><t:ItemId Id="message:{draft_id}"/></m:ItemIds><m:ItemIds/>"#
-        ),
+        format!(r#"<m:ItemIds><t:ItemId Id="message:{draft_id}"/></m:ItemIds><m:ItemIds/>"#),
         format!(r#"<t:ItemId Id="message:{draft_id}"/>"#),
         format!(
             r#"<m:ItemIds><t:ItemId Id="message:{draft_id}"/></m:ItemIds><m:Other><m:ItemIds/></m:Other>"#
@@ -6663,9 +6664,7 @@ async fn delete_item_requires_one_direct_nonempty_item_ids_collection_before_del
     let mailbox_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000024").unwrap();
 
     for item_ids in [
-        format!(
-            r#"<m:ItemIds><t:ItemId Id="message:{message_id}"/></m:ItemIds><m:ItemIds/>"#
-        ),
+        format!(r#"<m:ItemIds><t:ItemId Id="message:{message_id}"/></m:ItemIds><m:ItemIds/>"#),
         format!(r#"<t:ItemId Id="message:{message_id}"/>"#),
         format!(
             r#"<m:ItemIds><t:ItemId Id="message:{message_id}"/></m:ItemIds><m:Other><m:ItemIds/></m:Other>"#
@@ -6710,8 +6709,18 @@ async fn send_item_rejects_multiple_accessible_drafts_without_submitting_either(
     let service = ExchangeService::new(FakeStore {
         session: Some(FakeStore::account()),
         emails: Arc::new(Mutex::new(vec![
-            FakeStore::email(&first_id.to_string(), &drafts_id.to_string(), "drafts", "First"),
-            FakeStore::email(&second_id.to_string(), &drafts_id.to_string(), "drafts", "Second"),
+            FakeStore::email(
+                &first_id.to_string(),
+                &drafts_id.to_string(),
+                "drafts",
+                "First",
+            ),
+            FakeStore::email(
+                &second_id.to_string(),
+                &drafts_id.to_string(),
+                "drafts",
+                "Second",
+            ),
         ])),
         submitted_draft_messages: submitted_draft_messages.clone(),
         ..Default::default()
@@ -6742,8 +6751,18 @@ async fn delete_item_rejects_multiple_accessible_items_without_deleting_either()
     let service = ExchangeService::new(FakeStore {
         session: Some(FakeStore::account()),
         emails: Arc::new(Mutex::new(vec![
-            FakeStore::email(&first_id.to_string(), &mailbox_id.to_string(), "inbox", "First"),
-            FakeStore::email(&second_id.to_string(), &mailbox_id.to_string(), "inbox", "Second"),
+            FakeStore::email(
+                &first_id.to_string(),
+                &mailbox_id.to_string(),
+                "inbox",
+                "First",
+            ),
+            FakeStore::email(
+                &second_id.to_string(),
+                &mailbox_id.to_string(),
+                "inbox",
+                "Second",
+            ),
         ])),
         deleted_emails: deleted_emails.clone(),
         ..Default::default()
@@ -6770,9 +6789,19 @@ async fn update_item_rejects_multi_item_and_unsupported_message_fields_without_m
     let first_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000025").unwrap();
     let second_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000026").unwrap();
     let mailbox_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000027").unwrap();
-    let mut first = FakeStore::email(&first_id.to_string(), &mailbox_id.to_string(), "inbox", "First");
+    let mut first = FakeStore::email(
+        &first_id.to_string(),
+        &mailbox_id.to_string(),
+        "inbox",
+        "First",
+    );
     first.unread = true;
-    let mut second = FakeStore::email(&second_id.to_string(), &mailbox_id.to_string(), "inbox", "Second");
+    let mut second = FakeStore::email(
+        &second_id.to_string(),
+        &mailbox_id.to_string(),
+        "inbox",
+        "Second",
+    );
     second.unread = true;
     second.flagged = false;
     let emails = Arc::new(Mutex::new(vec![first, second]));
@@ -7564,9 +7593,8 @@ async fn get_service_configuration_returns_a_parseable_gap_for_each_unknown_requ
             .count(),
         2
     );
-    assert!(body.contains(
-        "<m:ConfigurationName>OrganizationRelationshipSettings</m:ConfigurationName>"
-    ));
+    assert!(body
+        .contains("<m:ConfigurationName>OrganizationRelationshipSettings</m:ConfigurationName>"));
     assert!(body.contains("<m:ConfigurationName>MailboxProtectionRules</m:ConfigurationName>"));
     assert!(!body.contains("<m:ConfigurationName>Unknown</m:ConfigurationName>"));
 }
@@ -9127,10 +9155,11 @@ async fn ediscovery_operations_require_canonical_compliance_authority() {
             "<m:GetNonIndexableItemStatistics />",
         ),
     ] {
-        let request = format!(
-            "<s:Envelope><s:Body>{body}</s:Body></s:Envelope>",
-        );
-        let response = service.handle(&bearer_headers(), request.as_bytes()).await.unwrap();
+        let request = format!("<s:Envelope><s:Body>{body}</s:Body></s:Envelope>",);
+        let response = service
+            .handle(&bearer_headers(), request.as_bytes())
+            .await
+            .unwrap();
         assert_eq!(response.status(), StatusCode::OK, "{operation}");
         let response_body = response_text(response).await;
         assert!(
@@ -9157,17 +9186,13 @@ async fn bulk_transfer_operations_record_canonical_transfer_jobs() {
         session: Some(FakeStore::account()),
         ews_transfer_jobs: jobs.clone(),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
-            mailbox_id,
-            "inbox",
-            "Inbox",
+            mailbox_id, "inbox", "Inbox",
         )])),
         emails: emails.clone(),
         ..Default::default()
     };
-    let service = ExchangeService::new_with_validator(
-        store,
-        Validator::new(FakeDetector::rfc822(), 0.8),
-    );
+    let service =
+        ExchangeService::new_with_validator(store, Validator::new(FakeDetector::rfc822(), 0.8));
 
     let response = service
         .handle(
@@ -12588,7 +12613,10 @@ async fn calendar_attachment_get_and_delete_use_the_accessible_canonical_event()
     let get = format!(
         r#"<s:Envelope><s:Body><m:GetAttachment><m:AttachmentIds><t:AttachmentId Id="{file_reference}"/></m:AttachmentIds></m:GetAttachment></s:Body></s:Envelope>"#
     );
-    let response = service.handle(&bearer_headers(), get.as_bytes()).await.unwrap();
+    let response = service
+        .handle(&bearer_headers(), get.as_bytes())
+        .await
+        .unwrap();
     let body = response_text(response).await;
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(body.contains("<t:Name>agenda.pdf</t:Name>"));
@@ -12659,10 +12687,17 @@ async fn calendar_attachment_requires_effective_read_and_delete_rights() {
     });
 
     for request in [
-        format!(r#"<s:Envelope><s:Body><m:GetAttachment><m:AttachmentIds><t:AttachmentId Id="{file_reference}"/></m:AttachmentIds></m:GetAttachment></s:Body></s:Envelope>"#),
-        format!(r#"<s:Envelope><s:Body><m:DeleteAttachment><m:AttachmentIds><t:AttachmentId Id="{file_reference}"/></m:AttachmentIds></m:DeleteAttachment></s:Body></s:Envelope>"#),
+        format!(
+            r#"<s:Envelope><s:Body><m:GetAttachment><m:AttachmentIds><t:AttachmentId Id="{file_reference}"/></m:AttachmentIds></m:GetAttachment></s:Body></s:Envelope>"#
+        ),
+        format!(
+            r#"<s:Envelope><s:Body><m:DeleteAttachment><m:AttachmentIds><t:AttachmentId Id="{file_reference}"/></m:AttachmentIds></m:DeleteAttachment></s:Body></s:Envelope>"#
+        ),
     ] {
-        let response = service.handle(&bearer_headers(), request.as_bytes()).await.unwrap();
+        let response = service
+            .handle(&bearer_headers(), request.as_bytes())
+            .await
+            .unwrap();
         let body = response_text(response).await;
         assert!(body.contains("<m:ResponseCode>ErrorAttachmentNotFound</m:ResponseCode>"));
     }
@@ -13161,7 +13196,10 @@ async fn archive_item_rejects_an_inaccessible_source_before_moving_or_projecting
         emails.lock().unwrap()[0].mailbox_ids,
         vec![Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap()]
     );
-    assert_ne!(emails.lock().unwrap()[0].mailbox_ids, vec![archive_mailbox_id]);
+    assert_ne!(
+        emails.lock().unwrap()[0].mailbox_ids,
+        vec![archive_mailbox_id]
+    );
     assert_eq!(emails.lock().unwrap()[0].id, message_id);
 }
 

@@ -421,7 +421,7 @@ pub(super) fn append_open_attachment_response(
     }
     if session
         .pending_attachment_deletions
-        .contains(&(folder_id, message_id, attach_num))
+        .contains_key(&(folder_id, message_id, attach_num))
     {
         responses.extend_from_slice(&rop_error_response(
             0x22,
@@ -469,7 +469,7 @@ pub(super) fn append_create_attachment_response(
     let parent_message_handle = parent_handle.filter(|handle| {
         matches!(
             session.handles.get(handle),
-            Some(MapiObject::PendingMessage { .. })
+            Some(MapiObject::Message { .. } | MapiObject::PendingMessage { .. })
         )
     });
     let parent_event_handle = parent_handle.filter(|handle| {
@@ -579,7 +579,8 @@ pub(super) fn append_create_attachment_response(
 
     let attach_num = if is_contact {
         0
-    } else if let Some(parent_handle) = parent_message_handle {
+    } else if is_pending_message {
+        let parent_handle = parent_message_handle.expect("pending Message has a parent handle");
         session
             .pending_message_attachments
             .get(&parent_handle)
@@ -720,20 +721,18 @@ pub(super) fn append_delete_attachment_response(
         responses.extend_from_slice(&rop_simple_success_response(request));
         return;
     }
-    if snapshot
-        .attachment_for_message(folder_id, message_id, attach_num)
-        .is_none()
-    {
+    let Some(attachment) = snapshot.attachment_for_message(folder_id, message_id, attach_num)
+    else {
         responses.extend_from_slice(&rop_error_response(
             0x24,
             request.response_handle_index(),
             0x8004_010F,
         ));
         return;
-    }
+    };
     session
         .pending_attachment_deletions
-        .insert((folder_id, message_id, attach_num));
+        .insert((folder_id, message_id, attach_num), attachment.canonical_id);
     responses.extend_from_slice(&rop_simple_success_response(request));
 }
 
@@ -967,6 +966,10 @@ pub(super) async fn append_save_changes_attachment_response<S, V>(
             session.handles.get(&parent_handle),
             Some(MapiObject::PendingMessage { .. })
         );
+        let parent_is_saved_message = matches!(
+            session.handles.get(&parent_handle),
+            Some(MapiObject::Message { .. })
+        );
         let parent_is_event = matches!(
             session.handles.get(&parent_handle),
             Some(MapiObject::Event { .. } | MapiObject::PendingEvent { .. })
@@ -975,7 +978,12 @@ pub(super) async fn append_save_changes_attachment_response<S, V>(
             session.handles.get(&parent_handle),
             Some(MapiObject::Contact { .. } | MapiObject::PendingContact { .. })
         );
-        if parent_is_pending_message {
+        if parent_is_saved_message {
+            // [MS-OXCMSG] section 3.2.5.13 commits an existing Message's new
+            // Attachment when SaveChangesAttachment succeeds. Continue to the
+            // canonical write below; only a not-yet-saved parent Message keeps
+            // the attachment in its handle-local transaction.
+        } else if parent_is_pending_message {
             session
                 .pending_message_attachments
                 .entry(parent_handle)
@@ -1037,36 +1045,38 @@ pub(super) async fn append_save_changes_attachment_response<S, V>(
             ));
             return;
         }
-        session.handles.insert(
-            handle,
-            MapiObject::SavedAttachment {
-                folder_id,
-                message_id,
-                attach_num,
-                file_reference: format!(
-                    "pending-{}:{parent_handle}:{attach_num}",
-                    if parent_is_event {
-                        "event"
-                    } else if parent_is_contact {
-                        "contact"
-                    } else {
-                        "message"
-                    }
-                ),
-                file_name: attachment.file_name,
-                media_type: attachment.media_type,
-                disposition: attachment.disposition,
-                content_id: attachment.content_id,
-                size_octets: attachment.blob_bytes.len() as u64,
-            },
-        );
-        set_handle_slot(
-            handle_slots,
-            Some(request.response_handle_index()),
-            parent_handle,
-        );
-        responses.extend_from_slice(&rop_simple_success_response(request));
-        return;
+        if !parent_is_saved_message {
+            session.handles.insert(
+                handle,
+                MapiObject::SavedAttachment {
+                    folder_id,
+                    message_id,
+                    attach_num,
+                    file_reference: format!(
+                        "pending-{}:{parent_handle}:{attach_num}",
+                        if parent_is_event {
+                            "event"
+                        } else if parent_is_contact {
+                            "contact"
+                        } else {
+                            "message"
+                        }
+                    ),
+                    file_name: attachment.file_name,
+                    media_type: attachment.media_type,
+                    disposition: attachment.disposition,
+                    content_id: attachment.content_id,
+                    size_octets: attachment.blob_bytes.len() as u64,
+                },
+            );
+            set_handle_slot(
+                handle_slots,
+                Some(request.response_handle_index()),
+                parent_handle,
+            );
+            responses.extend_from_slice(&rop_simple_success_response(request));
+            return;
+        }
     }
     if let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails) {
         match store
@@ -1082,7 +1092,7 @@ pub(super) async fn append_save_changes_attachment_response<S, V>(
             )
             .await
         {
-            Ok(Some((_email, stored))) => {
+            Ok(Some((updated_email, stored))) => {
                 if upsert_custom_property_values_from_map(
                     store,
                     principal,
@@ -1099,6 +1109,17 @@ pub(super) async fn append_save_changes_attachment_response<S, V>(
                         0x8004_010F,
                     ));
                     return;
+                }
+                if let Some(MapiObject::Message { saved_email, .. }) =
+                    session.handles.get_mut(&parent_handle)
+                {
+                    let durable_identity = saved_email
+                        .as_ref()
+                        .and_then(|saved| saved.durable_identity.clone());
+                    *saved_email = Some(MapiSavedEmail {
+                        email: updated_email,
+                        durable_identity,
+                    });
                 }
                 session.handles.insert(
                     handle,
@@ -1393,43 +1414,6 @@ pub(super) fn abandon_event_attachment_transaction(session: &mut MapiSession, pa
     }
 }
 
-pub(super) async fn mapi_submit_attachments_from_email<S>(
-    store: &S,
-    account_id: Uuid,
-    email: &JmapEmail,
-) -> Result<Vec<AttachmentUploadInput>>
-where
-    S: ExchangeStore,
-{
-    if !email.has_attachments {
-        return Ok(Vec::new());
-    }
-
-    let attachments = store
-        .fetch_message_attachments(account_id, email.id)
-        .await?;
-    let mut uploads = Vec::with_capacity(attachments.len());
-    for attachment in attachments {
-        let Some(content) = store
-            .fetch_attachment_content(account_id, &attachment.file_reference)
-            .await?
-        else {
-            return Err(anyhow::anyhow!(
-                "missing attachment content for {}",
-                attachment.file_reference
-            ));
-        };
-        uploads.push(AttachmentUploadInput {
-            file_name: content.file_name,
-            media_type: content.media_type,
-            disposition: attachment.disposition,
-            content_id: attachment.content_id,
-            blob_bytes: content.blob_bytes,
-        });
-    }
-    Ok(uploads)
-}
-
 pub(super) async fn sync_attachment_facts_for_with_embedded_content<S: ExchangeStore>(
     store: &S,
     account_id: Uuid,
@@ -1655,6 +1639,7 @@ pub(super) fn pending_embedded_message_attachment_upload(
         media_type: "application/vnd.ms-outlook".to_string(),
         disposition: Some("attachment".to_string()),
         content_id: None,
+        is_scheduling_body: false,
         blob_bytes: if payload.is_empty() {
             format!("Embedded message {attach_num}").into_bytes()
         } else {

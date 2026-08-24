@@ -13276,7 +13276,7 @@ async fn calendar_event_round_trips_schema_backed_fields() {
 #[tokio::test]
 async fn calendar_event_get_projects_mapi_written_canonical_fields() {
     let mut event = FakeStore::event();
-    event.uid = "mapi-created-event".to_string();
+    event.uid = "mapi-goid:040000008200e00074c5b7101a82e00800000000c08470cd9e31dd0100000000000000001e0000007643616c2d556964010000006d6170692d637265617465642d6576656e74".to_string();
     event.date = "2026-06-03".to_string();
     event.time = "13:30".to_string();
     event.time_zone = "Europe/Berlin".to_string();
@@ -13511,7 +13511,10 @@ async fn contact_and_calendar_set_support_property_patches() {
         events: Arc::new(Mutex::new(vec![FakeStore::event()])),
         ..Default::default()
     };
-    let service = JmapService::new(store.clone());
+    let service = JmapService::new_with_validator(
+        store.clone(),
+        validator_error("unchanged persisted photo must not be revalidated"),
+    );
 
     let response = service
         .handle_api_request(
@@ -13567,6 +13570,7 @@ async fn contact_and_calendar_set_support_property_patches() {
     assert_eq!(contacts[0].name, "Robert Example");
     assert_eq!(contacts[0].email, "robert@example.test");
     assert_eq!(contacts[0].phone, "");
+    assert_eq!(contacts[0].photo_data.as_deref(), Some("iVBORw0KGgo="));
     drop(contacts);
 
     let events = store.events.lock().unwrap();
@@ -13575,6 +13579,56 @@ async fn contact_and_calendar_set_support_property_patches() {
     assert!(events[0]
         .attendees_json
         .contains("\"partstat\":\"tentative\""));
+}
+
+#[tokio::test]
+async fn contact_photo_property_patch_revalidates_changed_bytes() {
+    let contact_id = FakeStore::contact().id.to_string();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contacts: Arc::new(Mutex::new(vec![FakeStore::contact()])),
+        ..Default::default()
+    };
+    let service = JmapService::new_with_validator(
+        store.clone(),
+        validator_error("changed photo validation reached detector"),
+    );
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_CONTACTS_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "ContactCard/set".to_string(),
+                    json!({
+                        "update": {
+                            (contact_id.clone()): {
+                                "photo/data": "bmV3LXBob3Rv"
+                            }
+                        }
+                    }),
+                    "contact-photo-patch".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.method_responses[0].1["notUpdated"][contact_id.as_str()]["type"],
+        "invalidProperties"
+    );
+    assert!(
+        response.method_responses[0].1["notUpdated"][contact_id.as_str()]["description"]
+            .as_str()
+            .unwrap()
+            .contains("changed photo validation reached detector")
+    );
+    assert_eq!(
+        store.contacts.lock().unwrap()[0].photo_data.as_deref(),
+        Some("iVBORw0KGgo=")
+    );
 }
 
 #[tokio::test]

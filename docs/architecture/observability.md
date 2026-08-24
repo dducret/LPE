@@ -23,6 +23,11 @@
   - one `mail-auth.mapi.login-succeeded` event is emitted when EMSMDB `Connect` or NSPI `Bind` successfully establishes or reconnects a Session Context
   - `Execute`, `NotificationWait`, `PING`, `Disconnect`, `Unbind`, and ordinary NSPI continuation requests do not emit repeated successful-login events
   - invalid, revoked, disabled, or changed credentials remain failed-authentication events
+- Meeting-response outcome audits:
+  - a sender-authenticated response stored as a message records one bounded outcome action: applied, superseded, idempotent, organizer mismatch, no candidate, ambiguous candidate, or invalid durable state
+  - the audit actor is `lpe-core` and the subject is only `message:<UUID>`, allowing correlation through canonical message and transport trace state
+  - attendee or organizer addresses, meeting UID, subject, proposed times, response payloads, and content hashes are not copied into the outcome audit
+  - parser failures and envelope/header sender-authentication failures remain ordinary mail and do not create a meeting-response outcome audit
 - `LPE-CT` logs:
   - SMTP session events
   - edge policy decisions

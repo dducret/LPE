@@ -29,6 +29,14 @@ fn utf16z(value: &str) -> Vec<u8> {
         .collect()
 }
 
+fn complete_global_object_id() -> Vec<u8> {
+    let value = "040000008200E00074C5B7101A82E00800000000C08470CD9E31DD01000000000000000010000000ECFF8AEC00CE584390F914BF6A87F955";
+    (0..value.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&value[index..index + 2], 16).unwrap())
+        .collect()
+}
+
 #[test]
 fn hierarchy_display_name_prefers_required_hierarchy_value_over_duplicate_property_value() {
     let hierarchy_values = vec![(
@@ -119,7 +127,8 @@ fn pending_html_only_message_derives_plain_body_for_save_and_submit() {
         &properties,
         &recipients,
         Vec::new(),
-    );
+    )
+    .unwrap();
     assert_eq!(imported.body_text, "Hello\nWorld & team");
     assert_eq!(
         imported.body_html_sanitized.as_deref(),
@@ -128,7 +137,7 @@ fn pending_html_only_message_derives_plain_body_for_save_and_submit() {
     assert_eq!(imported.size_octets, "HTML draft".len() as i64 + 18);
     assert_eq!(imported.to.len(), 1);
 
-    let submitted = mapi_submit_from_pending_message(&principal, &properties, &recipients);
+    let submitted = mapi_submit_from_pending_message(&principal, &properties, &recipients).unwrap();
     assert_eq!(submitted.body_text, "Hello\nWorld & team");
     assert_eq!(
         submitted.body_html_sanitized.as_deref(),
@@ -169,7 +178,12 @@ fn meeting_request_submit_includes_calendar_request_attachment() {
     );
     properties.insert(
         PID_LID_GLOBAL_OBJECT_ID_TAG,
-        MapiValue::Binary(vec![0x04, 0x00, 0x00, 0x00]),
+        MapiValue::Binary(complete_global_object_id()),
+    );
+    properties.insert(PID_LID_APPOINTMENT_SEQUENCE_TAG, MapiValue::I32(3));
+    properties.insert(
+        PID_TAG_CLIENT_SUBMIT_TIME,
+        MapiValue::I64(mapi_mailstore::filetime_from_rfc3339_utc("2026-06-01T07:45:00Z") as i64),
     );
     let recipients = vec![
         PendingRecipient {
@@ -188,7 +202,7 @@ fn meeting_request_submit_includes_calendar_request_attachment() {
         },
     ];
 
-    let submitted = mapi_submit_from_pending_message(&principal, &properties, &recipients);
+    let submitted = mapi_submit_from_pending_message(&principal, &properties, &recipients).unwrap();
 
     assert_eq!(submitted.attachments.len(), 1);
     assert_eq!(
@@ -197,13 +211,198 @@ fn meeting_request_submit_includes_calendar_request_attachment() {
     );
     let calendar = String::from_utf8_lossy(&submitted.attachments[0].blob_bytes);
     assert!(calendar.contains("METHOD:REQUEST"));
-    assert!(calendar.contains("DTSTAMP:20260601T080000Z"));
+    assert!(calendar.contains("DTSTAMP:20260601T074500Z"));
     assert!(calendar.contains("DTSTART:20260601T080000Z"));
     assert!(calendar.contains("DTEND:20260601T083000Z"));
-    assert!(calendar.contains("ORGANIZER;CN=Organizer:mailto:organizer@example.test"));
-    assert!(calendar.contains("ATTENDEE;CN=Attendee;ROLE=REQ-PARTICIPANT"));
+    assert_eq!(calendar.matches("SEQUENCE:3").count(), 1);
+    assert!(calendar.contains("ORGANIZER;CN=\"Organizer\":mailto:organizer@example.test"));
+    assert!(calendar.contains("ATTENDEE;CN=\"Attendee\";ROLE=REQ-PARTICIPANT"));
     assert_eq!(submitted.to.len(), 1);
     assert_eq!(submitted.to[0].address, "attendee@example.test");
+
+    let mut initial_request = properties.clone();
+    initial_request.remove(&PID_LID_APPOINTMENT_SEQUENCE_TAG);
+    let submitted_initial =
+        mapi_submit_from_pending_message(&principal, &initial_request, &recipients).unwrap();
+    let initial_calendar = String::from_utf8_lossy(&submitted_initial.attachments[0].blob_bytes);
+    assert_eq!(initial_calendar.matches("SEQUENCE:0").count(), 1);
+
+    let mut invalid_request = properties.clone();
+    invalid_request.insert(PID_LID_APPOINTMENT_SEQUENCE_TAG, MapiValue::I32(-1));
+    assert!(mapi_submit_from_pending_message(&principal, &invalid_request, &recipients).is_err());
+    assert!(jmap_import_from_pending_message(
+        &principal,
+        &mailbox(
+            "11111111-1111-4111-8111-111111111111",
+            None,
+            "drafts",
+            "Drafts",
+        ),
+        &invalid_request,
+        &recipients,
+        Vec::new(),
+    )
+    .is_err());
+
+    let imported = jmap_import_from_pending_message(
+        &principal,
+        &mailbox(
+            "11111111-1111-4111-8111-111111111111",
+            None,
+            "drafts",
+            "Drafts",
+        ),
+        &properties,
+        &recipients,
+        vec![AttachmentUploadInput {
+            file_name: "agenda.txt".to_string(),
+            media_type: "text/plain".to_string(),
+            disposition: Some("attachment".to_string()),
+            content_id: None,
+            is_scheduling_body: false,
+            blob_bytes: b"Agenda".to_vec(),
+        }],
+    )
+    .unwrap();
+    assert_eq!(imported.attachments.len(), 2);
+    assert!(imported
+        .attachments
+        .iter()
+        .any(|attachment| attachment.file_name == "agenda.txt"));
+    assert!(imported
+        .attachments
+        .iter()
+        .any(|attachment| attachment.is_scheduling_body
+            && attachment.media_type.contains("method=REQUEST")));
+}
+
+#[test]
+fn meeting_response_submit_correlates_declined_counter_and_represented_sender() {
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::nil(),
+        email: "delegate@example.test".to_string(),
+        display_name: "Delegate".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let mut properties = HashMap::new();
+    properties.insert(
+        PID_TAG_MESSAGE_CLASS_W,
+        MapiValue::String("IPM.Schedule.Meeting.Resp.Neg".to_string()),
+    );
+    properties.insert(
+        PID_TAG_SUBJECT_W,
+        MapiValue::String("New Time Proposed: Probe 6".to_string()),
+    );
+    properties.insert(
+        PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
+        MapiValue::String("attendee@example.test".to_string()),
+    );
+    properties.insert(
+        PID_TAG_SENT_REPRESENTING_NAME_W,
+        MapiValue::String("Attendee".to_string()),
+    );
+    properties.insert(
+        PID_TAG_SENDER_EMAIL_ADDRESS_W,
+        MapiValue::String("delegate@example.test".to_string()),
+    );
+    properties.insert(
+        PID_TAG_SENDER_NAME_W,
+        MapiValue::String("Delegate".to_string()),
+    );
+    properties.insert(
+        PID_LID_GLOBAL_OBJECT_ID_TAG,
+        MapiValue::Binary(complete_global_object_id()),
+    );
+    properties.insert(
+        PID_LID_APPOINTMENT_START_WHOLE_TAG,
+        MapiValue::I64(mapi_mailstore::filetime_from_rfc3339_utc("2026-08-21T18:00:00Z") as i64),
+    );
+    properties.insert(
+        PID_LID_APPOINTMENT_END_WHOLE_TAG,
+        MapiValue::I64(mapi_mailstore::filetime_from_rfc3339_utc("2026-08-21T18:30:00Z") as i64),
+    );
+    properties.insert(
+        PID_LID_APPOINTMENT_COUNTER_PROPOSAL_TAG,
+        MapiValue::Bool(true),
+    );
+    // Response objects can retain meeting state flags copied from the
+    // appointment; the organizer remains the outbound delivery recipient.
+    properties.insert(PID_LID_APPOINTMENT_STATE_FLAGS_TAG, MapiValue::I32(1));
+    properties.insert(
+        PID_LID_APPOINTMENT_PROPOSED_START_WHOLE_TAG,
+        MapiValue::I64(mapi_mailstore::filetime_from_rfc3339_utc("2026-08-21T19:00:00Z") as i64),
+    );
+    properties.insert(
+        PID_LID_APPOINTMENT_PROPOSED_END_WHOLE_TAG,
+        MapiValue::I64(mapi_mailstore::filetime_from_rfc3339_utc("2026-08-21T19:30:00Z") as i64),
+    );
+    let recipients = vec![PendingRecipient {
+        row_id: 1,
+        address: "organizer@example.test".to_string(),
+        display_name: Some("Organizer".to_string()),
+        recipient_type: 0x01,
+        recipient_flags: 0x0000_0003,
+    }];
+
+    let submitted = mapi_submit_from_pending_message(&principal, &properties, &recipients).unwrap();
+
+    assert_eq!(submitted.from_address, "attendee@example.test");
+    assert_eq!(submitted.from_display.as_deref(), Some("Attendee"));
+    assert_eq!(
+        submitted.sender_address.as_deref(),
+        Some("delegate@example.test")
+    );
+    assert_eq!(submitted.sender_display.as_deref(), Some("Delegate"));
+    assert_eq!(submitted.to.len(), 1);
+    assert_eq!(submitted.to[0].address, "organizer@example.test");
+    assert_eq!(submitted.attachments.len(), 1);
+    assert_eq!(
+        submitted.attachments[0].media_type,
+        "text/calendar; method=COUNTER; charset=UTF-8"
+    );
+    assert!(submitted.attachments[0].is_scheduling_body);
+    let calendar = String::from_utf8_lossy(&submitted.attachments[0].blob_bytes);
+    assert!(calendar.contains("METHOD:COUNTER"));
+    assert!(calendar.contains("PARTSTAT=DECLINED:mailto:attendee@example.test"));
+    assert!(calendar.contains("ORGANIZER;CN=\"Organizer\":mailto:organizer@example.test"));
+    assert!(calendar.contains("X-MS-OLK-ORIGINALSTART:20260821T180000Z"));
+    assert!(calendar.contains("DTSTART:20260821T190000Z"));
+
+    let imported = jmap_import_from_pending_message(
+        &principal,
+        &mailbox(
+            "11111111-1111-4111-8111-111111111111",
+            None,
+            "drafts",
+            "Drafts",
+        ),
+        &properties,
+        &recipients,
+        Vec::new(),
+    )
+    .unwrap();
+    assert_eq!(imported.from_address, "attendee@example.test");
+    assert_eq!(imported.from_display.as_deref(), Some("Attendee"));
+    assert_eq!(
+        imported.sender_address.as_deref(),
+        Some("delegate@example.test")
+    );
+    assert_eq!(imported.sender_display.as_deref(), Some("Delegate"));
+    assert_eq!(imported.attachments.len(), 1);
+    assert!(imported.attachments[0].is_scheduling_body);
+    assert!(String::from_utf8_lossy(&imported.attachments[0].blob_bytes).contains("METHOD:COUNTER"));
+
+    properties.remove(&PID_TAG_SENT_REPRESENTING_NAME_W);
+    let without_represented_name =
+        mapi_submit_from_pending_message(&principal, &properties, &recipients).unwrap();
+    assert_eq!(without_represented_name.from_display, None);
+    let calendar = String::from_utf8_lossy(&without_represented_name.attachments[0].blob_bytes);
+    let unfolded_calendar = calendar.replace("\r\n ", "");
+    assert!(unfolded_calendar.contains(
+        "ATTENDEE;CN=\"attendee@example.test\";PARTSTAT=DECLINED:mailto:attendee@example.test"
+    ));
 }
 
 #[test]
@@ -243,11 +442,12 @@ fn microsoft_inline_image_html_body_preserves_cid_for_save_and_submit() {
         &properties,
         &recipients,
         Vec::new(),
-    );
+    )
+    .unwrap();
     assert_eq!(imported.body_html_sanitized.as_deref(), Some(html));
     assert!(imported.body_text.contains("This is a sample body text"));
 
-    let submitted = mapi_submit_from_pending_message(&principal, &properties, &recipients);
+    let submitted = mapi_submit_from_pending_message(&principal, &properties, &recipients).unwrap();
     assert_eq!(submitted.body_html_sanitized.as_deref(), Some(html));
     assert!(submitted.body_text.contains("This is a sample body text"));
 }
@@ -2862,7 +3062,11 @@ fn outlook_common_probe_named_properties_have_stable_ids() {
 #[test]
 fn meeting_request_named_properties_have_stable_ids() {
     for (property_id, lid, guid) in [
-        (0x8224, PID_LID_INTENDED_BUSY_STATUS, PSETID_APPOINTMENT_GUID),
+        (
+            0x8224,
+            PID_LID_INTENDED_BUSY_STATUS,
+            PSETID_APPOINTMENT_GUID,
+        ),
         (0x8229, PID_LID_F_INVITED, PSETID_APPOINTMENT_GUID),
         (0x8128, PID_LID_OWNER_CRITICAL_CHANGE, PSETID_MEETING_GUID),
         (0x81E4, PID_LID_IS_EXCEPTION, PSETID_MEETING_GUID),
@@ -2878,7 +3082,10 @@ fn meeting_request_named_properties_have_stable_ids() {
             kind: MapiNamedPropertyKind::Lid(lid),
         };
         assert_eq!(well_known_named_property_id(&property), Some(property_id));
-        assert_eq!(well_known_named_property_for_id(property_id), Some(property));
+        assert_eq!(
+            well_known_named_property_for_id(property_id),
+            Some(property)
+        );
     }
 }
 
@@ -3093,6 +3300,156 @@ fn microsoft_oxcdata_reminder_restriction_example_parses_and_matches() {
 }
 
 #[test]
+fn unresolved_rfc_from_and_sender_project_distinct_one_off_mapi_identities() {
+    let mailbox_id = Uuid::from_u128(0x3333);
+    let mut email = JmapEmail {
+        id: Uuid::from_u128(0x1111),
+        thread_id: Uuid::from_u128(0x2222),
+        mailbox_id,
+        mailbox_role: "inbox".to_string(),
+        mailbox_name: "Inbox".to_string(),
+        modseq: 7,
+        mailbox_ids: vec![mailbox_id],
+        mailbox_states: Vec::new(),
+        received_at: "2026-08-24T05:45:00Z".to_string(),
+        sent_at: Some("2026-08-24T05:44:30Z".to_string()),
+        from_address: "organizer@example.test".to_string(),
+        from_display: Some("Organizer Identity".to_string()),
+        sender_address: Some("transport-agent@example.test".to_string()),
+        sender_display: Some("Transport Agent".to_string()),
+        sender_authorization_kind: "external".to_string(),
+        submitted_by_account_id: Uuid::from_u128(0x4444),
+        to: vec![lpe_storage::JmapEmailAddress {
+            address: "test@l-p-e.ch".to_string(),
+            display_name: Some("LPE Test".to_string()),
+        }],
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        subject: "External identity projection".to_string(),
+        preview: String::new(),
+        body_text: String::new(),
+        body_html_sanitized: None,
+        unread: true,
+        flagged: false,
+        followup_flag_status: "none".to_string(),
+        followup_icon: 0,
+        todo_item_flags: 0,
+        followup_request: String::new(),
+        followup_start_at: None,
+        followup_due_at: None,
+        followup_completed_at: None,
+        reminder_set: false,
+        reminder_at: None,
+        reminder_dismissed_at: None,
+        swapped_todo_store_id: None,
+        swapped_todo_data: None,
+        categories: Vec::new(),
+        has_attachments: false,
+        calendar_invitation: false,
+        calendar_meeting_request: None,
+        calendar_meeting_response: None,
+        size_octets: 512,
+        internet_message_id: Some("<external-identity@example.test>".to_string()),
+        mime_blob_ref: None,
+        delivery_status: "delivered".to_string(),
+    };
+
+    for (tag, expected) in [
+        (PID_TAG_SENDER_NAME_W, "Transport Agent"),
+        (
+            PID_TAG_SENDER_EMAIL_ADDRESS_W,
+            "transport-agent@example.test",
+        ),
+        (
+            PID_TAG_SENDER_SMTP_ADDRESS_W,
+            "transport-agent@example.test",
+        ),
+        (PID_TAG_SENT_REPRESENTING_NAME_W, "Organizer Identity"),
+        (
+            PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
+            "organizer@example.test",
+        ),
+        (
+            PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W,
+            "organizer@example.test",
+        ),
+    ] {
+        assert_eq!(
+            email_property_value(&email, tag),
+            Some(MapiValue::String(expected.to_string())),
+            "property {tag:#010x}"
+        );
+    }
+    for tag in [
+        PID_TAG_SENDER_ADDRESS_TYPE_W,
+        PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W,
+    ] {
+        assert_eq!(
+            email_property_value(&email, tag),
+            Some(MapiValue::String("SMTP".to_string())),
+            "property {tag:#010x}"
+        );
+    }
+
+    let sender_entry_id = email_property_value(&email, PID_TAG_SENDER_ENTRY_ID);
+    let sent_representing_entry_id =
+        email_property_value(&email, PID_TAG_SENT_REPRESENTING_ENTRY_ID);
+    assert_eq!(
+        sender_entry_id,
+        Some(MapiValue::Binary(calendar_one_off_entry_id(
+            "Transport Agent",
+            "transport-agent@example.test",
+        )))
+    );
+    assert_eq!(
+        sent_representing_entry_id,
+        Some(MapiValue::Binary(calendar_one_off_entry_id(
+            "Organizer Identity",
+            "organizer@example.test",
+        )))
+    );
+    for value in [&sender_entry_id, &sent_representing_entry_id] {
+        let Some(MapiValue::Binary(entry_id)) = value else {
+            panic!("external identity EntryID must be binary");
+        };
+        assert_ne!(
+            entry_id.get(4..20),
+            Some(NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID.as_slice())
+        );
+    }
+
+    assert_eq!(
+        email_property_value(&email, PID_TAG_SENDER_SEARCH_KEY),
+        Some(MapiValue::Binary(
+            b"SMTP:TRANSPORT-AGENT@EXAMPLE.TEST\0".to_vec()
+        ))
+    );
+    assert_eq!(
+        email_property_value(&email, PID_TAG_SENT_REPRESENTING_SEARCH_KEY),
+        Some(MapiValue::Binary(b"SMTP:ORGANIZER@EXAMPLE.TEST\0".to_vec()))
+    );
+    let headers = match email_property_value(&email, PID_TAG_TRANSPORT_MESSAGE_HEADERS_W) {
+        Some(MapiValue::String(headers)) => headers,
+        value => panic!("unexpected transport headers: {value:?}"),
+    };
+    assert!(headers.contains("From: Organizer Identity <organizer@example.test>"));
+    assert!(headers.contains("Sender: Transport Agent <transport-agent@example.test>"));
+
+    // A submission authorization record does not resolve either RFC address
+    // to that account's GAL object. It must not make distinct send-on-behalf
+    // identities alias the submitting account's permanent EntryID.
+    email.sender_authorization_kind = "send_on_behalf".to_string();
+    assert_eq!(
+        email_property_value(&email, PID_TAG_SENDER_ENTRY_ID),
+        sender_entry_id
+    );
+    assert_eq!(
+        email_property_value(&email, PID_TAG_SENT_REPRESENTING_ENTRY_ID),
+        sent_representing_entry_id
+    );
+}
+
+#[test]
 fn email_message_class_and_content_class_follow_canonical_projection() {
     assert_eq!(
         well_known_named_property_id(&MapiNamedProperty {
@@ -3200,6 +3557,44 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
     invitation.calendar_meeting_request = Some(lpe_storage::CalendarMeetingRequest {
         uid: "probe-7@example.test".to_string(),
         transport_attachment_id: None,
+        organizer: Some(lpe_storage::CalendarMeetingIdentity {
+            email: "feed@example.test".to_string(),
+            display_name: "Feed".to_string(),
+        }),
+        attendees: vec![
+            lpe_storage::CalendarMeetingAttendee {
+                email: "test@l-p-e.ch".to_string(),
+                display_name: "Test User".to_string(),
+                cutype: "INDIVIDUAL".to_string(),
+                role: "REQ-PARTICIPANT".to_string(),
+                partstat: "NEEDS-ACTION".to_string(),
+                rsvp: true,
+            },
+            lpe_storage::CalendarMeetingAttendee {
+                email: "required-resource@example.test".to_string(),
+                display_name: "Required Resource".to_string(),
+                cutype: "RESOURCE".to_string(),
+                role: "REQ-PARTICIPANT".to_string(),
+                partstat: "NEEDS-ACTION".to_string(),
+                rsvp: true,
+            },
+            lpe_storage::CalendarMeetingAttendee {
+                email: "optional-room@example.test".to_string(),
+                display_name: "Optional Room".to_string(),
+                cutype: "ROOM".to_string(),
+                role: "OPT-PARTICIPANT".to_string(),
+                partstat: "NEEDS-ACTION".to_string(),
+                rsvp: true,
+            },
+            lpe_storage::CalendarMeetingAttendee {
+                email: "observer@example.test".to_string(),
+                display_name: "Observer".to_string(),
+                cutype: "INDIVIDUAL".to_string(),
+                role: "NON-PARTICIPANT".to_string(),
+                partstat: "NEEDS-ACTION".to_string(),
+                rsvp: false,
+            },
+        ],
         response_requested: true,
         sent_at: Some("2026-08-23T18:00:00Z".to_string()),
         meeting_start: "2026-08-24T06:30:00Z".to_string(),
@@ -3226,6 +3621,10 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
             Some(MapiValue::Bool(true))
         );
     }
+    assert_eq!(
+        email_property_value(&invitation, PID_TAG_HAS_NAMED_PROPERTIES),
+        Some(MapiValue::Bool(true))
+    );
     let request_start = mapi_mailstore::filetime_from_rfc3339_utc("2026-08-24T06:30:00Z");
     let request_end = mapi_mailstore::filetime_from_rfc3339_utc("2026-08-24T07:00:00Z");
     for tag in [
@@ -3289,7 +3688,19 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
     );
     assert_eq!(
         email_property_value(&invitation, PID_LID_ALL_ATTENDEES_STRING_W_TAG),
-        Some(MapiValue::String("Test User".to_string()))
+        Some(MapiValue::String(
+            "Test User; Required Resource; Optional Room; Observer".to_string()
+        ))
+    );
+    assert_eq!(
+        email_property_value(&invitation, PID_LID_TO_ATTENDEES_STRING_W_TAG),
+        Some(MapiValue::String(
+            "Test User; Required Resource".to_string()
+        ))
+    );
+    assert_eq!(
+        email_property_value(&invitation, PID_LID_CC_ATTENDEES_STRING_W_TAG),
+        Some(MapiValue::String("Optional Room".to_string()))
     );
     assert_eq!(email_property_value(&invitation, PID_TAG_PROCESSED), None);
     assert_eq!(
@@ -3314,25 +3725,71 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
         email_property_value(&invitation, PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG),
         Some(MapiValue::Binary(goid))
     );
-    let encoded_uid = "040000008200e00074c5b7101a82e00800000000c08470cd9e31dd01000000000000000010000000ecff8aec00ce584390f914bf6a87f955";
+    let encoded_uid = "040000008200E00074C5B7101A82E00807EA0818C08470CD9E31DD01000000000000000010000000ECFF8AEC00CE584390F914BF6A87F955";
     let mut native_uid_invitation = invitation.clone();
     native_uid_invitation
         .calendar_meeting_request
         .as_mut()
         .expect("request metadata exists")
-        .uid = encoded_uid.to_string();
+        .uid = format!("mapi-goid:{encoded_uid}");
     let decoded_uid = hex_to_bytes(encoded_uid).expect("encoded Outlook UID is valid hex");
+    let mut clean_uid = decoded_uid.clone();
+    clean_uid[16..20].fill(0);
     assert_eq!(
         email_property_value(&native_uid_invitation, PID_LID_GLOBAL_OBJECT_ID_TAG),
         Some(MapiValue::Binary(decoded_uid.clone()))
     );
     assert_eq!(
         email_property_value(&native_uid_invitation, PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG),
-        Some(MapiValue::Binary(decoded_uid))
+        Some(MapiValue::Binary(clean_uid.clone()))
+    );
+    assert!(
+        email_meeting_property_tags(&native_uid_invitation).contains(&PID_LID_GLOBAL_OBJECT_ID_TAG)
+    );
+    assert!(email_meeting_property_tags(&native_uid_invitation)
+        .contains(&PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG));
+    let inconsistent_uid = format!(
+        "mapi-goid:{}11000000{}",
+        &encoded_uid[..72],
+        &encoded_uid[80..]
+    );
+    native_uid_invitation
+        .calendar_meeting_request
+        .as_mut()
+        .expect("request metadata exists")
+        .uid = inconsistent_uid.clone();
+    let inconsistent_goid =
+        match email_property_value(&native_uid_invitation, PID_LID_GLOBAL_OBJECT_ID_TAG) {
+            Some(MapiValue::Binary(value)) => value,
+            value => panic!("expected third-party GlobalObjectId, got {value:?}"),
+        };
+    assert_eq!(&inconsistent_goid[40..48], b"vCal-Uid");
+    assert_eq!(&inconsistent_goid[52..], inconsistent_uid.as_bytes());
+    let lowercase_unprefixed_uid = encoded_uid.to_ascii_lowercase();
+    native_uid_invitation
+        .calendar_meeting_request
+        .as_mut()
+        .expect("request metadata exists")
+        .uid = lowercase_unprefixed_uid.clone();
+    let lowercase_unprefixed_goid =
+        match email_property_value(&native_uid_invitation, PID_LID_GLOBAL_OBJECT_ID_TAG) {
+            Some(MapiValue::Binary(value)) => value,
+            value => panic!("expected third-party GlobalObjectId, got {value:?}"),
+        };
+    assert_eq!(&lowercase_unprefixed_goid[40..48], b"vCal-Uid");
+    assert_eq!(
+        &lowercase_unprefixed_goid[52..],
+        lowercase_unprefixed_uid.as_bytes()
     );
     let mut counter = email.clone();
     counter.calendar_meeting_response = Some(lpe_storage::CalendarMeetingResponse {
         method: "COUNTER".to_string(),
+        transport_attachment_id: None,
+        server_processed: true,
+        organizer: Some(lpe_storage::CalendarMeetingIdentity {
+            email: "test@l-p-e.ch".to_string(),
+            display_name: "Test User".to_string(),
+        }),
         attendee_email: "denis.ducret@sdic.ch".to_string(),
         attendee_name: "Denis Ducret".to_string(),
         partstat: "tentative".to_string(),
@@ -3349,7 +3806,9 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
     });
     assert_eq!(
         email_property_value(&counter, PID_TAG_MESSAGE_CLASS_W),
-        Some(MapiValue::String("IPM.Schedule.Meeting.Resp.Tent".to_string()))
+        Some(MapiValue::String(
+            "IPM.Schedule.Meeting.Resp.Tent".to_string()
+        ))
     );
     let mut declined_counter = counter.clone();
     declined_counter
@@ -3359,7 +3818,9 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
         .partstat = "declined".to_string();
     assert_eq!(
         email_property_value(&declined_counter, PID_TAG_MESSAGE_CLASS_W),
-        Some(MapiValue::String("IPM.Schedule.Meeting.Resp.Tent".to_string()))
+        Some(MapiValue::String(
+            "IPM.Schedule.Meeting.Resp.Tent".to_string()
+        ))
     );
     assert_eq!(
         email_property_value(&counter, PID_LID_APPOINTMENT_COUNTER_PROPOSAL_TAG),
@@ -3369,6 +3830,65 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
         email_property_value(&counter, PID_TAG_SUBJECT_PREFIX_W),
         Some(MapiValue::String("New Time Proposed: ".to_string()))
     );
+    assert_eq!(
+        email_property_value(&counter, PID_TAG_HAS_NAMED_PROPERTIES),
+        Some(MapiValue::Bool(true))
+    );
+    assert_eq!(
+        email_property_value(&counter, PID_TAG_PROCESSED),
+        Some(MapiValue::Bool(true))
+    );
+    assert!(email_meeting_property_tags(&counter).contains(&PID_TAG_PROCESSED));
+    let mut unresolved_counter = counter.clone();
+    unresolved_counter
+        .calendar_meeting_response
+        .as_mut()
+        .expect("counter response exists")
+        .server_processed = false;
+    assert_eq!(
+        email_property_value(&unresolved_counter, PID_TAG_PROCESSED),
+        Some(MapiValue::Bool(false))
+    );
+    for (method, partstat, subject, prefix, normalized) in [
+        (
+            "REPLY",
+            "accepted",
+            "Accepted: Probe 10",
+            "Accepted: ",
+            "Probe 10",
+        ),
+        (
+            "REPLY",
+            "declined",
+            "Declined: Probe 10",
+            "Declined: ",
+            "Probe 10",
+        ),
+        (
+            "COUNTER",
+            "tentative",
+            "New Time Proposed: Probe 10",
+            "New Time Proposed: ",
+            "Probe 10",
+        ),
+    ] {
+        let mut response = counter.clone();
+        response.subject = subject.to_string();
+        let metadata = response
+            .calendar_meeting_response
+            .as_mut()
+            .expect("response metadata exists");
+        metadata.method = method.to_string();
+        metadata.partstat = partstat.to_string();
+        assert_eq!(
+            email_property_value(&response, PID_TAG_SUBJECT_PREFIX_W),
+            Some(MapiValue::String(prefix.to_string()))
+        );
+        assert_eq!(
+            email_property_value(&response, PID_TAG_NORMALIZED_SUBJECT_W),
+            Some(MapiValue::String(normalized.to_string()))
+        );
+    }
     assert_eq!(
         email_property_value(&counter, PID_TAG_ICON_INDEX),
         Some(MapiValue::U32(0x0000_0407))
@@ -3413,20 +3933,45 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
         email_property_value(&counter, PID_LID_APPOINTMENT_SEQUENCE_TAG),
         Some(MapiValue::I32(0))
     );
+    let malformed_prefixed_goid = match email_property_value(&counter, PID_LID_GLOBAL_OBJECT_ID_TAG)
+    {
+        Some(MapiValue::Binary(value)) => value,
+        value => panic!("expected third-party GlobalObjectId, got {value:?}"),
+    };
+    assert_eq!(&malformed_prefixed_goid[40..48], b"vCal-Uid");
+    assert_eq!(&malformed_prefixed_goid[52..], b"mapi-goid:001122");
     assert_eq!(
-        email_property_value(&counter, PID_LID_GLOBAL_OBJECT_ID_TAG),
-        Some(MapiValue::Binary(vec![0x00, 0x11, 0x22]))
+        email_property_value(&counter, PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG),
+        Some(MapiValue::Binary(malformed_prefixed_goid))
+    );
+    let mut native_uid_counter = counter.clone();
+    native_uid_counter
+        .calendar_meeting_response
+        .as_mut()
+        .expect("counter metadata exists")
+        .uid = format!("mapi-goid:{encoded_uid}");
+    assert_eq!(
+        email_property_value(&native_uid_counter, PID_LID_GLOBAL_OBJECT_ID_TAG),
+        Some(MapiValue::Binary(decoded_uid))
+    );
+    assert_eq!(
+        email_property_value(&native_uid_counter, PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG),
+        Some(MapiValue::Binary(clean_uid))
     );
     assert_eq!(
         email_property_value(&counter, PID_TAG_OWNER_APPOINTMENT_ID),
         Some(MapiValue::U32(
-            (mapi_mailstore::filetime_from_rfc3339_utc("2026-08-24T06:30:00Z")
-                / 600_000_000) as u32,
+            (mapi_mailstore::filetime_from_rfc3339_utc("2026-08-24T06:30:00Z") / 600_000_000)
+                as u32,
         ))
     );
     assert_eq!(
         email_property_value(&email, PID_TAG_ACCESS_LEVEL),
         Some(MapiValue::U32(1))
+    );
+    assert_eq!(
+        email_property_value(&email, PID_TAG_HAS_NAMED_PROPERTIES),
+        Some(MapiValue::Bool(true))
     );
     assert_eq!(
         email_property_value(&email, PID_TAG_SENDER_ADDRESS_TYPE_W),
@@ -3595,7 +4140,7 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
         other => panic!("unexpected transport headers value: {other:?}"),
     };
     assert!(headers.contains("Message-ID: rss-guid"));
-    assert!(headers.contains("From: Feed"));
+    assert!(headers.contains("From: Feed <feed@example.test>"));
     assert!(headers.contains("Subject: RSS item"));
     assert!(!headers.contains("Bcc:"));
     assert_eq!(
@@ -4470,7 +5015,7 @@ fn calendar_projection_uses_canonical_all_day_status_and_participants() {
 
     let global_object_id = vec![
         0x04, 0x00, 0x00, 0x00, 0x82, 0x00, 0xE0, 0x00, 0x74, 0xC5, 0xB7, 0x10, 0x1A, 0x82, 0xE0,
-        0x08, 0x00, 0x00, 0x00, 0x00, 0x40, 0x6F, 0xD6, 0x61, 0xE4, 0x73, 0xC8, 0x01, 0x00, 0x00,
+        0x08, 0x07, 0xEA, 0x08, 0x18, 0x40, 0x6F, 0xD6, 0x61, 0xE4, 0x73, 0xC8, 0x01, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x2A, 0x58, 0x44, 0xB3, 0xA4,
         0x44, 0xF7, 0x4A, 0x9C, 0x24, 0x6C, 0x60, 0x88, 0x6F, 0x11, 0x6B,
     ];
@@ -4480,7 +5025,18 @@ fn calendar_projection_uses_canonical_all_day_status_and_participants() {
     );
     assert_eq!(
         event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_GLOBAL_OBJECT_ID_TAG),
-        Some(MapiValue::Binary(global_object_id))
+        Some(MapiValue::Binary(global_object_id.clone()))
+    );
+    let mut clean_global_object_id = global_object_id;
+    clean_global_object_id[16..20].fill(0);
+    assert_eq!(
+        event_property_value(
+            &event,
+            1,
+            CALENDAR_FOLDER_ID,
+            PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG,
+        ),
+        Some(MapiValue::Binary(clean_global_object_id))
     );
 }
 
@@ -4501,8 +5057,8 @@ fn calendar_owner_appointment_id_uses_its_start_time() {
     assert_eq!(
         event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_OWNER_APPOINTMENT_ID),
         Some(MapiValue::U32(
-            (mapi_mailstore::filetime_from_rfc3339_utc("2026-08-24T06:30:00Z")
-                / 600_000_000) as u32,
+            (mapi_mailstore::filetime_from_rfc3339_utc("2026-08-24T06:30:00Z") / 600_000_000)
+                as u32,
         ))
     );
 }
@@ -4541,6 +5097,57 @@ fn calendar_projection_does_not_mark_an_appointment_without_attendees_as_a_meeti
     let organizer: serde_json::Value = serde_json::from_str(&input.organizer_json).unwrap();
 
     assert_eq!(organizer["is_meeting"], false);
+}
+
+#[test]
+fn mapi_event_write_uses_the_same_uid_form_as_external_meeting_responses() {
+    let mut existing = default_event_for_mapping(Uuid::nil(), "default");
+    existing.uid = "existing@example.test".to_string();
+
+    let third_party_uid = "probe-7@example.test";
+    let third_party_goid = calendar_global_object_id_from_uid(third_party_uid, Uuid::nil());
+    let third_party = event_input_from_mapi(
+        Uuid::nil(),
+        Some(existing.id),
+        &existing,
+        &HashMap::from([(
+            PID_LID_GLOBAL_OBJECT_ID_TAG,
+            MapiValue::Binary(third_party_goid),
+        )]),
+    )
+    .unwrap();
+    assert_eq!(third_party.uid, third_party_uid);
+
+    let mut occurrence_goid = complete_global_object_id();
+    occurrence_goid[16..20].copy_from_slice(&[0x07, 0xEA, 0x08, 0x18]);
+    let mut clean_goid = occurrence_goid.clone();
+    clean_goid[16..20].fill(0);
+    let native = event_input_from_mapi(
+        Uuid::nil(),
+        Some(existing.id),
+        &existing,
+        &HashMap::from([(
+            PID_LID_GLOBAL_OBJECT_ID_TAG,
+            MapiValue::Binary(occurrence_goid),
+        )]),
+    )
+    .unwrap();
+    assert_eq!(
+        native.uid,
+        format!("mapi-goid:{}", lpe_domain::crypto::hex_lower(&clean_goid))
+    );
+
+    let malformed = event_input_from_mapi(
+        Uuid::nil(),
+        Some(existing.id),
+        &existing,
+        &HashMap::from([(
+            PID_LID_GLOBAL_OBJECT_ID_TAG,
+            MapiValue::Binary(vec![0x04, 0x00]),
+        )]),
+    )
+    .unwrap();
+    assert_eq!(malformed.uid, existing.uid);
 }
 
 #[test]
@@ -4655,6 +5262,80 @@ fn calendar_pending_meeting_separates_organizer_from_attendees() {
     );
     let organizer: serde_json::Value = serde_json::from_str(&input.organizer_json).unwrap();
     assert_eq!(organizer["is_meeting"], true);
+}
+
+#[test]
+fn owner_created_mapi_meeting_materializes_owner_without_an_originator_row() {
+    let existing = default_event_for_mapping(Uuid::nil(), "default");
+    let properties = HashMap::from([(
+        PID_LID_APPOINTMENT_STATE_FLAGS_TAG,
+        MapiValue::I32(0x0000_0001),
+    )]);
+    let mut input =
+        event_input_from_mapi(Uuid::nil(), Some(existing.id), &existing, &properties).unwrap();
+
+    apply_calendar_pending_recipients(
+        &mut input,
+        &existing,
+        &properties,
+        &[PendingRecipient {
+            row_id: 1,
+            recipient_type: 1,
+            recipient_flags: 0x0000_0001,
+            address: "attendee@example.test".to_string(),
+            display_name: Some("Attendee".to_string()),
+        }],
+    );
+    materialize_owner_meeting_organizer(&mut input, "owner@example.test", "Owner");
+
+    let participants = parse_calendar_participants_metadata(&input.attendees_json);
+    assert_eq!(participants.attendees.len(), 1);
+    assert_eq!(
+        participants.organizer,
+        Some(CalendarOrganizerMetadata {
+            email: "owner@example.test".to_string(),
+            common_name: "Owner".to_string(),
+        })
+    );
+    let organizer: serde_json::Value = serde_json::from_str(&input.organizer_json).unwrap();
+    assert_eq!(organizer["email"], "owner@example.test");
+    assert_eq!(organizer["common_name"], "Owner");
+    assert_eq!(organizer["is_meeting"], true);
+}
+
+#[test]
+fn owner_materialization_preserves_an_explicit_external_organizer() {
+    let existing = default_event_for_mapping(Uuid::nil(), "default");
+    let properties = HashMap::from([
+        (
+            PID_LID_APPOINTMENT_STATE_FLAGS_TAG,
+            MapiValue::I32(0x0000_0001),
+        ),
+        (
+            PID_TAG_SENDER_EMAIL_ADDRESS_W,
+            MapiValue::String("external@example.test".to_string()),
+        ),
+        (
+            PID_TAG_SENDER_NAME_W,
+            MapiValue::String("External Organizer".to_string()),
+        ),
+    ]);
+    let mut input =
+        event_input_from_mapi(Uuid::nil(), Some(existing.id), &existing, &properties).unwrap();
+
+    materialize_owner_meeting_organizer(&mut input, "owner@example.test", "Owner");
+
+    let participants = parse_calendar_participants_metadata(&input.attendees_json);
+    assert_eq!(
+        participants.organizer,
+        Some(CalendarOrganizerMetadata {
+            email: "external@example.test".to_string(),
+            common_name: "External Organizer".to_string(),
+        })
+    );
+    let organizer: serde_json::Value = serde_json::from_str(&input.organizer_json).unwrap();
+    assert_eq!(organizer["email"], "external@example.test");
+    assert_eq!(organizer["common_name"], "External Organizer");
 }
 
 #[test]
@@ -6847,11 +7528,12 @@ fn already_open_common_view_missing_descriptor_uses_empty_stream_semantics() {
         message_save_generations: std::collections::HashMap::new(),
         message_handle_generations: std::collections::HashMap::new(),
         pending_message_recipient_replacements: std::collections::HashMap::new(),
+        pending_message_property_deletions: std::collections::HashMap::new(),
         pending_message_attachments: std::collections::HashMap::new(),
         pending_contact_photo_attachments: std::collections::HashMap::new(),
         pending_attachment_parent_messages: std::collections::HashMap::new(),
         pending_event_attachment_transactions: std::collections::HashMap::new(),
-        pending_attachment_deletions: std::collections::HashSet::new(),
+        pending_attachment_deletions: std::collections::HashMap::new(),
         pending_embedded_message_ids: std::collections::HashMap::new(),
         pending_embedded_message_attachments: std::collections::HashMap::new(),
         saved_embedded_messages: std::collections::HashMap::new(),
@@ -6939,11 +7621,12 @@ fn common_view_named_view_descriptor_accepts_microsoft_write_stream_sequence() {
         message_save_generations: std::collections::HashMap::new(),
         message_handle_generations: std::collections::HashMap::new(),
         pending_message_recipient_replacements: std::collections::HashMap::new(),
+        pending_message_property_deletions: std::collections::HashMap::new(),
         pending_message_attachments: std::collections::HashMap::new(),
         pending_contact_photo_attachments: std::collections::HashMap::new(),
         pending_attachment_parent_messages: std::collections::HashMap::new(),
         pending_event_attachment_transactions: std::collections::HashMap::new(),
-        pending_attachment_deletions: std::collections::HashSet::new(),
+        pending_attachment_deletions: std::collections::HashMap::new(),
         pending_embedded_message_ids: std::collections::HashMap::new(),
         pending_embedded_message_attachments: std::collections::HashMap::new(),
         saved_embedded_messages: std::collections::HashMap::new(),
@@ -7052,11 +7735,12 @@ fn associated_config_stream_rops_require_the_actual_stream_handle() {
         message_save_generations: std::collections::HashMap::new(),
         message_handle_generations: std::collections::HashMap::new(),
         pending_message_recipient_replacements: std::collections::HashMap::new(),
+        pending_message_property_deletions: std::collections::HashMap::new(),
         pending_message_attachments: std::collections::HashMap::new(),
         pending_contact_photo_attachments: std::collections::HashMap::new(),
         pending_attachment_parent_messages: std::collections::HashMap::new(),
         pending_event_attachment_transactions: std::collections::HashMap::new(),
-        pending_attachment_deletions: std::collections::HashSet::new(),
+        pending_attachment_deletions: std::collections::HashMap::new(),
         pending_embedded_message_ids: std::collections::HashMap::new(),
         pending_embedded_message_attachments: std::collections::HashMap::new(),
         saved_embedded_messages: std::collections::HashMap::new(),
@@ -7214,11 +7898,12 @@ fn message_list_settings_private_binary_stream_is_projected_without_widening_oth
         message_save_generations: std::collections::HashMap::new(),
         message_handle_generations: std::collections::HashMap::new(),
         pending_message_recipient_replacements: std::collections::HashMap::new(),
+        pending_message_property_deletions: std::collections::HashMap::new(),
         pending_message_attachments: std::collections::HashMap::new(),
         pending_contact_photo_attachments: std::collections::HashMap::new(),
         pending_attachment_parent_messages: std::collections::HashMap::new(),
         pending_event_attachment_transactions: std::collections::HashMap::new(),
-        pending_attachment_deletions: std::collections::HashSet::new(),
+        pending_attachment_deletions: std::collections::HashMap::new(),
         pending_embedded_message_ids: std::collections::HashMap::new(),
         pending_embedded_message_attachments: std::collections::HashMap::new(),
         saved_embedded_messages: std::collections::HashMap::new(),
@@ -7441,7 +8126,7 @@ fn overlapping_named_property_ids_have_one_round_trip_definition() {
             },
         ),
         (
-            0x8219,
+            PID_LID_WHERE_NAMED_ID,
             MapiNamedProperty {
                 guid: PSETID_MEETING_GUID,
                 kind: MapiNamedPropertyKind::Lid(PID_LID_WHERE),
@@ -7633,6 +8318,30 @@ fn outlook_common_probe_lid_family_maps_to_stable_ids() {
             })
         );
     }
+}
+
+#[test]
+fn meeting_where_does_not_alias_the_common_8219_mapping() {
+    let meeting_where = MapiNamedProperty {
+        guid: PSETID_MEETING_GUID,
+        kind: MapiNamedPropertyKind::Lid(PID_LID_WHERE),
+    };
+    let common_8219 = MapiNamedProperty {
+        guid: PSETID_COMMON_GUID,
+        kind: MapiNamedPropertyKind::Lid(0x8219),
+    };
+
+    assert_ne!(PID_LID_WHERE_NAMED_ID, 0x8219);
+    assert_eq!(
+        well_known_named_property_id(&meeting_where),
+        Some(PID_LID_WHERE_NAMED_ID)
+    );
+    assert_eq!(
+        well_known_named_property_for_id(PID_LID_WHERE_NAMED_ID),
+        Some(meeting_where)
+    );
+    assert_eq!(well_known_named_property_id(&common_8219), Some(0x8219));
+    assert_eq!(well_known_named_property_for_id(0x8219), Some(common_8219));
 }
 
 #[test]

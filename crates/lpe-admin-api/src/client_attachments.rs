@@ -178,6 +178,7 @@ async fn read_multipart_attachment(
             media_type,
             disposition: Some("attachment".to_string()),
             content_id: None,
+            is_scheduling_body: false,
             blob_bytes,
         });
     }
@@ -277,6 +278,7 @@ mod tests {
             media_type: "application/pdf".to_string(),
             disposition: Some("attachment".to_string()),
             content_id: None,
+            is_scheduling_body: false,
             blob_bytes: b"%PDF-1.7".to_vec(),
         }
     }

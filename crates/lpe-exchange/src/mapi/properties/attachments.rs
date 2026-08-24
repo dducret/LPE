@@ -112,6 +112,7 @@ pub(in crate::mapi) fn pending_attachment_upload(
             .to_string(),
         ),
         content_id,
+        is_scheduling_body: false,
         blob_bytes: data,
     }
 }

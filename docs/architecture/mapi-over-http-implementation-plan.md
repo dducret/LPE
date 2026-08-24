@@ -1187,6 +1187,18 @@ non-canonical LPE state.
   `PidTagMessageFlags` (`0x0E070003`) projects `mfUnsent` (`0x00000008`)
   whenever the current canonical mailbox membership is a draft, as required by
   `[MS-OXCMSG]` section 2.2.1.6; a Drafts table row must never claim sent state.
+- `RopSubmitMessage` on an opened saved Draft or Outbox Message is itself a
+  save boundary; Outlook is not required to issue `RopSaveChangesMessage`
+  first. LPE therefore claims the exact canonical source and applies that
+  handle's pending standard properties, complete recipient replacement,
+  attachment additions and deletions, and custom-property upserts and deletions
+  in the same transaction that reloads the resulting source, validates and
+  renders it, creates `Sent` and queue state, and expunges the source. The
+  resulting `Sent` Message retains the source's complete effective client-owned
+  custom-property bag but receives fresh server identity and version state. A
+  rejected overlay or submission rolls the transaction back and must never send
+  the older persisted source. This follows `[MS-OXOMSG]` sections 3.2.4.1 and
+  3.3.5.1.
 - `Bcc` is protected metadata. It must not leak through MAPI search, AI-facing
   indexing, non-owner projections, or protocol shortcuts.
 - NSPI resolves the authenticated mailbox and visible contacts from canonical
@@ -2619,13 +2631,20 @@ participation status on the existing event. An inbound `text/calendar`
 `IPM.Schedule.Meeting.Request` even when the RFC 5322 message omits the legacy
 top-level `Content-Class` header. A conflicting MIME `method` parameter is
 rejected rather than overriding the decoded VCALENDAR method. The bounded
-request parser retains UID, `DTSTAMP`, a complete supported UTC/fixed-offset
-start/end interval, location, sequence, intended busy status, and the aggregate
-attendee `RSVP` value. Requests with an incomplete or unsupported interval or
-an `RRULE` or `RECURRENCE-ID` remain ordinary mail until the complete
-recurrence/time-zone state can be projected; this prevents zero dates, partial
-recurrence, or a falsely non-exception instance from being advertised to
-Outlook. Per `[MS-OXCICAL]` section
+request parser retains UID, `DTSTAMP`, a complete supported start/end interval,
+location, sequence, intended busy status, and the aggregate attendee `RSVP`
+value. UTC values, fixed-offset `VTIMEZONE` values, and embedded Microsoft
+zones with exactly one `STANDARD` and an optional `DAYLIGHT` component using
+bounded yearly `BYDAY`, `BYMONTHDAY`, or `DTSTART`-derived transitions are
+resolved for the event date. Transition offsets use the paired `TZOFFSETTO`
+values so the advisory `TZOFFSETFROM` value does not override them, matching
+Microsoft's import guidance.
+Duplicate time-zone identifiers or recurrence parts, ambiguous or nonexistent
+local clock-change times, an incomplete or otherwise unsupported interval, an
+unsupported time-zone transition rule, an `RRULE`, or a `RECURRENCE-ID` remain
+ordinary mail; this prevents an arbitrary offset, zero date, partial recurrence,
+or falsely non-exception instance from being advertised to Outlook. Per
+`[MS-OXCICAL]` section
 2.1.3.1.1.20.2.5, `RSVP=TRUE` projects both `PidTagReplyRequested` and
 `PidTagResponseRequested` as true; `[MS-OXOCAL]` section 3.1.4.8.4 otherwise
 permits Outlook to suppress the response action. A single-instance request
@@ -2637,24 +2656,235 @@ request processing, and recurrence-only `PidLidCalendarType` remains absent on
 the single-instance path. These values use the same property projection for
 direct reads, Message CopyTo, and cached-mode contents synchronization;
 FastTransfer named properties carry their GUID and LID metadata as required by
-`[MS-OXCFXICS]` section 2.2.4.1. Native hexadecimal EncodedGlobalId UIDs are
-decoded while third-party UIDs use the documented `vCal-Uid` wrapper, preserving
-the identity Outlook needs when it creates a response. The inline or unnamed
-`text/calendar` transport body remains in canonical MIME state, but its exact
-attachment identity is correlated and omitted from the actionable request's
-MAPI attachment collection; another inline part or an explicitly attached
-calendar file remains visible, and `PidTagHasAttachments` reflects only the
-remaining MAPI-visible attachments.
+`[MS-OXCFXICS]` section 2.2.4.1. A hexadecimal EncodedGlobalId UID is decoded
+only when it has the complete `[MS-OXOCAL]` section 2.2.1.27 header and minimum
+shape, its reserved `X` field is zero, and its little-endian `Size` exactly
+matches `Data`; malformed or short
+`mapi-goid:` values use the documented third-party `vCal-Uid` wrapper instead
+of exposing invalid binary. Product note `<203>` in `[MS-OXCICAL]` section
+2.1.3.1.1.20.26 makes the unprefixed textual ByteArrayID uppercase-sensitive
+for the targeted Outlook versions, while the explicit internal `mapi-goid:`
+marker accepts either hex case. `PidLidCleanGlobalObjectId` uses the same bytes
+as `PidLidGlobalObjectId` except that occurrence-date bytes 16 through 19 are
+zero, as required by `[MS-OXOCAL]` section 2.2.1.28. These rules preserve the
+identity Outlook needs when it creates a response. Outbound iCalendar reverses
+that mapping under `[MS-OXCICAL]` section 2.1.3.1.1.20.26: a `vCal-Uid` data
+payload exports its remaining UTF-8 UID directly, while a native Global Object
+ID exports as bare uppercase hexadecimal after zeroing bytes 16 through 19.
+The internal `mapi-goid:` marker is never emitted as the UID of these MAPI
+scheduling MIME bodies. A third-party UID is encoded and decoded as RFC 5545
+`TEXT`, including comma, semicolon, and backslash escapes, so its exact value
+survives the outbound request and inbound response correlation path. An
+outbound `METHOD:REQUEST` always emits exactly one
+nonnegative `SEQUENCE`: `PidLidAppointmentSequence` is used when present and a
+new request defaults to zero; an invalid negative value rejects submission.
+This keeps replies to an updated meeting correlated with the same canonical
+Event generation. When a direct MAPI save creates a Meeting object or converts
+an owned Appointment object into one without supplying an organizer address,
+LPE materializes the canonical calendar owner's address in both organizer and
+participant metadata before commit. An explicitly supplied external organizer
+is preserved, and an ICS-imported object is never rewritten through this
+fallback. This ensures that a later response can pass the canonical organizer
+authorization check without turning an attendee copy into an organizer copy.
+The organizer's Meeting Event is committed before its separate Outbox Meeting
+Request is submitted. At the canonical source-claim boundary, after applying
+any save-on-submit overlay but before creating `Sent` or queue state, LPE
+requires exactly one active, non-cancelled, non-recurring Event across the
+submitting organizer's calendars whose normalized UID and complete UTC
+start/end interval match the request, whose organizer is that mailbox, and
+whose canonical attendees contain every nonempty, unique request attendee.
+Those request attendees must map exactly to unique visible `To`/`Cc` envelope
+recipients; a scheduling `Bcc` fails closed because it cannot be represented by
+the generated MAPI attendee rows. A request sequence
+lower than the Event sequence is stale; equality is valid, and a higher request
+sequence is valid for the partial-attendee update case in which Outlook does
+not advance the organizer Meeting's sequence. Missing, deleted, cancelled,
+ambiguous, recurring, or mismatched correlation rejects the entire submission
+transaction before `Sent`/queue creation or Drafts/Outbox source expunge. The
+post-submit `PidLidFInvited`, sequence-time, and critical-change save is not a
+prerequisite for the initial request. This ordering and sequence behavior
+follows `[MS-OXOCAL]` sections 3.1.4.7.1, 3.1.4.7.3, 3.1.5.4, and
+4.2.2.1 through 4.2.2.2.
+Pending scheduling submission rejects a Global Object
+ID with a nonzero occurrence
+date until correlated `RECURRENCE-ID` export is supported, rather than sending
+an instance response as a series-master response. Submitting a pending MAPI
+Meeting Response creates the selected scheduling MIME body from that same
+identity. `IPM.Schedule.Meeting.Resp.Pos`, `.Tent`, and `.Neg` map to
+`ACCEPTED`, `TENTATIVE`, and `DECLINED`; `PidLidAppointmentCounterProposal`
+selects `METHOD:COUNTER`, while other responses use `METHOD:REPLY`. A response
+is not made actionable unless its Global Object ID, original start/end,
+organizer, and sent-representing responder identity are complete. A counter
+proposal additionally requires a complete proposed interval, exports that
+interval as `DTSTART`/`DTEND`, and preserves the prior interval in
+`X-MS-OLK-ORIGINALSTART`/`X-MS-OLK-ORIGINALEND`, following `[MS-OXCICAL]`
+sections 2.1.3.1.1.20.8, 2.1.3.1.1.20.10, 2.1.3.1.1.20.59, and
+2.1.3.1.1.20.60. This includes the observed Outlook-compatible case in which
+a `.Resp.Neg` counter proposal retains `PARTSTAT=DECLINED`. A nonempty response
+body is exported as `COMMENT` under `[MS-OXCICAL]` section 2.1.3.1.1.20.5.
+Generated request and response `DTSTAMP` values use the first valid client
+submit, attendee-critical-change, modification, or creation time available;
+when those properties are absent, they use the actual server submit time and
+never the appointment start. A response requires exactly one organizer-marked
+delivery row, or exactly one delivery row when the client omitted the organizer
+flag; ambiguous rows reject submission. Organizer and attendee `CN` parameters
+are always quoted and control characters are removed so commas, colons, and
+semicolons cannot alter the iCalendar property structure. Every generated
+iCalendar content line is folded at the RFC 5545 75-octet boundary without
+splitting a UTF-8 code point; this includes the long native Global Object ID
+`UID` line that Outlook itself emits as a folded line. Inbound unfolding removes
+exactly the one required continuation space or tab so a second, value-owned
+space survives UID and scheduling-field correlation.
+At the canonical submission boundary, a selected `REPLY` or `COUNTER` must
+parse completely, its single attendee must equal the authorized `From`
+mailbox, and its envelope must contain exactly one nonempty visible organizer
+recipient and no `Bcc`. When the iCalendar response supplies `ORGANIZER`, that
+identity must equal the visible recipient. This response authorization check
+precedes MIME, `Sent`, queue, and source-expunge writes; outbound Event
+correlation remains deferred until attendee-copy save ordering is canonical.
+When a MAPI response supplies `PidLidAppointmentSequence`, it must fit a
+nonnegative 32-bit iCalendar `SEQUENCE`; an invalid value rejects submission
+instead of sending a response that the organizer cannot correlate. Older
+responses that omit the property remain eligible for the bounded missing-
+sequence replay rules.
+An explicit `IPM.Schedule.Meeting.*` class outside the implemented Request and
+positive/tentative/negative Response set rejects submission. In particular, a
+Meeting Cancellation must not inherit copied appointment-state flags and be
+mis-sent as a new `METHOD:REQUEST`, or silently degrade to ordinary mail, until
+the canonical cancellation path is implemented. `SaveChangesMessage` applies
+the same validation to a pending scheduling Message: incomplete correlation
+fields or an unsupported scheduling class leave the pending handle intact and
+return an error instead of persisting an ordinary-mail downgrade that could
+bypass the later submission check.
+Before an inbound response can mutate the canonical Event, its ICS `ATTENDEE`
+must match both the SMTP `MAIL FROM` and RFC `From` identities, and any supplied
+ICS `ORGANIZER` must match the receiving organizer mailbox. A distinct RFC
+`Sender` is retained as message metadata but is not attendee authorization;
+delegate-response authorization remains deferred until its canonical semantics
+are implemented. A response cannot mutate a cancelled or deleted Event. The
+matched Event must itself identify that mailbox as its
+organizer, exactly one canonical attendee row must match the responder, and
+`calendar_events.meeting_response_state_json` retains a private per-attendee
+sequence and `DTSTAMP` watermark. Same-sequence duplicate, older, or missing-
+timestamp replays cannot overwrite a newer response; a visible attendee update
+with unchanged participation still advances the watermark. This private replay
+state is separate from `attendees_json`, so JMAP, DAV, EWS, ActiveSync, or MAPI
+rewrites of public participant fields cannot erase it. Outlook responses that
+carry both `SEQUENCE` and `X-MICROSOFT-CDO-APPT-SEQUENCE` are accepted only when
+their bounded numeric values agree; conflicting aliases and duplicate singleton
+properties are rejected.
+
+Only the first eligible non-attachment iMIP `text/calendar` part is marked as
+the scheduling transport body. Selection follows `[MS-OXCMAIL]` section
+2.2.3.3.2 for `multipart/alternative` and `multipart/related`, while Outlook
+2010 and later compatibility follows `[MS-STANOICAL]` V0334 by searching every
+`multipart/mixed` child in order; later calendar candidates and a part with
+`Content-Disposition: attachment` are never selected. That exact part remains
+in canonical MIME state but is omitted from an actionable request or response's
+MAPI attachment collection. Other inline parts and explicitly attached calendar
+files remain visible, and `PidTagHasAttachments` reflects only the remaining
+MAPI-visible attachments.
+
+`mime_parts.is_scheduling_body` persists this MIME role, with one selected part
+per message. `calendar_mail_classifications` stores the bounded parser revision,
+classification generation, classification (`none`, request, or response), exact
+scheduling MIME-part ID, dirty-reclassification state, and serialized protocol
+metadata independently of an account-scoped attachment ID. New inbound
+messages write that row in the same transaction as their canonical message and
+MIME parts, then record the original membership's applied generation. A copied
+membership records the generation with which it was created only when it is the
+account's first visible membership for that message; a later mailbox copy must
+not acknowledge a generation still pending on an older membership. This initial
+acknowledgement is insert-only, so a retained projection and MAPI identity from
+an expunged membership cannot be advanced without their required rotation when
+the message is copied back.
+
+A read of a missing row, any unequal parser revision, or a dirty row hydrates
+only the selected scheduling part through the durable blob backend, including
+migrated/S3 objects. Parsing may occur without holding a database transaction;
+the repair then locks the message, revalidates the exact scheduling MIME-part
+identity, and retries a bounded number of times if the MIME graph changed. A
+stored revision newer than the running parser is rejected instead of silently
+projected. MIME graph replacement or deletion clears the selected-part foreign
+key and marks the row dirty before removing that part, preserving the preceding
+generation and metadata for change detection.
+
+A selective MAPI snapshot fetches canonical message content and completes any
+lazy classification repair before it loads or allocates the message identity.
+This prevents the repaired Meeting metadata from being paired with the stale
+CN and ChangeKey that the same repair just rotated.
+
+Any actionable payload transition, including actionable to `none`, advances the
+classification generation. `calendar_mail_classification_projections` records
+the applied generation separately for every account where the canonical message
+is visible. Repair processes those accounts in deterministic account-lock then
+message-lock order; for each unapplied rotating generation it advances visible
+memberships, rotates the active MAPI message identity, journals message and
+mailbox-message updates, emits the account change, and only then acknowledges
+the generation in the same transaction. This makes repair idempotent and keeps
+another account's cached Outlook state from suppressing the correction. A
+missing row first classified as `none`, an unchanged payload, or an already
+applied generation performs no version rotation. Before returning metadata, one
+SQL snapshot verifies that the classification is current and clean and that no
+visible account has a missing or different applied generation. A bounded
+repair/apply/read loop retries when concurrent classification or membership
+changes make that snapshot unready, so new metadata is never exposed under an
+older mailbox version.
+
+Inbound RFC `From` and a distinct RFC `Sender` are retained as separate
+canonical recipient roles; the SMTP envelope sender is only the fallback when
+`From` is absent and remains the anti-spoof identity for applying meeting
+responses. When `From` contains more than one mailbox, the first mailbox is the
+MAPI SentRepresenting identity, with quoted commas preserved in display names.
+REQUEST metadata also retains the iCalendar `ORGANIZER` plus every
+valid `mailto:` `ATTENDEE` with `CN`, `CUTYPE`, `ROLE`, `PARTSTAT`, and `RSVP`.
+The MAPI projection derives Sender and SentRepresenting fields from their
+corresponding RFC roles. Until a specific address is resolved to a GAL object,
+the complete name, SMTP address, one-off EntryID, and SMTP search-key cluster is
+used consistently; submission authorization alone never aliases Sender and
+SentRepresenting to the submitting mailbox's NSPI identity. That same cluster
+is available through direct properties, message tables, property enumeration,
+and both FastTransfer writers. Meeting recipient rows derive organizer and
+attendee identity, recipient type, flags, and tracking status from the retained
+iCalendar values rather than from the RFC To/Cc envelope view. OpenMessage,
+ReadRecipients, and cached-mode `StartRecip` use the same recipient projection;
+the organizer carries flags `0x00000003`, while each attendee carries its
+ordered ROLE-before-CUTYPE recipient type and PARTSTAT tracking status.
+
+Opened actionable meeting request and response messages advertise
+`HasNamedProperties`. Their effective well-known Meeting and Appointment tags
+come from one filtered projection shared by direct reads,
+`RopGetPropertiesAll`, `RopGetPropertiesList`, specific-property candidates,
+contents rows, and FastTransfer/ICS export, including response-only proposal
+properties when present.
 
 Calendar MIME enrichment now lives in the focused
 `lpe-storage/src/protocols/calendar_mail.rs` helper; `protocols.rs` remains the
-query orchestration and result-assembly layer. Keep future calendar-part query,
+query orchestration and result-assembly layer, while its serialized mail result
+types live in `protocols/email_types.rs`. Keep future calendar-part query,
 request/response parsing, and exact transport-part correlation in that helper
-and verify it with the storage calendar tests. Inbound iCalendar
+and verify it with the storage calendar tests. `lpe-storage/src/mail.rs` has
+crossed the thousand-line split threshold; before the next calendar-message
+parser behavior is added, move request/response classification and identity
+parsing into `mail/icalendar_message.rs`, alongside the existing focused
+`mail/icalendar_timezone.rs`. Global Object ID validation and normalization
+already live in `mail/global_object_id.rs`; leave `mail.rs` as MIME/RFC parsing
+and module wiring. Inbound iCalendar
 `REPLY` and
 `COUNTER` messages are accepted only when they contain exactly one `VEVENT` and
 one attendee whose address matches the envelope sender and whose UID resolves
-to an active event owned by the delivery recipient. A `COUNTER` keeps the
+to an active event owned by the delivery recipient. Structurally valid native
+EncodedGlobalId and `mapi-goid:` forms are normalized to the same lowercase
+internal `mapi-goid:` value at every canonical Event write boundary and during
+MIME parsing, while malformed and ordinary third-party iCalendar UID case
+remains unchanged. Correlation locks
+all active owner candidates in deterministic calendar/Event order and fails
+closed unless exactly one candidate contains the responding attendee after
+applying every available sequence and interval discriminator. A `REPLY` uses
+its scheduled interval when present; a `COUNTER` uses its explicit original
+interval when present and never treats the proposed interval as the current
+schedule. This prevents duplicate UIDs in separate calendars or a delayed
+response for an earlier sequence from updating an arbitrary Event. A `COUNTER` keeps the
 scheduled event time unchanged while recording that attendee's proposed UTC
 start/end and projecting the Inbox item as a Meeting Response with
 `PidLidAppointmentCounterProposal`. The Meeting Response projection retains the
@@ -2664,6 +2894,20 @@ It also projects the iCalendar location and appointment sequence carried by
 the response, plus the Meeting-set `PidLidWhere`,
 `PidLidAttendeeCriticalChange`, and `PidLidIsSilent` properties and its Outlook
 Meeting Response subject prefix.
+Response authorization is durable ingress evidence, separate from reparable
+parser metadata: LPE stores the exact selected-part SHA-256 only after the
+attendee, SMTP envelope sender, unambiguous RFC `From`, and optional organizer
+match the recipient account. Parser upgrades and dirty-classification repair
+may restore a response only when the current selected part retains that exact
+hash. When exactly one canonical Event is correlated, including an idempotent
+or superseded replay, LPE records the response as server processed and projects
+`PidTagProcessed=TRUE` per [MS-OXOCAL] section 3.1.4.8.5.1. An unresolved or
+ambiguous response remains unprocessed, so LPE does not claim that the Calendar
+item was found.
+`RECURRENCE-ID` responses, and responses whose decoded Global Object ID carries
+a nonzero occurrence date, remain non-actionable until the canonical response
+path can correlate an occurrence or exception; they are rejected rather than
+being applied to the recurring series master.
 When the response contains `DTSTAMP`, LPE uses that iCalendar response time for
 `PidLidAttendeeCriticalChange`; durable message delivery time is the fallback
 only when older input omits `DTSTAMP`.

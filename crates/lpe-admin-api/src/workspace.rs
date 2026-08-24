@@ -6,8 +6,8 @@ use axum::{
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest, Validator};
 use lpe_storage::{
-    AccessibleContact, AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent,
-    ClientNote, ClientReminder, ClientTask, ClientTaskList, ClientWorkspace,
+    external_calendar_uid, AccessibleContact, AuditEntryInput, AuthenticatedAccount, ClientContact,
+    ClientEvent, ClientNote, ClientReminder, ClientTask, ClientTaskList, ClientWorkspace,
     CollaborationCollection, HealthResponse, JmapEmail, JmapEmailFollowupUpdate, JournalEntry,
     MailboxAccountAccess, OutlookProfileState, RecipientSuggestion, RecoverableItem, ReminderQuery,
     SavedDraftMessage, SearchFolderDefinition, Storage, SubmitMessageInput, SubmittedMessage,
@@ -1019,7 +1019,7 @@ pub(crate) async fn upsert_client_event(
     };
     Ok(Json(ClientEvent {
         id: event.id,
-        uid: event.uid,
+        uid: external_calendar_uid(&event.uid),
         date: event.date,
         time: event.time,
         time_zone: event.time_zone,

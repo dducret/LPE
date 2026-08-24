@@ -63,13 +63,14 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) message_save_generations: HashMap<(u64, u64), u64>,
     pub(in crate::mapi) message_handle_generations: HashMap<u32, u64>,
     pub(in crate::mapi) pending_message_recipient_replacements: HashMap<u32, Vec<PendingRecipient>>,
+    pub(in crate::mapi) pending_message_property_deletions: HashMap<u32, HashSet<u32>>,
     pub(in crate::mapi) pending_message_attachments:
         HashMap<u32, Vec<(u32, AttachmentUploadInput)>>,
     pub(in crate::mapi) pending_contact_photo_attachments: HashMap<u32, AttachmentUploadInput>,
     pub(in crate::mapi) pending_attachment_parent_messages: HashMap<u32, u32>,
     pub(in crate::mapi) pending_event_attachment_transactions:
         HashMap<u32, MapiEventAttachmentChanges>,
-    pub(in crate::mapi) pending_attachment_deletions: HashSet<(u64, u64, u32)>,
+    pub(in crate::mapi) pending_attachment_deletions: HashMap<(u64, u64, u32), Uuid>,
     pub(in crate::mapi) pending_embedded_message_ids: HashMap<u32, u64>,
     pub(in crate::mapi) pending_embedded_message_attachments: HashMap<u32, (u64, u64, u32)>,
     pub(in crate::mapi) saved_embedded_messages: HashMap<(u64, u64, u32), HashMap<u32, MapiValue>>,

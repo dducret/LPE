@@ -208,6 +208,7 @@ async fn insert_logical_message_with_attachment(
                 media_type: "application/pdf".to_string(),
                 disposition: Some("attachment".to_string()),
                 content_id: None,
+                is_scheduling_body: false,
                 blob_bytes: attachment_bytes.to_vec(),
             }],
         )
@@ -2103,6 +2104,18 @@ async fn durable_blob_store_writes_reads_stats_and_verifies() {
         )
         .await
         .expect("store same bytes in other domain");
+    let in_transaction_read = blob_store
+        .read_durable_blob_in_tx(
+            &mut tx,
+            &tenant,
+            domain_id,
+            DurableBlobKind::Attachment,
+            first.id,
+        )
+        .await
+        .expect("read attachment through the active one-connection transaction")
+        .expect("in-transaction attachment blob exists");
+    assert_eq!(in_transaction_read.bytes, bytes);
     tx.commit().await.expect("commit blob transaction");
 
     assert!(first.created);
@@ -2692,6 +2705,7 @@ async fn attachment_content_fetch_reads_through_blob_store_boundary() {
                 media_type: "text/plain".to_string(),
                 disposition: Some("inline".to_string()),
                 content_id: Some("<cid-1>".to_string()),
+                is_scheduling_body: false,
                 blob_bytes: b"attachment body".to_vec(),
             }],
         )
@@ -2818,6 +2832,7 @@ async fn attachment_content_fetch_reads_through_blob_store_boundary() {
                 media_type: "text/plain".to_string(),
                 disposition: Some("attachment".to_string()),
                 content_id: None,
+                is_scheduling_body: false,
                 blob_bytes: b"attachment body".to_vec(),
             },
             crate::AuditEntryInput {

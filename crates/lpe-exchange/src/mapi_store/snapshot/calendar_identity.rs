@@ -286,24 +286,20 @@ impl MapiMailStoreSnapshot {
                 let transport_attachment_id = email
                     .calendar_meeting_request
                     .as_ref()
-                    .and_then(|request| request.transport_attachment_id);
+                    .and_then(|request| request.transport_attachment_id)
+                    .or_else(|| {
+                        email
+                            .calendar_meeting_response
+                            .as_ref()
+                            .and_then(|response| response.transport_attachment_id)
+                    });
                 let message_attachments = attachments
                     .iter()
                     .find(|(message_id, _)| *message_id == email.id)
                     .map(|(_, attachments)| attachments.as_slice())
                     .unwrap_or_default()
                     .iter()
-                    .filter(|attachment| {
-                        !(transport_attachment_id == Some(attachment.id)
-                            && attachment.disposition.as_deref().is_some_and(|disposition| {
-                                disposition.eq_ignore_ascii_case("inline")
-                            })
-                            && attachment
-                                .media_type
-                                .trim()
-                                .to_ascii_lowercase()
-                                .starts_with("text/calendar"))
-                    })
+                    .filter(|attachment| transport_attachment_id != Some(attachment.id))
                     .enumerate()
                     .map(|(index, attachment)| MapiAttachment {
                         attach_num: index as u32,
@@ -316,7 +312,9 @@ impl MapiMailStoreSnapshot {
                         size_octets: attachment.size_octets,
                     })
                     .collect::<Vec<_>>();
-                if email.calendar_meeting_request.is_some() {
+                if email.calendar_meeting_request.is_some()
+                    || email.calendar_meeting_response.is_some()
+                {
                     email.has_attachments = !message_attachments.is_empty();
                 }
                 MapiMessage {

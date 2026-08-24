@@ -13,8 +13,9 @@ use crate::{
         MAPI_FIRST_GLOBAL_COUNTER, MAPI_FIRST_RESERVED_HIGH_GLOBAL_COUNTER,
         MAPI_MAX_GLOBAL_COUNTER,
     },
-    AccessibleEvent, CalendarEventAttachment, CanonicalChangeCategory, CollaborationRights,
-    MapiEventAttachmentChanges, Storage, UpsertClientEventInput,
+    normalize_calendar_meeting_uid, AccessibleEvent, CalendarEventAttachment,
+    CanonicalChangeCategory, CollaborationRights, MapiEventAttachmentChanges, Storage,
+    UpsertClientEventInput,
 };
 use custom_properties::{
     apply_mapi_event_custom_properties_in_tx, fetch_mapi_event_search_key_in_tx,
@@ -258,7 +259,7 @@ impl Storage {
         let event_uid = if input.event.uid.trim().is_empty() {
             event_id.to_string()
         } else {
-            input.event.uid.trim().to_string()
+            normalize_calendar_meeting_uid(&input.event.uid)
         };
         let mut tx = self.pool.begin().await?;
         let calendar_id = match Uuid::parse_str(&collection.id) {
@@ -934,6 +935,11 @@ async fn update_mapi_event_core_in_tx(
     let event_id = input
         .id
         .ok_or_else(|| anyhow!("MAPI Event update requires a canonical Event id"))?;
+    let event_uid = if input.uid.trim().is_empty() {
+        String::new()
+    } else {
+        normalize_calendar_meeting_uid(&input.uid)
+    };
     let updated = sqlx::query(
         r#"
         UPDATE calendar_events
@@ -982,7 +988,7 @@ async fn update_mapi_event_core_in_tx(
     .bind(tenant_id)
     .bind(input.account_id)
     .bind(event_id)
-    .bind(input.uid.trim())
+    .bind(event_uid)
     .bind(input.date.trim())
     .bind(input.time.trim())
     .bind(input.time_zone.trim())

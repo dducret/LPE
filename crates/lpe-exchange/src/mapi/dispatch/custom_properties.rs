@@ -257,6 +257,17 @@ where
                 stored_values.insert(*tag, property_value);
             }
         }
+    } else if let Some(MapiObject::Message {
+        pending_properties, ..
+    }) = object
+    {
+        for (tag, value) in pending_properties {
+            if storage_tags.contains(tag) && is_custom_property_tag(*tag) {
+                let mut property_value = Vec::new();
+                write_mapi_value(&mut property_value, *tag, value);
+                stored_values.insert(*tag, property_value);
+            }
+        }
     }
     let mut values = HashMap::new();
     for (requested_tag, storage_tag) in requested_tags {

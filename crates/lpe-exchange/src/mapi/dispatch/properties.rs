@@ -171,7 +171,7 @@ pub(super) async fn append_get_properties_specific_response<S>(
         &visible_emails
     };
     let normalized_request = normalized_get_properties_request(session, request);
-    let custom_values = fetch_custom_property_values_for_request(
+    let mut custom_values = fetch_custom_property_values_for_request(
         store,
         principal,
         object.as_ref(),
@@ -182,6 +182,11 @@ pub(super) async fn append_get_properties_specific_response<S>(
     )
     .await
     .unwrap_or_default();
+    if let Some(deleted) = input_handle(handle_slots, request)
+        .and_then(|handle| session.pending_message_property_deletions.get(&handle))
+    {
+        custom_values.retain(|tag, _| !deleted.contains(&canonical_property_storage_tag(*tag)));
+    }
     let inbox_folder_type_getprops_context = if let (
         true,
         Some(MapiObject::Folder { properties, .. }),

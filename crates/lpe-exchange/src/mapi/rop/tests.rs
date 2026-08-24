@@ -1347,11 +1347,12 @@ pub(in crate::mapi) fn session_idle_expiry_follows_cookie_max_age() {
         message_save_generations: HashMap::new(),
         message_handle_generations: HashMap::new(),
         pending_message_recipient_replacements: HashMap::new(),
+        pending_message_property_deletions: HashMap::new(),
         pending_message_attachments: HashMap::new(),
         pending_contact_photo_attachments: HashMap::new(),
         pending_attachment_parent_messages: HashMap::new(),
         pending_event_attachment_transactions: HashMap::new(),
-        pending_attachment_deletions: HashSet::new(),
+        pending_attachment_deletions: HashMap::new(),
         pending_embedded_message_ids: HashMap::new(),
         pending_embedded_message_attachments: HashMap::new(),
         saved_embedded_messages: HashMap::new(),
@@ -2531,6 +2532,677 @@ fn get_properties_specific_test_request(input_handle_index: u8, tags: &[u32]) ->
     }
 }
 
+fn meeting_property_enumeration_test_email() -> JmapEmail {
+    let id = Uuid::parse_str("20202020-2020-2020-2020-202020202020").unwrap();
+    let mailbox_id = Uuid::parse_str("10101010-1010-1010-1010-101010101010").unwrap();
+    crate::mapi::identity::remember_mapi_identity(id, crate::mapi::identity::mapi_store_id(0x2020));
+    JmapEmail {
+        id,
+        thread_id: id,
+        mailbox_ids: vec![mailbox_id],
+        mailbox_states: Vec::new(),
+        mailbox_id,
+        mailbox_role: "inbox".to_string(),
+        mailbox_name: "Inbox".to_string(),
+        modseq: 7,
+        received_at: "2026-08-24T05:45:00Z".to_string(),
+        sent_at: Some("2026-08-24T05:44:30Z".to_string()),
+        from_address: "denis.ducret@sdic.ch".to_string(),
+        from_display: Some("Denis Ducret".to_string()),
+        sender_address: None,
+        sender_display: None,
+        sender_authorization_kind: "author".to_string(),
+        submitted_by_account_id: Uuid::nil(),
+        to: vec![JmapEmailAddress {
+            address: "test@l-p-e.ch".to_string(),
+            display_name: Some("LPE Test".to_string()),
+        }],
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        subject: "Probe 10".to_string(),
+        preview: "Outlook interoperability probe".to_string(),
+        body_text: "Outlook interoperability probe".to_string(),
+        body_html_sanitized: None,
+        unread: true,
+        flagged: false,
+        followup_flag_status: "none".to_string(),
+        followup_icon: 0,
+        todo_item_flags: 0,
+        followup_request: String::new(),
+        followup_start_at: None,
+        followup_due_at: None,
+        followup_completed_at: None,
+        reminder_set: false,
+        reminder_at: None,
+        reminder_dismissed_at: None,
+        swapped_todo_store_id: None,
+        swapped_todo_data: None,
+        categories: Vec::new(),
+        has_attachments: false,
+        calendar_invitation: false,
+        calendar_meeting_request: None,
+        calendar_meeting_response: None,
+        size_octets: 1024,
+        internet_message_id: Some("<probe-10@sdic.ch>".to_string()),
+        mime_blob_ref: None,
+        delivery_status: "delivered".to_string(),
+    }
+}
+
+fn actionable_meeting_request_test_email() -> JmapEmail {
+    let mut email = meeting_property_enumeration_test_email();
+    email.calendar_invitation = true;
+    email.calendar_meeting_request = Some(lpe_storage::CalendarMeetingRequest {
+        uid: "probe-10-20260824@sdic.ch".to_string(),
+        transport_attachment_id: None,
+        organizer: Some(lpe_storage::CalendarMeetingIdentity {
+            email: "denis.ducret@sdic.ch".to_string(),
+            display_name: "Denis Ducret".to_string(),
+        }),
+        attendees: vec![lpe_storage::CalendarMeetingAttendee {
+            email: "test@l-p-e.ch".to_string(),
+            display_name: "LPE Test".to_string(),
+            cutype: "INDIVIDUAL".to_string(),
+            role: "REQ-PARTICIPANT".to_string(),
+            partstat: "NEEDS-ACTION".to_string(),
+            rsvp: true,
+        }],
+        response_requested: true,
+        sent_at: Some("2026-08-24T05:44:30Z".to_string()),
+        meeting_start: "2026-08-24T06:30:00Z".to_string(),
+        meeting_end: "2026-08-24T07:00:00Z".to_string(),
+        meeting_location: Some("Les Planches".to_string()),
+        meeting_sequence: 2,
+        intended_busy_status: 2,
+    });
+    email
+}
+
+fn counter_meeting_response_test_email() -> JmapEmail {
+    let mut email = meeting_property_enumeration_test_email();
+    email.subject = "New Time Proposed: Probe 10".to_string();
+    email.calendar_meeting_response = Some(lpe_storage::CalendarMeetingResponse {
+        method: "COUNTER".to_string(),
+        transport_attachment_id: None,
+        server_processed: false,
+        organizer: Some(lpe_storage::CalendarMeetingIdentity {
+            email: "test@l-p-e.ch".to_string(),
+            display_name: "LPE Test".to_string(),
+        }),
+        attendee_email: "denis.ducret@sdic.ch".to_string(),
+        attendee_name: "Denis Ducret".to_string(),
+        partstat: "declined".to_string(),
+        uid: "probe-10-20260824@sdic.ch".to_string(),
+        response_sent_at: Some("2026-08-24T05:44:30Z".to_string()),
+        meeting_start: Some("2026-08-24T06:30:00Z".to_string()),
+        meeting_end: Some("2026-08-24T07:00:00Z".to_string()),
+        meeting_location: Some("Les Planches".to_string()),
+        meeting_sequence: Some(2),
+        proposed_start: Some("2026-08-24T07:30:00Z".to_string()),
+        proposed_end: Some("2026-08-24T08:00:00Z".to_string()),
+        original_start: Some("2026-08-24T06:30:00Z".to_string()),
+        original_end: Some("2026-08-24T07:00:00Z".to_string()),
+    });
+    email
+}
+
+fn reply_meeting_response_test_email(partstat: &str, prefix: &str) -> JmapEmail {
+    let mut email = counter_meeting_response_test_email();
+    email.subject = format!("{prefix}Probe 10");
+    let response = email
+        .calendar_meeting_response
+        .as_mut()
+        .expect("response metadata exists");
+    response.method = "REPLY".to_string();
+    response.partstat = partstat.to_string();
+    response.proposed_start = None;
+    response.proposed_end = None;
+    email
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct DecodedSavedRecipientRow {
+    row_id: Option<u32>,
+    recipient_type: u8,
+    email_address: String,
+    display_name: String,
+    properties: HashMap<u32, MapiValue>,
+}
+
+fn skip_typed_string(cursor: &mut Cursor<'_>) {
+    read_typed_string(cursor);
+}
+
+fn read_typed_string(cursor: &mut Cursor<'_>) -> String {
+    match cursor.read_u8().unwrap() {
+        0x01 => String::new(),
+        0x03 => cursor.read_ascii_z().unwrap(),
+        0x04 => cursor.read_utf16z().unwrap(),
+        value => panic!("unexpected TypedString type {value:#04x}"),
+    }
+}
+
+fn decode_open_message_subjects(response: &[u8]) -> (bool, String, String) {
+    let mut cursor = Cursor::new(response);
+    assert_eq!(cursor.read_u8().unwrap(), RopId::OpenMessage.as_u8());
+    cursor.read_u8().unwrap();
+    assert_eq!(cursor.read_u32().unwrap(), 0);
+    let has_named_properties = cursor.read_u8().unwrap() != 0;
+    let prefix = read_typed_string(&mut cursor);
+    let normalized = read_typed_string(&mut cursor);
+    (has_named_properties, prefix, normalized)
+}
+
+fn decode_saved_recipient_row(
+    row_id: Option<u32>,
+    recipient_type: u8,
+    row: &[u8],
+    columns: &[u32],
+) -> DecodedSavedRecipientRow {
+    let mut cursor = Cursor::new(row);
+    let intrinsic_flags = cursor.read_u16().unwrap();
+    assert_eq!(intrinsic_flags, 0x021B, "Unicode SMTP address and name");
+    let email_address = cursor.read_utf16z().unwrap();
+    let display_name = cursor.read_utf16z().unwrap();
+    assert_eq!(cursor.read_u16().unwrap() as usize, columns.len());
+    assert_eq!(cursor.read_u8().unwrap(), 0, "StandardPropertyRow");
+    let mut properties = HashMap::new();
+    for property_tag in columns {
+        properties.insert(
+            *property_tag,
+            parse_mapi_property_value(&mut cursor, *property_tag).unwrap(),
+        );
+    }
+    assert_eq!(cursor.remaining(), 0);
+    DecodedSavedRecipientRow {
+        row_id,
+        recipient_type,
+        email_address,
+        display_name,
+        properties,
+    }
+}
+
+fn decode_open_message_recipients(
+    response: &[u8],
+) -> (u16, Vec<u32>, Vec<DecodedSavedRecipientRow>) {
+    let mut cursor = Cursor::new(response);
+    assert_eq!(cursor.read_u8().unwrap(), RopId::OpenMessage.as_u8());
+    cursor.read_u8().unwrap();
+    assert_eq!(cursor.read_u32().unwrap(), 0);
+    cursor.read_u8().unwrap();
+    skip_typed_string(&mut cursor);
+    skip_typed_string(&mut cursor);
+    let recipient_count = cursor.read_u16().unwrap();
+    let column_count = cursor.read_u16().unwrap() as usize;
+    let columns = (0..column_count)
+        .map(|_| cursor.read_u32().unwrap())
+        .collect::<Vec<_>>();
+    let row_count = cursor.read_u8().unwrap() as usize;
+    let mut rows = Vec::with_capacity(row_count);
+    for _ in 0..row_count {
+        let recipient_type = cursor.read_u8().unwrap();
+        assert_eq!(cursor.read_u16().unwrap(), 0x0FFF);
+        assert_eq!(cursor.read_u16().unwrap(), 0);
+        let size = cursor.read_u16().unwrap() as usize;
+        rows.push(decode_saved_recipient_row(
+            None,
+            recipient_type,
+            cursor.read_bytes(size).unwrap(),
+            &columns,
+        ));
+    }
+    assert_eq!(cursor.remaining(), 0);
+    (recipient_count, columns, rows)
+}
+
+fn decode_read_recipients(response: &[u8], columns: &[u32]) -> Vec<DecodedSavedRecipientRow> {
+    let mut cursor = Cursor::new(response);
+    assert_eq!(cursor.read_u8().unwrap(), RopId::ReadRecipients.as_u8());
+    cursor.read_u8().unwrap();
+    assert_eq!(cursor.read_u32().unwrap(), 0);
+    let row_count = cursor.read_u8().unwrap() as usize;
+    let mut rows = Vec::with_capacity(row_count);
+    for _ in 0..row_count {
+        let row_id = cursor.read_u32().unwrap();
+        let recipient_type = cursor.read_u8().unwrap();
+        assert_eq!(cursor.read_u16().unwrap(), 0x0FFF);
+        assert_eq!(cursor.read_u16().unwrap(), 0);
+        let size = cursor.read_u16().unwrap() as usize;
+        rows.push(decode_saved_recipient_row(
+            Some(row_id),
+            recipient_type,
+            cursor.read_bytes(size).unwrap(),
+            columns,
+        ));
+    }
+    assert_eq!(cursor.remaining(), 0);
+    rows
+}
+
+fn recipient_u32(row: &DecodedSavedRecipientRow, property_tag: u32) -> u32 {
+    match row.properties.get(&property_tag) {
+        Some(MapiValue::U32(value)) => *value,
+        Some(MapiValue::I32(value)) => *value as u32,
+        value => panic!("unexpected recipient property {property_tag:#010x}: {value:?}"),
+    }
+}
+
+#[test]
+fn meeting_response_open_and_read_recipients_share_complete_ics_projection() {
+    let mut email = counter_meeting_response_test_email();
+    email.to = vec![JmapEmailAddress {
+        address: "stale-rfc-recipient@example.test".to_string(),
+        display_name: Some("Stale RFC recipient".to_string()),
+    }];
+    email.cc = vec![JmapEmailAddress {
+        address: "stale-rfc-cc@example.test".to_string(),
+        display_name: None,
+    }];
+    let open_request = RopRequest {
+        rop_id: RopId::OpenMessage.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: Some(2),
+        payload: Vec::new(),
+    };
+    let open = rop_open_message_response_with_recipients(&open_request, &email.subject, &email);
+    let (recipient_count, columns, open_rows) = decode_open_message_recipients(&open);
+
+    assert_eq!(recipient_count, 2);
+    assert_eq!(columns, MESSAGE_RECIPIENT_COLUMNS);
+    assert_eq!(open_rows.len(), 2);
+    let organizer = &open_rows[0];
+    assert_eq!(organizer.email_address, "test@l-p-e.ch");
+    assert_eq!(organizer.display_name, "LPE Test");
+    assert_eq!(organizer.recipient_type, 1);
+    assert_eq!(recipient_u32(organizer, PID_TAG_RECIPIENT_FLAGS), 3);
+    assert_eq!(recipient_u32(organizer, PID_TAG_RECIPIENT_ORDER), 0);
+    assert_eq!(recipient_u32(organizer, PID_TAG_RECIPIENT_TRACK_STATUS), 0);
+    assert_eq!(
+        organizer.properties.get(&PID_TAG_ADDRESS_TYPE_W),
+        Some(&MapiValue::String("SMTP".to_string()))
+    );
+    assert_eq!(
+        organizer.properties.get(&PID_TAG_SMTP_ADDRESS_W),
+        Some(&MapiValue::String("test@l-p-e.ch".to_string()))
+    );
+    assert_eq!(
+        organizer.properties.get(&PID_TAG_ENTRY_ID),
+        organizer.properties.get(&PID_TAG_RECIPIENT_ENTRY_ID)
+    );
+    assert!(matches!(
+        organizer.properties.get(&PID_TAG_SEARCH_KEY),
+        Some(MapiValue::Binary(value)) if value == b"SMTP:TEST@L-P-E.CH\0"
+    ));
+
+    let responder = &open_rows[1];
+    assert_eq!(responder.email_address, "denis.ducret@sdic.ch");
+    assert_eq!(responder.display_name, "Denis Ducret");
+    assert_eq!(responder.recipient_type, 1);
+    assert_eq!(recipient_u32(responder, PID_TAG_RECIPIENT_FLAGS), 1);
+    assert_eq!(recipient_u32(responder, PID_TAG_RECIPIENT_ORDER), 1);
+    assert_eq!(recipient_u32(responder, PID_TAG_RECIPIENT_TRACK_STATUS), 4);
+    assert!(open_rows
+        .iter()
+        .all(|row| !row.email_address.starts_with("stale-rfc-")));
+
+    let object = MapiObject::Message {
+        folder_id: INBOX_FOLDER_ID,
+        message_id: crate::mapi::identity::mapi_store_id(0x2020),
+        saved_email: Some(MapiSavedEmail {
+            email,
+            durable_identity: None,
+        }),
+        pending_properties: HashMap::new(),
+    };
+    let read_request = RopRequest {
+        rop_id: RopId::ReadRecipients.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload: [0, 0, 0, 0, 0, 0].to_vec(),
+    };
+    let read = rop_read_recipients_response(
+        &read_request,
+        Some(&object),
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+    );
+    let read_rows = decode_read_recipients(&read, &columns);
+    assert_eq!(read_rows.len(), open_rows.len());
+    for (row_id, (read, open)) in read_rows.iter().zip(&open_rows).enumerate() {
+        assert_eq!(read.row_id, Some(row_id as u32));
+        assert_eq!(read.recipient_type, open.recipient_type);
+        assert_eq!(read.email_address, open.email_address);
+        assert_eq!(read.display_name, open.display_name);
+        assert_eq!(read.properties, open.properties);
+    }
+}
+
+#[test]
+fn meeting_request_recipient_projection_preserves_type_status_and_order() {
+    let mut email = actionable_meeting_request_test_email();
+    let request = email.calendar_meeting_request.as_mut().unwrap();
+    request
+        .attendees
+        .push(lpe_storage::CalendarMeetingAttendee {
+            email: "optional@example.test".to_string(),
+            display_name: "Optional".to_string(),
+            cutype: "INDIVIDUAL".to_string(),
+            role: "OPT-PARTICIPANT".to_string(),
+            partstat: "accepted".to_string(),
+            rsvp: false,
+        });
+    request
+        .attendees
+        .push(lpe_storage::CalendarMeetingAttendee {
+            email: "room@example.test".to_string(),
+            display_name: "Room".to_string(),
+            cutype: "ROOM".to_string(),
+            role: "NON-PARTICIPANT".to_string(),
+            partstat: "tentative".to_string(),
+            rsvp: false,
+        });
+
+    let recipients = message_recipients(&email);
+    assert_eq!(recipients.len(), 4);
+    assert_eq!(recipients[0].recipient_flags, 3);
+    assert_eq!(recipients[0].order, 0);
+    assert_eq!(recipients[1].recipient_type, 1);
+    assert_eq!(recipients[1].track_status, 0);
+    assert_eq!(recipients[1].order, 1);
+    assert_eq!(recipients[2].recipient_type, 2);
+    assert_eq!(recipients[2].track_status, 3);
+    assert_eq!(recipients[2].order, 2);
+    assert_eq!(recipients[3].recipient_type, 3);
+    assert_eq!(recipients[3].track_status, 2);
+    assert_eq!(recipients[3].order, 3);
+}
+
+#[test]
+fn open_message_advertises_named_properties_for_actionable_meeting_mail() {
+    let request = RopRequest {
+        rop_id: RopId::OpenMessage.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: Some(3),
+        payload: Vec::new(),
+    };
+    let ordinary = meeting_property_enumeration_test_email();
+    let meeting_request = actionable_meeting_request_test_email();
+    assert_eq!(
+        decode_open_message_subjects(&rop_open_message_response_with_recipients(
+            &request,
+            &ordinary.subject,
+            &ordinary,
+        )),
+        (false, String::new(), ordinary.subject.clone())
+    );
+    let mut categorized = ordinary.clone();
+    categorized.categories = vec!["Customer".to_string()];
+    assert_eq!(
+        decode_open_message_subjects(&rop_open_message_response_with_recipients(
+            &request,
+            &categorized.subject,
+            &categorized,
+        )),
+        (true, String::new(), categorized.subject.clone())
+    );
+    assert_eq!(
+        decode_open_message_subjects(&rop_open_message_response_with_recipients(
+            &request,
+            &meeting_request.subject,
+            &meeting_request,
+        )),
+        (true, String::new(), meeting_request.subject.clone())
+    );
+    for (email, prefix) in [
+        (
+            reply_meeting_response_test_email("accepted", "Accepted: "),
+            "Accepted: ",
+        ),
+        (
+            reply_meeting_response_test_email("declined", "Declined: "),
+            "Declined: ",
+        ),
+        (counter_meeting_response_test_email(), "New Time Proposed: "),
+    ] {
+        assert_eq!(
+            decode_open_message_subjects(&rop_open_message_response_with_recipients(
+                &request,
+                &email.subject,
+                &email,
+            )),
+            (true, prefix.to_string(), "Probe 10".to_string())
+        );
+    }
+}
+
+#[test]
+fn meeting_response_enumeration_omits_absent_times() {
+    let mut email = counter_meeting_response_test_email();
+    let response = email.calendar_meeting_response.as_mut().unwrap();
+    response.meeting_start = None;
+    response.meeting_end = None;
+    response.proposed_start = None;
+    response.proposed_end = None;
+
+    let tags = email_meeting_property_tags(&email);
+    let absent_tags = [
+        PID_TAG_START_DATE,
+        PID_TAG_END_DATE,
+        PID_TAG_OWNER_APPOINTMENT_ID,
+        PID_LID_COMMON_START_TAG,
+        PID_LID_COMMON_END_TAG,
+        PID_LID_APPOINTMENT_START_WHOLE_TAG,
+        PID_LID_APPOINTMENT_END_WHOLE_TAG,
+        PID_LID_APPOINTMENT_PROPOSED_START_WHOLE_TAG,
+        PID_LID_APPOINTMENT_PROPOSED_END_WHOLE_TAG,
+    ];
+    for absent in absent_tags {
+        assert!(!tags.contains(&absent), "invented absent {absent:#010x}");
+    }
+    assert!(tags.contains(&PID_LID_APPOINTMENT_COUNTER_PROPOSAL_TAG));
+    assert!(tags.contains(&PID_LID_IS_SILENT_TAG));
+
+    let object = MapiObject::Message {
+        folder_id: INBOX_FOLDER_ID,
+        message_id: crate::mapi::identity::mapi_store_id(0x2020),
+        saved_email: Some(MapiSavedEmail {
+            email,
+            durable_identity: None,
+        }),
+        pending_properties: HashMap::new(),
+    };
+    let request = RopRequest {
+        rop_id: RopId::GetPropertiesList.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload: Vec::new(),
+    };
+    let list = rop_get_properties_list_response(
+        &request,
+        &property_enumeration_test_session(),
+        Some(&object),
+        &MapiMailStoreSnapshot::empty(),
+    );
+    let listed_tags = list[8..]
+        .chunks_exact(4)
+        .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+        .collect::<Vec<_>>();
+    for absent in absent_tags {
+        assert!(
+            !listed_tags.contains(&absent),
+            "GetPropertiesList invented absent {absent:#010x}"
+        );
+    }
+}
+
+#[test]
+fn ordinary_message_named_property_flag_and_enumeration_follow_effective_bag() {
+    let session = property_enumeration_test_session();
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let list_request = RopRequest {
+        rop_id: RopId::GetPropertiesList.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload: Vec::new(),
+    };
+    let listed_tags = |email: JmapEmail| {
+        let object = MapiObject::Message {
+            folder_id: INBOX_FOLDER_ID,
+            message_id: crate::mapi::identity::mapi_store_id(0x2020),
+            saved_email: Some(MapiSavedEmail {
+                email,
+                durable_identity: None,
+            }),
+            pending_properties: HashMap::new(),
+        };
+        let response =
+            rop_get_properties_list_response(&list_request, &session, Some(&object), &snapshot);
+        response[8..]
+            .chunks_exact(4)
+            .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+            .collect::<Vec<_>>()
+    };
+
+    let plain = meeting_property_enumeration_test_email();
+    assert_eq!(
+        email_property_value(&plain, PID_TAG_HAS_NAMED_PROPERTIES),
+        Some(MapiValue::Bool(false))
+    );
+    let plain_tags = listed_tags(plain.clone());
+    assert!(plain_tags.contains(&PID_TAG_HAS_NAMED_PROPERTIES));
+    assert!(!plain_tags
+        .iter()
+        .any(|tag| MapiPropertyTag::new(*tag).property_id() >= MIN_NAMED_PROPERTY_ID));
+
+    let mut categorized = plain;
+    categorized.categories = vec!["Customer".to_string()];
+    assert_eq!(
+        email_property_value(&categorized, PID_TAG_HAS_NAMED_PROPERTIES),
+        Some(MapiValue::Bool(true))
+    );
+    let categorized_tags = listed_tags(categorized);
+    assert!(categorized_tags.contains(&PID_TAG_HAS_NAMED_PROPERTIES));
+    assert!(categorized_tags.contains(&PID_NAME_KEYWORDS_TAG));
+}
+
+#[test]
+fn meeting_mail_getprops_all_list_and_specific_share_supported_properties() {
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::nil(),
+        email: "test@l-p-e.ch".to_string(),
+        display_name: "LPE Test".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let session = property_enumeration_test_session();
+    let snapshot = MapiMailStoreSnapshot::empty();
+    for email in [
+        actionable_meeting_request_test_email(),
+        reply_meeting_response_test_email("accepted", "Accepted: "),
+        reply_meeting_response_test_email("declined", "Declined: "),
+        counter_meeting_response_test_email(),
+    ] {
+        let expected = email_meeting_property_tags(&email);
+        assert!(!expected.is_empty());
+        assert!(expected.contains(&PID_TAG_HAS_NAMED_PROPERTIES));
+        assert!(expected.iter().any(|property_tag| {
+            MapiPropertyTag::new(*property_tag).property_id() >= MIN_NAMED_PROPERTY_ID
+        }));
+        let object = MapiObject::Message {
+            folder_id: INBOX_FOLDER_ID,
+            message_id: crate::mapi::identity::mapi_store_id(0x2020),
+            saved_email: Some(MapiSavedEmail {
+                email: email.clone(),
+                durable_identity: None,
+            }),
+            pending_properties: HashMap::new(),
+        };
+
+        let list_request = RopRequest {
+            rop_id: RopId::GetPropertiesList.as_u8(),
+            input_handle_index: Some(2),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+        let list =
+            rop_get_properties_list_response(&list_request, &session, Some(&object), &snapshot);
+        let list_count = u16::from_le_bytes(list[6..8].try_into().unwrap()) as usize;
+        let list_tags = list[8..]
+            .chunks_exact(4)
+            .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+            .collect::<Vec<_>>();
+        assert_eq!(list_tags.len(), list_count);
+        for absent in [
+            PID_LID_COMPANIES_TAG,
+            PID_LID_CONTACTS_TAG,
+            PID_LID_LOG_TYPE_W_TAG,
+        ] {
+            assert!(
+                !list_tags.contains(&absent),
+                "GetPropertiesList invented absent {absent:#010x}"
+            );
+        }
+        for property_tag in &expected {
+            assert!(
+                list_tags.contains(property_tag),
+                "GetPropertiesList omitted {property_tag:#010x} for {}",
+                message_class_for_email(&email)
+            );
+        }
+
+        let all_request = RopRequest {
+            rop_id: RopId::GetPropertiesAll.as_u8(),
+            input_handle_index: Some(2),
+            output_handle_index: None,
+            payload: [0, 0, 1, 0].to_vec(),
+        };
+        let all = rop_get_properties_all_response(
+            &all_request,
+            &session,
+            Some(&object),
+            &principal,
+            &[],
+            &[],
+            &snapshot,
+        );
+        let all_count = u16::from_le_bytes(all[6..8].try_into().unwrap()) as usize;
+        let mut cursor = Cursor::new(&all[8..]);
+        let mut all_tags = Vec::with_capacity(all_count);
+        for _ in 0..all_count {
+            let property_tag = cursor.read_u32().unwrap();
+            all_tags.push(property_tag);
+            parse_mapi_property_value(&mut cursor, property_tag).unwrap();
+        }
+        assert_eq!(cursor.remaining(), 0);
+        for property_tag in &expected {
+            assert!(
+                all_tags.contains(property_tag),
+                "GetPropertiesAll omitted {property_tag:#010x} for {}",
+                message_class_for_email(&email)
+            );
+        }
+
+        let specific_request = get_properties_specific_test_request(2, &expected);
+        let specific = rop_get_properties_specific_response(
+            &specific_request,
+            Some(&object),
+            &principal,
+            &[],
+            &[],
+            &snapshot,
+        );
+        assert_eq!(&specific[..7], &[0x07, 0x02, 0, 0, 0, 0, 0]);
+        let mut cursor = Cursor::new(&specific[7..]);
+        for property_tag in &expected {
+            parse_mapi_property_value(&mut cursor, *property_tag).unwrap();
+        }
+        assert_eq!(cursor.remaining(), 0);
+    }
+}
+
 #[test]
 fn property_reads_reject_live_non_property_objects() {
     // [MS-OXCPRPT] sections 2.2.2, 2.2.3, and 2.2.4 describe
@@ -3169,7 +3841,7 @@ fn calendar_event_get_valid_attachments_rejects_missing_event_handle() {
         &request,
         Some(&object),
         &MapiMailStoreSnapshot::empty(),
-        &HashSet::new(),
+        &HashMap::new(),
     );
 
     assert_eq!(response[0], RopId::GetValidAttachments.as_u8());
@@ -3289,11 +3961,7 @@ fn delegate_freebusy_getprops_rejects_message_from_wrong_folder() {
 fn message_body_getprops_contract_reports_canonical_body_shape() {
     let mailbox_id = Uuid::parse_str("10101010-1010-1010-1010-101010101010").unwrap();
     let email_id = Uuid::parse_str("20202020-2020-2020-2020-202020202020").unwrap();
-    crate::mapi::identity::remember_mapi_identity(mailbox_id, INBOX_FOLDER_ID);
-    crate::mapi::identity::remember_mapi_identity(
-        email_id,
-        crate::mapi::identity::mapi_store_id(0x99),
-    );
+    let message_id = crate::mapi::identity::mapi_store_id(0x00B0_D0C1);
     let mailboxes = vec![JmapMailbox {
         id: mailbox_id,
         parent_id: None,
@@ -3359,8 +4027,11 @@ fn message_body_getprops_contract_reports_canonical_body_shape() {
     }];
     let object = MapiObject::Message {
         folder_id: INBOX_FOLDER_ID,
-        message_id: crate::mapi::identity::mapi_store_id(0x99),
-        saved_email: None,
+        message_id,
+        saved_email: Some(MapiSavedEmail {
+            email: emails[0].clone(),
+            durable_identity: None,
+        }),
         pending_properties: HashMap::new(),
     };
     let snapshot = MapiMailStoreSnapshot::new(
@@ -3390,7 +4061,7 @@ fn message_body_getprops_contract_reports_canonical_body_shape() {
     );
 
     assert!(contract.contains("message_found=true"));
-    assert!(contract.contains("source=mailbox"));
+    assert!(contract.contains("source=saved_handle"));
     assert!(contract.contains("subject_chars=10"));
     assert!(contract.contains("body_text_chars=10"));
     assert!(contract.contains("body_text_empty=false"));

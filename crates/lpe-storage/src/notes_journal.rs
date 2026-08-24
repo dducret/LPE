@@ -685,43 +685,47 @@ impl Storage {
                         WHERE COALESCE(e.recurrence_rule, '') = ''
                         UNION ALL
                         SELECT generated_at AS occurrence_start
-                        FROM generate_series(
-                            e.starts_at,
-                            NOW() + interval '90 days',
-                            CASE
-                                WHEN e.recurrence_rule ILIKE 'FREQ=DAILY%' THEN make_interval(days => COALESCE(NULLIF(substring(e.recurrence_rule from 'INTERVAL=([0-9]+)'), '')::int, 1))
-                                WHEN e.recurrence_rule ILIKE 'FREQ=WEEKLY%' THEN make_interval(days => 7 * COALESCE(NULLIF(substring(e.recurrence_rule from 'INTERVAL=([0-9]+)'), '')::int, 1))
-                                WHEN e.recurrence_rule ILIKE 'FREQ=MONTHLY%' THEN make_interval(months => COALESCE(NULLIF(substring(e.recurrence_rule from 'INTERVAL=([0-9]+)'), '')::int, 1))
-                                WHEN e.recurrence_rule ILIKE 'FREQ=YEARLY%' THEN make_interval(years => COALESCE(NULLIF(substring(e.recurrence_rule from 'INTERVAL=([0-9]+)'), '')::int, 1))
-                                ELSE interval '100 years'
-                            END
-                        ) WITH ORDINALITY AS occurrences(generated_at, occurrence_index)
-                        WHERE COALESCE(e.recurrence_rule, '') <> ''
-                          AND generated_at >= NOW() - interval '1 day'
+                        FROM (
+                            SELECT generated_at,
+                                   row_number() OVER (ORDER BY generated_at) AS occurrence_index
+                            FROM generate_series(
+                                e.starts_at,
+                                NOW() + interval '90 days',
+                                CASE
+                                    WHEN e.recurrence_rule ILIKE 'FREQ=DAILY%' THEN make_interval(days => COALESCE(NULLIF(substring(e.recurrence_rule from 'INTERVAL=([0-9]+)'), '')::int, 1))
+                                    WHEN e.recurrence_rule ILIKE 'FREQ=WEEKLY%' THEN make_interval(days => 7 * COALESCE(NULLIF(substring(e.recurrence_rule from 'INTERVAL=([0-9]+)'), '')::int, 1))
+                                    WHEN e.recurrence_rule ILIKE 'FREQ=MONTHLY%' THEN make_interval(months => COALESCE(NULLIF(substring(e.recurrence_rule from 'INTERVAL=([0-9]+)'), '')::int, 1))
+                                    WHEN e.recurrence_rule ILIKE 'FREQ=YEARLY%' THEN make_interval(years => COALESCE(NULLIF(substring(e.recurrence_rule from 'INTERVAL=([0-9]+)'), '')::int, 1))
+                                    ELSE interval '100 years'
+                                END
+                            ) AS generated_occurrences(generated_at)
+                            WHERE COALESCE(e.recurrence_rule, '') <> ''
+                              AND (
+                                  COALESCE(NULLIF(substring(e.recurrence_rule from 'UNTIL=([0-9]{8})'), ''), '') = ''
+                                  OR generated_at::date <= to_date(substring(e.recurrence_rule from 'UNTIL=([0-9]{8})'), 'YYYYMMDD')
+                              )
+                              AND (
+                                  COALESCE(NULLIF(substring(e.recurrence_rule from 'BYDAY=([^;]+)'), ''), '') = ''
+                                  OR position(
+                                      CASE EXTRACT(ISODOW FROM generated_at)::int
+                                          WHEN 1 THEN 'MO'
+                                          WHEN 2 THEN 'TU'
+                                          WHEN 3 THEN 'WE'
+                                          WHEN 4 THEN 'TH'
+                                          WHEN 5 THEN 'FR'
+                                          WHEN 6 THEN 'SA'
+                                          ELSE 'SU'
+                                      END
+                                      IN substring(e.recurrence_rule from 'BYDAY=([^;]+)')
+                                  ) > 0
+                              )
+                              AND (
+                                  COALESCE(NULLIF(substring(e.recurrence_rule from 'BYMONTHDAY=([^;]+)'), ''), '') = ''
+                                  OR EXTRACT(DAY FROM generated_at)::int::text = ANY(string_to_array(substring(e.recurrence_rule from 'BYMONTHDAY=([^;]+)'), ','))
+                              )
+                        ) AS rule_occurrences
+                        WHERE generated_at >= NOW() - interval '1 day'
                           AND occurrence_index <= COALESCE(NULLIF(substring(e.recurrence_rule from 'COUNT=([0-9]+)'), '')::bigint, occurrence_index)
-                          AND (
-                              COALESCE(NULLIF(substring(e.recurrence_rule from 'UNTIL=([0-9]{8})'), ''), '') = ''
-                              OR generated_at::date <= to_date(substring(e.recurrence_rule from 'UNTIL=([0-9]{8})'), 'YYYYMMDD')
-                          )
-                          AND (
-                              COALESCE(NULLIF(substring(e.recurrence_rule from 'BYDAY=([^;]+)'), ''), '') = ''
-                              OR position(
-                                  CASE EXTRACT(ISODOW FROM generated_at)::int
-                                      WHEN 1 THEN 'MO'
-                                      WHEN 2 THEN 'TU'
-                                      WHEN 3 THEN 'WE'
-                                      WHEN 4 THEN 'TH'
-                                      WHEN 5 THEN 'FR'
-                                      WHEN 6 THEN 'SA'
-                                      ELSE 'SU'
-                                  END
-                                  IN substring(e.recurrence_rule from 'BYDAY=([^;]+)')
-                              ) > 0
-                          )
-                          AND (
-                              COALESCE(NULLIF(substring(e.recurrence_rule from 'BYMONTHDAY=([^;]+)'), ''), '') = ''
-                              OR EXTRACT(DAY FROM generated_at)::int::text = ANY(string_to_array(substring(e.recurrence_rule from 'BYMONTHDAY=([^;]+)'), ','))
-                          )
                           AND NOT EXISTS (
                               SELECT 1
                               FROM jsonb_array_elements_text(e.recurrence_exceptions_json) AS exception(value)
@@ -794,43 +798,47 @@ impl Storage {
                         WHERE COALESCE(t.recurrence_rule, '') = ''
                         UNION ALL
                         SELECT generated_at AS occurrence_anchor
-                        FROM generate_series(
-                            COALESCE(t.due_at, t.reminder_at),
-                            NOW() + interval '90 days',
-                            CASE
-                                WHEN t.recurrence_rule ILIKE 'FREQ=DAILY%' THEN make_interval(days => COALESCE(NULLIF(substring(t.recurrence_rule from 'INTERVAL=([0-9]+)'), '')::int, 1))
-                                WHEN t.recurrence_rule ILIKE 'FREQ=WEEKLY%' THEN make_interval(days => 7 * COALESCE(NULLIF(substring(t.recurrence_rule from 'INTERVAL=([0-9]+)'), '')::int, 1))
-                                WHEN t.recurrence_rule ILIKE 'FREQ=MONTHLY%' THEN make_interval(months => COALESCE(NULLIF(substring(t.recurrence_rule from 'INTERVAL=([0-9]+)'), '')::int, 1))
-                                WHEN t.recurrence_rule ILIKE 'FREQ=YEARLY%' THEN make_interval(years => COALESCE(NULLIF(substring(t.recurrence_rule from 'INTERVAL=([0-9]+)'), '')::int, 1))
-                                ELSE interval '100 years'
-                            END
-                        ) WITH ORDINALITY AS occurrences(generated_at, occurrence_index)
-                        WHERE COALESCE(t.recurrence_rule, '') <> ''
-                          AND generated_at >= NOW() - interval '1 day'
+                        FROM (
+                            SELECT generated_at,
+                                   row_number() OVER (ORDER BY generated_at) AS occurrence_index
+                            FROM generate_series(
+                                COALESCE(t.due_at, t.reminder_at),
+                                NOW() + interval '90 days',
+                                CASE
+                                    WHEN t.recurrence_rule ILIKE 'FREQ=DAILY%' THEN make_interval(days => COALESCE(NULLIF(substring(t.recurrence_rule from 'INTERVAL=([0-9]+)'), '')::int, 1))
+                                    WHEN t.recurrence_rule ILIKE 'FREQ=WEEKLY%' THEN make_interval(days => 7 * COALESCE(NULLIF(substring(t.recurrence_rule from 'INTERVAL=([0-9]+)'), '')::int, 1))
+                                    WHEN t.recurrence_rule ILIKE 'FREQ=MONTHLY%' THEN make_interval(months => COALESCE(NULLIF(substring(t.recurrence_rule from 'INTERVAL=([0-9]+)'), '')::int, 1))
+                                    WHEN t.recurrence_rule ILIKE 'FREQ=YEARLY%' THEN make_interval(years => COALESCE(NULLIF(substring(t.recurrence_rule from 'INTERVAL=([0-9]+)'), '')::int, 1))
+                                    ELSE interval '100 years'
+                                END
+                            ) AS generated_occurrences(generated_at)
+                            WHERE COALESCE(t.recurrence_rule, '') <> ''
+                              AND (
+                                  COALESCE(NULLIF(substring(t.recurrence_rule from 'UNTIL=([0-9]{8})'), ''), '') = ''
+                                  OR generated_at::date <= to_date(substring(t.recurrence_rule from 'UNTIL=([0-9]{8})'), 'YYYYMMDD')
+                              )
+                              AND (
+                                  COALESCE(NULLIF(substring(t.recurrence_rule from 'BYDAY=([^;]+)'), ''), '') = ''
+                                  OR position(
+                                      CASE EXTRACT(ISODOW FROM generated_at)::int
+                                          WHEN 1 THEN 'MO'
+                                          WHEN 2 THEN 'TU'
+                                          WHEN 3 THEN 'WE'
+                                          WHEN 4 THEN 'TH'
+                                          WHEN 5 THEN 'FR'
+                                          WHEN 6 THEN 'SA'
+                                          ELSE 'SU'
+                                      END
+                                      IN substring(t.recurrence_rule from 'BYDAY=([^;]+)')
+                                  ) > 0
+                              )
+                              AND (
+                                  COALESCE(NULLIF(substring(t.recurrence_rule from 'BYMONTHDAY=([^;]+)'), ''), '') = ''
+                                  OR EXTRACT(DAY FROM generated_at)::int::text = ANY(string_to_array(substring(t.recurrence_rule from 'BYMONTHDAY=([^;]+)'), ','))
+                              )
+                        ) AS rule_occurrences
+                        WHERE generated_at >= NOW() - interval '1 day'
                           AND occurrence_index <= COALESCE(NULLIF(substring(t.recurrence_rule from 'COUNT=([0-9]+)'), '')::bigint, occurrence_index)
-                          AND (
-                              COALESCE(NULLIF(substring(t.recurrence_rule from 'UNTIL=([0-9]{8})'), ''), '') = ''
-                              OR generated_at::date <= to_date(substring(t.recurrence_rule from 'UNTIL=([0-9]{8})'), 'YYYYMMDD')
-                          )
-                          AND (
-                              COALESCE(NULLIF(substring(t.recurrence_rule from 'BYDAY=([^;]+)'), ''), '') = ''
-                              OR position(
-                                  CASE EXTRACT(ISODOW FROM generated_at)::int
-                                      WHEN 1 THEN 'MO'
-                                      WHEN 2 THEN 'TU'
-                                      WHEN 3 THEN 'WE'
-                                      WHEN 4 THEN 'TH'
-                                      WHEN 5 THEN 'FR'
-                                      WHEN 6 THEN 'SA'
-                                      ELSE 'SU'
-                                  END
-                                  IN substring(t.recurrence_rule from 'BYDAY=([^;]+)')
-                              ) > 0
-                          )
-                          AND (
-                              COALESCE(NULLIF(substring(t.recurrence_rule from 'BYMONTHDAY=([^;]+)'), ''), '') = ''
-                              OR EXTRACT(DAY FROM generated_at)::int::text = ANY(string_to_array(substring(t.recurrence_rule from 'BYMONTHDAY=([^;]+)'), ','))
-                          )
                     ) occurrence
                     LEFT JOIN reminder_occurrence_dismissals rod
                       ON rod.tenant_id = t.tenant_id

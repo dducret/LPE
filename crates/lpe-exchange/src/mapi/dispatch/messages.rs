@@ -372,6 +372,20 @@ pub(super) fn stage_message_property_values(
     values: Vec<(u32, MapiValue)>,
 ) -> Result<()> {
     let handle = input_handle(handle_slots, request).ok_or_else(|| anyhow!("missing handle"))?;
+    if values
+        .iter()
+        .any(|(tag, _)| !saved_submission_property_upsert_is_supported(*tag))
+    {
+        return Err(anyhow!("MAPI saved Message property is not mutable"));
+    }
+    if let Some(deleted) = session.pending_message_property_deletions.get_mut(&handle) {
+        for (tag, _) in &values {
+            deleted.remove(&canonical_property_storage_tag(*tag));
+        }
+        if deleted.is_empty() {
+            session.pending_message_property_deletions.remove(&handle);
+        }
+    }
     let object = session
         .handles
         .get_mut(&handle)
@@ -385,20 +399,52 @@ pub(super) fn stage_message_property_values(
     let (canonical_values, _custom_values) = split_custom_property_values(values.clone());
     let followup_values = canonical_values
         .into_iter()
-        .filter(|(tag, _)| {
-            !matches!(
-                *tag,
-                PID_TAG_SUBJECT_W
-                    | PID_TAG_NORMALIZED_SUBJECT_W
-                    | PID_TAG_BODY_W
-                    | PID_TAG_SOURCE_KEY
-                    | PID_TAG_CHANGE_KEY
-                    | PID_TAG_PREDECESSOR_CHANGE_LIST
-            )
-        })
+        .filter(|(tag, _)| copyable_message_followup_property_tag(*tag))
         .collect::<Vec<_>>();
     message_followup_update_from_mapi_values(followup_values)?;
     apply_mapi_property_values_to_map(pending_properties, values);
+    Ok(())
+}
+
+pub(super) fn stage_message_property_deletions(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    property_tags: &[u32],
+) -> Result<()> {
+    let handle = input_handle(handle_slots, request).ok_or_else(|| anyhow!("missing handle"))?;
+    let object = session
+        .handles
+        .get_mut(&handle)
+        .ok_or_else(|| anyhow!("missing message object"))?;
+    let MapiObject::Message {
+        pending_properties, ..
+    } = object
+    else {
+        return Err(anyhow!("MAPI object is not a message"));
+    };
+    let storage_tags = property_tags
+        .iter()
+        .copied()
+        .map(canonical_property_storage_tag)
+        .collect::<Vec<_>>();
+    if storage_tags
+        .iter()
+        .copied()
+        .any(|tag| !saved_submission_property_deletion_is_supported(tag))
+    {
+        return Err(anyhow!(
+            "MAPI saved Message property deletion is not supported"
+        ));
+    }
+    for tag in &storage_tags {
+        pending_properties.remove(tag);
+    }
+    session
+        .pending_message_property_deletions
+        .entry(handle)
+        .or_default()
+        .extend(storage_tags);
     Ok(())
 }
 
@@ -538,7 +584,7 @@ where
     Ok(true)
 }
 
-fn copyable_message_followup_property_tag(tag: u32) -> bool {
+pub(super) fn copyable_message_followup_property_tag(tag: u32) -> bool {
     matches!(
         canonical_property_storage_tag(tag),
         PID_TAG_MESSAGE_FLAGS

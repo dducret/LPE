@@ -848,7 +848,8 @@ async fn mapi_over_http_submit_pending_message_uses_canonical_submission() {
     let submitted_messages = store.submitted_messages.clone();
     let emails = store.emails.clone();
     let projection_store = store.clone();
-    let service = ExchangeService::new(store);
+    let service =
+        ExchangeService::new_with_validator(store, Validator::new(FakeDetector::pdf(), 0.8));
     let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut property_values = Vec::new();
@@ -863,6 +864,15 @@ async fn mapi_over_http_submit_pending_message_uses_canonical_submission() {
 
     let to_row = mapi_recipient_row("Bob", "SMTP:bob@example.test", 0x01);
     let bcc_row = mapi_recipient_row("Hidden", "hidden@example.test", 0x03);
+    let attachment_bytes = b"%PDF-direct-pending-submit";
+    let mut attachment_properties = Vec::new();
+    append_mapi_utf16_property(
+        &mut attachment_properties,
+        0x3707_001F,
+        "direct-pending.pdf",
+    );
+    append_mapi_utf16_property(&mut attachment_properties, 0x370E_001F, "application/pdf");
+    append_mapi_binary_property(&mut attachment_properties, 0x3701_0102, attachment_bytes);
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Inbox
     ];
@@ -897,12 +907,18 @@ async fn mapi_over_http_submit_pending_message_uses_canonical_submission() {
         rops.extend_from_slice(&(row.len() as u16).to_le_bytes());
         rops.extend_from_slice(row);
     }
+    rops.extend_from_slice(&[0x23, 0x00, 0x02, 0x03]); // RopCreateAttachment
+    append_rop_set_properties(&mut rops, 3, 3, &attachment_properties);
+    rops.extend_from_slice(&[0x25, 0x00, 0x02, 0x03, 0x00]); // RopSaveChangesAttachment
     rops.extend_from_slice(&[
         0x32, 0x00, 0x02, 0x00, // RopSubmitMessage
     ]);
     append_rop_get_properties_specific(&mut rops, 2, &[0x0037_001F]);
 
-    let request = execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX]));
+    let request = execute_body(&rop_buffer(
+        &rops,
+        &[logon_handle, u32::MAX, u32::MAX, u32::MAX],
+    ));
     let response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
         .await
@@ -916,6 +932,7 @@ async fn mapi_over_http_submit_pending_message_uses_canonical_submission() {
     let response_rops = &rop_buffer[2..2 + response_rop_size];
 
     assert!(contains_bytes(response_rops, &[0x32, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(response_rops, &[0x25, 0x02, 0, 0, 0, 0]));
     assert!(contains_bytes(response_rops, &[0x07, 0x02, 0, 0, 0, 0]));
     assert!(contains_bytes(response_rops, &utf16z("Submit from MAPI")));
     {
@@ -930,6 +947,10 @@ async fn mapi_over_http_submit_pending_message_uses_canonical_submission() {
         assert_eq!(recorded[0].to[0].address, "bob@example.test");
         assert_eq!(recorded[0].bcc.len(), 1);
         assert_eq!(recorded[0].bcc[0].address, "hidden@example.test");
+        assert_eq!(recorded[0].attachments.len(), 1);
+        assert_eq!(recorded[0].attachments[0].file_name, "direct-pending.pdf");
+        assert_eq!(recorded[0].attachments[0].media_type, "application/pdf");
+        assert_eq!(recorded[0].attachments[0].blob_bytes, attachment_bytes);
         assert_eq!(
             recorded[0].internet_message_id.as_deref(),
             Some("<mapi-submit@example.test>")
@@ -1041,7 +1062,6 @@ async fn mapi_over_http_transport_send_uses_canonical_submission() {
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x4A, 0x02, 0, 0, 0, 0, 1]));
-
     {
         let recorded = submitted_messages.lock().unwrap();
         assert_eq!(recorded.len(), 1);
@@ -1075,6 +1095,201 @@ async fn mapi_over_http_transport_send_uses_canonical_submission() {
         .unwrap();
     assert_eq!(visible[0].mailbox_role, "sent");
     assert!(visible[0].bcc.is_empty());
+}
+
+struct OptimizedPostCommitFixture {
+    store: FakeStore,
+    service: ExchangeService<FakeStore>,
+    rops: Vec<u8>,
+    target_message_id: u64,
+    outbox_id: Uuid,
+}
+
+async fn optimized_post_commit_fixture(
+    fail_identity: bool,
+    identity_object_id_override: Option<u64>,
+    fail_mirror: bool,
+    invalid_target: bool,
+) -> OptimizedPostCommitFixture {
+    const PID_TAG_TARGET_ENTRY_ID: u32 = 0x3010_0102;
+
+    let account = FakeStore::account();
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let outbox_id = Uuid::parse_str("66666666-6666-6666-6666-666666666666").unwrap();
+    let sent_id = Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox"),
+            FakeStore::mailbox(&outbox_id.to_string(), "outbox", "Outbox"),
+            FakeStore::mailbox(&sent_id.to_string(), "sent", "Sent"),
+        ])),
+        fail_mapi_message_identity_allocation: fail_identity,
+        mapi_message_identity_object_id_override: identity_object_id_override,
+        fail_mapi_outbox_mirror: fail_mirror,
+        ..Default::default()
+    };
+    let mailboxes = store
+        .ensure_jmap_system_mailboxes(account.account_id)
+        .await
+        .unwrap();
+    let folder_identities = store
+        .fetch_or_allocate_mapi_identities(
+            account.account_id,
+            &crate::mapi_store::mapi_folder_identity_requests(&mailboxes),
+        )
+        .await
+        .unwrap();
+    let durable_inbox_id = folder_identities
+        .iter()
+        .find(|identity| identity.canonical_id == inbox_id)
+        .expect("durable Inbox identity")
+        .object_id;
+    let durable_outbox_id = folder_identities
+        .iter()
+        .find(|identity| identity.canonical_id == outbox_id)
+        .expect("durable Outbox identity")
+        .object_id;
+    let reservation_start = store
+        .reserve_mapi_local_replica_ids(account.account_id, 0x100)
+        .await
+        .unwrap();
+    let target_message_id = crate::mapi::identity::mapi_store_id(reservation_start + 7);
+    let target_entry_id = if invalid_target {
+        vec![0xFF; 16]
+    } else {
+        crate::mapi::identity::message_entry_id_from_object_ids(
+            account.account_id,
+            durable_outbox_id,
+            target_message_id,
+        )
+        .expect("optimized-send TargetEntryId")
+    };
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut property_values,
+        0x0037_001F,
+        "Post-commit optimized send",
+    );
+    append_mapi_utf16_property(&mut property_values, 0x1000_001F, "Post-commit body");
+    append_mapi_binary_property(
+        &mut property_values,
+        PID_TAG_TARGET_ENTRY_ID,
+        &target_entry_id,
+    );
+    let recipient = mapi_recipient_row("Bob", "bob@example.test", 0x01);
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, durable_inbox_id);
+    append_rop_create_message(&mut rops, 1, 2, durable_inbox_id);
+    append_rop_set_properties(&mut rops, 2, 3, &property_values);
+    append_rop_modify_recipients(&mut rops, 2, &[(1, 0x01, recipient.as_slice())]);
+    append_rop_transport_send(&mut rops, 2);
+
+    let service = ExchangeService::new(store.clone());
+    OptimizedPostCommitFixture {
+        store,
+        service,
+        rops,
+        target_message_id,
+        outbox_id,
+    }
+}
+
+async fn execute_optimized_post_commit_fixture(
+    fixture: &OptimizedPostCommitFixture,
+    probe_submitted_handle: bool,
+) -> Vec<u8> {
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&fixture.service).await;
+    let mut rops = fixture.rops.clone();
+    if probe_submitted_handle {
+        append_rop_get_properties_specific(&mut rops, 2, &[0x0037_001F]);
+    }
+    let response = fixture
+        .service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    response_rops_from_execute_response(response).await
+}
+
+#[tokio::test]
+async fn mapi_submit_identity_failure_is_success_and_retires_the_issued_handle() {
+    let fixture = optimized_post_commit_fixture(true, None, false, false).await;
+    let response = execute_optimized_post_commit_fixture(&fixture, true).await;
+
+    assert!(contains_bytes(&response, &[0x4A, 0x02, 0, 0, 0, 0, 1]));
+    assert!(contains_bytes(
+        &response,
+        &[0x07, 0x02, 0x08, 0x01, 0x04, 0x80]
+    ));
+    assert_eq!(fixture.store.submitted_messages.lock().unwrap().len(), 1);
+    assert_eq!(fixture.store.emails.lock().unwrap().len(), 1);
+    assert!(!fixture
+        .store
+        .mapi_identities
+        .lock()
+        .unwrap()
+        .contains_key(&Uuid::parse_str("ffffffff-ffff-ffff-ffff-ffffffffffff").unwrap()));
+}
+
+#[tokio::test]
+async fn mapi_optimized_send_mirror_failure_replays_from_durable_sent_without_duplicate() {
+    let fixture = optimized_post_commit_fixture(false, None, true, false).await;
+    let response = execute_optimized_post_commit_fixture(&fixture, true).await;
+    assert!(contains_bytes(&response, &[0x4A, 0x02, 0, 0, 0, 0, 1]));
+    assert!(contains_bytes(&response, &[0x07, 0x02, 0, 0, 0, 0]));
+    assert_eq!(fixture.store.submitted_messages.lock().unwrap().len(), 1);
+    {
+        let emails = fixture.store.emails.lock().unwrap();
+        assert_eq!(emails.len(), 1);
+        assert!(!emails[0].mailbox_ids.contains(&fixture.outbox_id));
+    }
+
+    let retry = execute_optimized_post_commit_fixture(&fixture, false).await;
+    assert!(contains_bytes(&retry, &[0x4A, 0x02, 0, 0, 0, 0, 1]));
+    assert_eq!(fixture.store.submitted_messages.lock().unwrap().len(), 1);
+    assert_eq!(fixture.store.emails.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn mapi_optimized_send_identity_mismatch_uses_actual_identity_and_replays() {
+    let actual_message_id = crate::mapi::identity::mapi_store_id(0x0000_0000_00F0_0001);
+    let fixture = optimized_post_commit_fixture(false, Some(actual_message_id), false, false).await;
+    let response = execute_optimized_post_commit_fixture(&fixture, true).await;
+    assert!(contains_bytes(&response, &[0x4A, 0x02, 0, 0, 0, 0, 1]));
+    assert!(contains_bytes(&response, &[0x07, 0x02, 0, 0, 0, 0]));
+    assert_ne!(fixture.target_message_id, actual_message_id);
+    assert_eq!(
+        fixture.store.mapi_identities.lock().unwrap()
+            [&Uuid::parse_str("ffffffff-ffff-ffff-ffff-ffffffffffff").unwrap()],
+        actual_message_id
+    );
+    assert!(!fixture.store.emails.lock().unwrap()[0]
+        .mailbox_ids
+        .contains(&fixture.outbox_id));
+
+    let retry = execute_optimized_post_commit_fixture(&fixture, false).await;
+    assert!(contains_bytes(&retry, &[0x4A, 0x02, 0, 0, 0, 0, 1]));
+    assert_eq!(fixture.store.submitted_messages.lock().unwrap().len(), 1);
+    assert_eq!(fixture.store.emails.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn mapi_optimized_send_invalid_target_fails_before_canonical_submission() {
+    let fixture = optimized_post_commit_fixture(false, None, false, true).await;
+    let response = execute_optimized_post_commit_fixture(&fixture, false).await;
+
+    assert!(contains_bytes(
+        &response,
+        &[0x4A, 0x02, 0x57, 0x00, 0x07, 0x80]
+    ));
+    assert!(fixture.store.submitted_messages.lock().unwrap().is_empty());
+    assert!(fixture.store.emails.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -1467,8 +1682,8 @@ async fn mapi_over_http_transport_send_target_entry_id_uses_outbox_mirror_and_im
 }
 
 #[tokio::test]
-async fn mapi_over_http_transport_send_opened_draft_preserves_canonical_attachment_and_bcc_guards()
-{
+async fn mapi_over_http_transport_send_opened_draft_defers_canonical_attachment_hydration_and_preserves_bcc_guards(
+) {
     let draft_id = Uuid::parse_str("20202020-2020-2020-2020-202020202020").unwrap();
     let draft_mailbox_id = Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap();
     let sent_mailbox_id = Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
@@ -1519,6 +1734,7 @@ async fn mapi_over_http_transport_send_opened_draft_preserves_canonical_attachme
         ..Default::default()
     };
     let submitted_messages = store.submitted_messages.clone();
+    let submitted_draft_messages = store.submitted_draft_messages.clone();
     let emails = store.emails.clone();
     let projection_store = store.clone();
     let service = ExchangeService::new(store);
@@ -1544,6 +1760,11 @@ async fn mapi_over_http_transport_send_opened_draft_preserves_canonical_attachme
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x4A, 0x02, 0, 0, 0, 0, 1]));
+    assert_eq!(
+        submitted_draft_messages.lock().unwrap().as_slice(),
+        &[draft_id],
+        "opened Drafts messages must use the persisted-source submission API"
+    );
 
     {
         let recorded = submitted_messages.lock().unwrap();
@@ -1552,18 +1773,10 @@ async fn mapi_over_http_transport_send_opened_draft_preserves_canonical_attachme
         assert_eq!(recorded[0].draft_message_id, Some(draft_id));
         assert_eq!(recorded[0].subject, "Transport saved draft");
         assert_eq!(recorded[0].bcc[0].address, "transport-hidden@example.test");
-        assert_eq!(recorded[0].attachments.len(), 1);
-        assert_eq!(recorded[0].attachments[0].file_name, "transport-inline.png");
-        assert_eq!(recorded[0].attachments[0].media_type, "image/png");
-        assert_eq!(
-            recorded[0].attachments[0].disposition.as_deref(),
-            Some("inline")
+        assert!(
+            recorded[0].attachments.is_empty(),
+            "saved MAPI submit must let canonical storage hydrate the exact source MIME graph"
         );
-        assert_eq!(
-            recorded[0].attachments[0].content_id.as_deref(),
-            Some("transport-inline.png@01C86E1C.F1954390")
-        );
-        assert_eq!(recorded[0].attachments[0].blob_bytes, b"PNGDATA");
     }
 
     let sent = {
@@ -1649,6 +1862,7 @@ async fn mapi_over_http_transport_send_opened_outbox_message_uses_canonical_subm
         ..Default::default()
     };
     let submitted_messages = store.submitted_messages.clone();
+    let submitted_draft_messages = store.submitted_draft_messages.clone();
     let emails = store.emails.clone();
     let service = ExchangeService::new(store);
     let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
@@ -1673,6 +1887,11 @@ async fn mapi_over_http_transport_send_opened_outbox_message_uses_canonical_subm
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x4A, 0x02, 0, 0, 0, 0, 1]));
+    assert_eq!(
+        submitted_draft_messages.lock().unwrap().as_slice(),
+        &[outbox_message_id],
+        "opened Outbox messages must use the persisted-source submission API"
+    );
 
     {
         let recorded = submitted_messages.lock().unwrap();
@@ -1813,7 +2032,8 @@ async fn mapi_over_http_duplicate_execute_request_id_with_different_body_does_no
 }
 
 #[tokio::test]
-async fn mapi_over_http_submit_opened_draft_uses_source_draft_id() {
+async fn mapi_over_http_submit_opened_draft_defers_scheduling_mime_hydration_to_canonical_storage()
+{
     let draft_id = Uuid::parse_str("20202020-2020-2020-2020-202020202020").unwrap();
     let draft_mailbox_id = Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap();
     let mut draft = FakeStore::email(
@@ -1846,9 +2066,9 @@ async fn mapi_over_http_submit_opened_draft_uses_source_draft_id() {
             vec![ActiveSyncAttachment {
                 id: attachment_id,
                 message_id: draft_id,
-                file_name: "draft.pdf".to_string(),
-                media_type: "application/pdf".to_string(),
-                disposition: None,
+                file_name: "response.ics".to_string(),
+                media_type: "text/calendar; method=REPLY; charset=UTF-8".to_string(),
+                disposition: Some("inline".to_string()),
                 content_id: None,
                 size_octets: 7,
                 file_reference: attachment_reference.clone(),
@@ -1858,9 +2078,9 @@ async fn mapi_over_http_submit_opened_draft_uses_source_draft_id() {
             attachment_reference.clone(),
             ActiveSyncAttachmentContent {
                 file_reference: attachment_reference,
-                file_name: "draft.pdf".to_string(),
-                media_type: "application/pdf".to_string(),
-                blob_bytes: b"PDFDATA".to_vec(),
+                file_name: "response.ics".to_string(),
+                media_type: "text/calendar; method=REPLY; charset=UTF-8".to_string(),
+                blob_bytes: b"BEGIN:VCALENDAR\r\nMETHOD:REPLY\r\nEND:VCALENDAR\r\n".to_vec(),
                 ..Default::default()
             },
         )]))),
@@ -1868,6 +2088,7 @@ async fn mapi_over_http_submit_opened_draft_uses_source_draft_id() {
         ..Default::default()
     };
     let submitted_messages = store.submitted_messages.clone();
+    let submitted_draft_messages = store.submitted_draft_messages.clone();
     let emails = store.emails.clone();
     let service = ExchangeService::new(store);
     let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
@@ -1902,6 +2123,11 @@ async fn mapi_over_http_submit_opened_draft_uses_source_draft_id() {
     let response_rops = &rop_buffer[2..2 + response_rop_size];
 
     assert!(contains_bytes(response_rops, &[0x32, 0x02, 0, 0, 0, 0]));
+    assert_eq!(
+        submitted_draft_messages.lock().unwrap().as_slice(),
+        &[draft_id],
+        "RopSubmitMessage on an opened draft must use the persisted-source submission API"
+    );
     let recorded = submitted_messages.lock().unwrap();
     assert_eq!(recorded.len(), 1);
     assert_eq!(recorded[0].source, "mapi-submit-message");
@@ -1911,16 +2137,614 @@ async fn mapi_over_http_submit_opened_draft_uses_source_draft_id() {
     assert_eq!(recorded[0].to[0].address, "bob@example.test");
     assert_eq!(recorded[0].cc[0].address, "carol@example.test");
     assert_eq!(recorded[0].bcc[0].address, "hidden@example.test");
-    assert_eq!(recorded[0].attachments.len(), 1);
-    assert_eq!(recorded[0].attachments[0].file_name, "draft.pdf");
-    assert_eq!(recorded[0].attachments[0].media_type, "application/pdf");
-    assert_eq!(recorded[0].attachments[0].blob_bytes, b"PDFDATA");
+    assert!(
+        recorded[0].attachments.is_empty(),
+        "saved MAPI submit must not flatten the canonical source MIME graph"
+    );
     let canonical = emails.lock().unwrap();
     let sent = canonical
         .iter()
         .find(|email| email.mailbox_role == "sent")
         .expect("submitted draft is visible in canonical Sent");
     assert!(sent.has_attachments);
+}
+
+#[tokio::test]
+async fn mapi_over_http_submit_opened_draft_atomically_applies_unsaved_editor_overlay() {
+    let draft_id = Uuid::parse_str("21212121-2121-2121-2121-212121212121").unwrap();
+    let draft_mailbox_id = Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap();
+    let deleted_attachment_id = Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap();
+    let deleted_reference = format!("attachment:{draft_id}:{deleted_attachment_id}");
+    let mut draft = FakeStore::email(
+        &draft_id.to_string(),
+        &draft_mailbox_id.to_string(),
+        "drafts",
+        "Persisted subject",
+    );
+    draft.body_text = "Persisted body".to_string();
+    draft.has_attachments = true;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &draft_mailbox_id.to_string(),
+            "drafts",
+            "Drafts",
+        )])),
+        emails: Arc::new(Mutex::new(vec![draft])),
+        attachments: Arc::new(Mutex::new(HashMap::from([(
+            draft_id,
+            vec![ActiveSyncAttachment {
+                id: deleted_attachment_id,
+                message_id: draft_id,
+                file_name: "old.txt".to_string(),
+                media_type: "text/plain".to_string(),
+                disposition: Some("attachment".to_string()),
+                content_id: None,
+                size_octets: 3,
+                file_reference: deleted_reference.clone(),
+            }],
+        )]))),
+        attachment_contents: Arc::new(Mutex::new(HashMap::from([(
+            deleted_reference.clone(),
+            ActiveSyncAttachmentContent {
+                file_reference: deleted_reference,
+                file_name: "old.txt".to_string(),
+                media_type: "text/plain".to_string(),
+                blob_bytes: b"old".to_vec(),
+                ..Default::default()
+            },
+        )]))),
+        ..Default::default()
+    };
+    let submitted_messages = store.submitted_messages.clone();
+    let submitted_source_patches = store.submitted_source_patches.clone();
+    let submitted_draft_messages = store.submitted_draft_messages.clone();
+    let service =
+        ExchangeService::new_with_validator(store, Validator::new(FakeDetector::text(), 0.8));
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
+
+    let mut message_properties = Vec::new();
+    append_mapi_utf16_property(&mut message_properties, 0x0037_001F, "Unsaved subject");
+    append_mapi_utf16_property(&mut message_properties, 0x1000_001F, "Unsaved body");
+    append_mapi_utf16_property(&mut message_properties, 0x9001_001F, "provider value");
+    let replacement_recipient = mapi_recipient_row("Carol", "carol@example.test", 0x01);
+    let mut new_attachment_properties = Vec::new();
+    append_mapi_utf16_property(&mut new_attachment_properties, 0x3707_001F, "new.txt");
+    append_mapi_utf16_property(&mut new_attachment_properties, 0x370E_001F, "text/plain");
+    append_mapi_binary_property(
+        &mut new_attachment_properties,
+        0x3701_0102,
+        b"new attachment",
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(14));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(14),
+        test_mapi_message_id(&draft_id.to_string()),
+    );
+    append_rop_set_properties(&mut rops, 2, 3, &message_properties);
+    append_rop_modify_recipients(&mut rops, 2, &[(0, 0x01, replacement_recipient.as_slice())]);
+    append_rop_delete_properties(&mut rops, 2, &[0x9002_001F, 0x1090_0003]);
+    rops.extend_from_slice(&[0x24, 0x00, 0x02]); // RopDeleteAttachment
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&[0x23, 0x00, 0x02, 0x03]); // RopCreateAttachment
+    append_rop_set_properties(&mut rops, 3, 3, &new_attachment_properties);
+    rops.extend_from_slice(&[0x25, 0x00, 0x02, 0x03, 0x00]); // RopSaveChangesAttachment
+    append_rop_submit_message(&mut rops, 2);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &rops,
+                &[logon_handle, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(&response_rops, &[0x32, 0x02, 0, 0, 0, 0]));
+    assert!(submitted_draft_messages.lock().unwrap().is_empty());
+    let submitted = submitted_messages.lock().unwrap();
+    assert_eq!(
+        submitted.len(),
+        1,
+        "unexpected submit inputs: {:?}",
+        submitted
+            .iter()
+            .map(|input| (&input.subject, input.attachments.len()))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(submitted[0].subject, "Unsaved subject");
+    assert_eq!(submitted[0].body_text, "Unsaved body");
+    assert_eq!(submitted[0].to.len(), 1);
+    assert_eq!(submitted[0].to[0].address, "carol@example.test");
+    assert_eq!(submitted[0].attachments.len(), 1);
+    assert_eq!(submitted[0].attachments[0].file_name, "new.txt");
+    assert_eq!(submitted[0].attachments[0].blob_bytes, b"new attachment");
+    drop(submitted);
+
+    let patches = submitted_source_patches.lock().unwrap();
+    assert_eq!(patches.len(), 1);
+    assert_eq!(patches[0].expected_source_modseq, Some(41));
+    assert_eq!(
+        patches[0].delete_attachment_ids,
+        vec![deleted_attachment_id]
+    );
+    assert_eq!(
+        patches[0]
+            .custom_property_upserts
+            .iter()
+            .map(|value| value.property_tag)
+            .collect::<Vec<_>>(),
+        vec![0x9001_001F]
+    );
+    assert_eq!(patches[0].delete_custom_property_tags, vec![0x9002_001F]);
+    let followup = patches[0]
+        .canonical_followup_update
+        .as_ref()
+        .expect("saved DeleteProperties is part of the source patch");
+    assert_eq!(followup.flagged, Some(false));
+    assert_eq!(followup.followup_flag_status.as_deref(), Some("none"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_submit_saved_counter_regenerates_only_pending_proposed_time() {
+    let draft_id = Uuid::parse_str("31313131-3131-3131-3131-313131313131").unwrap();
+    let draft_mailbox_id = Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap();
+    let transport_attachment_id = Uuid::parse_str("acacacac-acac-acac-acac-acacacacacac").unwrap();
+    let transport_reference = format!("attachment:{draft_id}:{transport_attachment_id}");
+    let mut draft = FakeStore::email(
+        &draft_id.to_string(),
+        &draft_mailbox_id.to_string(),
+        "drafts",
+        "New Time Proposed: Probe overlay",
+    );
+    draft.to[0].address = "organizer@example.test".to_string();
+    draft.to[0].display_name = Some("Organizer".to_string());
+    draft.has_attachments = true;
+    draft.calendar_meeting_response = Some(lpe_storage::CalendarMeetingResponse {
+        method: "COUNTER".to_string(),
+        transport_attachment_id: Some(transport_attachment_id),
+        server_processed: false,
+        organizer: Some(lpe_storage::CalendarMeetingIdentity {
+            email: "organizer@example.test".to_string(),
+            display_name: "Organizer".to_string(),
+        }),
+        attendee_email: "alice@example.test".to_string(),
+        attendee_name: "Alice".to_string(),
+        partstat: "tentative".to_string(),
+        uid: "saved-counter-overlay@example.test".to_string(),
+        response_sent_at: Some("2026-08-24T08:00:00Z".to_string()),
+        meeting_start: Some("2026-08-25T09:00:00Z".to_string()),
+        meeting_end: Some("2026-08-25T09:30:00Z".to_string()),
+        meeting_location: Some("Room 1".to_string()),
+        meeting_sequence: Some(2),
+        proposed_start: Some("2026-08-25T10:00:00Z".to_string()),
+        proposed_end: Some("2026-08-25T10:30:00Z".to_string()),
+        original_start: Some("2026-08-25T09:00:00Z".to_string()),
+        original_end: Some("2026-08-25T09:30:00Z".to_string()),
+    });
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &draft_mailbox_id.to_string(),
+            "drafts",
+            "Drafts",
+        )])),
+        emails: Arc::new(Mutex::new(vec![draft])),
+        attachments: Arc::new(Mutex::new(HashMap::from([(
+            draft_id,
+            vec![ActiveSyncAttachment {
+                id: transport_attachment_id,
+                message_id: draft_id,
+                file_name: "response.ics".to_string(),
+                media_type: "text/calendar; method=COUNTER; charset=UTF-8".to_string(),
+                disposition: Some("inline".to_string()),
+                content_id: None,
+                size_octets: 64,
+                file_reference: transport_reference.clone(),
+            }],
+        )]))),
+        attachment_contents: Arc::new(Mutex::new(HashMap::from([(
+            transport_reference.clone(),
+            ActiveSyncAttachmentContent {
+                file_reference: transport_reference,
+                file_name: "response.ics".to_string(),
+                media_type: "text/calendar; method=COUNTER; charset=UTF-8".to_string(),
+                blob_bytes: b"BEGIN:VCALENDAR\r\nMETHOD:COUNTER\r\nEND:VCALENDAR\r\n".to_vec(),
+                ..Default::default()
+            },
+        )]))),
+        ..Default::default()
+    };
+    let submitted_messages = store.submitted_messages.clone();
+    let submitted_source_patches = store.submitted_source_patches.clone();
+    let service = ExchangeService::new(store);
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
+
+    let mut proposed_times = Vec::new();
+    append_mapi_i64_property(
+        &mut proposed_times,
+        0x8250_0040,
+        test_filetime("2026-08-25", "11:00"),
+    );
+    append_mapi_i64_property(
+        &mut proposed_times,
+        0x8251_0040,
+        test_filetime("2026-08-25", "11:30"),
+    );
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(14));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(14),
+        test_mapi_message_id(&draft_id.to_string()),
+    );
+    append_rop_set_properties(&mut rops, 2, 2, &proposed_times);
+    append_rop_submit_message(&mut rops, 2);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x32, 0x02, 0, 0, 0, 0]));
+
+    let submitted = submitted_messages.lock().unwrap();
+    assert_eq!(submitted.len(), 1);
+    assert_eq!(submitted[0].attachments.len(), 1);
+    let calendar = String::from_utf8_lossy(&submitted[0].attachments[0].blob_bytes);
+    assert!(calendar.contains("METHOD:COUNTER"));
+    assert!(calendar.contains("DTSTART:20260825T110000Z"));
+    assert!(calendar.contains("DTEND:20260825T113000Z"));
+    assert!(calendar.contains("X-MS-OLK-ORIGINALSTART:20260825T090000Z"));
+    drop(submitted);
+    assert_eq!(
+        submitted_source_patches.lock().unwrap()[0].delete_attachment_ids,
+        vec![transport_attachment_id]
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_submit_saved_request_regenerates_pending_sequence() {
+    let draft_id = Uuid::parse_str("41414141-4141-4141-4141-414141414141").unwrap();
+    let draft_mailbox_id = Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap();
+    let mut draft = FakeStore::email(
+        &draft_id.to_string(),
+        &draft_mailbox_id.to_string(),
+        "drafts",
+        "Saved request sequence",
+    );
+    draft.calendar_invitation = true;
+    draft.calendar_meeting_request = Some(lpe_storage::CalendarMeetingRequest {
+        uid: "saved-request-sequence@example.test".to_string(),
+        transport_attachment_id: None,
+        organizer: Some(lpe_storage::CalendarMeetingIdentity {
+            email: "alice@example.test".to_string(),
+            display_name: "Alice".to_string(),
+        }),
+        attendees: vec![lpe_storage::CalendarMeetingAttendee {
+            email: "bob@example.test".to_string(),
+            display_name: "Bob".to_string(),
+            cutype: "INDIVIDUAL".to_string(),
+            role: "REQ-PARTICIPANT".to_string(),
+            partstat: "needs-action".to_string(),
+            rsvp: true,
+        }],
+        response_requested: true,
+        sent_at: Some("2026-08-24T08:00:00Z".to_string()),
+        meeting_start: "2026-08-25T09:00:00Z".to_string(),
+        meeting_end: "2026-08-25T09:30:00Z".to_string(),
+        meeting_location: Some("Room 1".to_string()),
+        meeting_sequence: 2,
+        intended_busy_status: 2,
+    });
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &draft_mailbox_id.to_string(),
+            "drafts",
+            "Drafts",
+        )])),
+        emails: Arc::new(Mutex::new(vec![draft])),
+        ..Default::default()
+    };
+    let submitted_messages = store.submitted_messages.clone();
+    let submitted_source_patches = store.submitted_source_patches.clone();
+    let service = ExchangeService::new(store);
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
+
+    let mut sequence = Vec::new();
+    append_mapi_i32_property(&mut sequence, 0x8201_0003, 3);
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(14));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(14),
+        test_mapi_message_id(&draft_id.to_string()),
+    );
+    append_rop_set_properties(&mut rops, 2, 1, &sequence);
+    append_rop_submit_message(&mut rops, 2);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x32, 0x02, 0, 0, 0, 0]));
+
+    let submitted = submitted_messages.lock().unwrap();
+    assert_eq!(submitted.len(), 1);
+    assert_eq!(submitted[0].attachments.len(), 1);
+    let calendar = String::from_utf8_lossy(&submitted[0].attachments[0].blob_bytes);
+    assert!(calendar.contains("METHOD:REQUEST"));
+    assert!(calendar.contains("SEQUENCE:3"));
+    drop(submitted);
+    assert_eq!(submitted_source_patches.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn mapi_over_http_submit_saved_request_regenerates_selected_ics_staged_for_deletion() {
+    let draft_id = Uuid::parse_str("42424242-4242-4242-4242-424242424242").unwrap();
+    let draft_mailbox_id = Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap();
+    let transport_attachment_id = Uuid::parse_str("aeaeaeae-aeae-aeae-aeae-aeaeaeaeaeae").unwrap();
+    let transport_reference = format!("attachment:{draft_id}:{transport_attachment_id}");
+    let mut draft = FakeStore::email(
+        &draft_id.to_string(),
+        &draft_mailbox_id.to_string(),
+        "drafts",
+        "Saved request selected body deletion",
+    );
+    draft.calendar_invitation = true;
+    draft.has_attachments = true;
+    draft.calendar_meeting_request = Some(lpe_storage::CalendarMeetingRequest {
+        uid: "saved-request-deleted-body@example.test".to_string(),
+        transport_attachment_id: None,
+        organizer: Some(lpe_storage::CalendarMeetingIdentity {
+            email: "alice@example.test".to_string(),
+            display_name: "Alice".to_string(),
+        }),
+        attendees: vec![lpe_storage::CalendarMeetingAttendee {
+            email: "bob@example.test".to_string(),
+            display_name: "Bob".to_string(),
+            cutype: "INDIVIDUAL".to_string(),
+            role: "REQ-PARTICIPANT".to_string(),
+            partstat: "needs-action".to_string(),
+            rsvp: true,
+        }],
+        response_requested: true,
+        sent_at: Some("2026-08-24T08:00:00Z".to_string()),
+        meeting_start: "2026-08-25T09:00:00Z".to_string(),
+        meeting_end: "2026-08-25T09:30:00Z".to_string(),
+        meeting_location: Some("Room 1".to_string()),
+        meeting_sequence: 2,
+        intended_busy_status: 2,
+    });
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &draft_mailbox_id.to_string(),
+            "drafts",
+            "Drafts",
+        )])),
+        emails: Arc::new(Mutex::new(vec![draft])),
+        attachments: Arc::new(Mutex::new(HashMap::from([(
+            draft_id,
+            vec![ActiveSyncAttachment {
+                id: transport_attachment_id,
+                message_id: draft_id,
+                file_name: "invite.ics".to_string(),
+                media_type: "text/calendar; method=REQUEST; charset=UTF-8".to_string(),
+                disposition: Some("inline".to_string()),
+                content_id: None,
+                size_octets: 64,
+                file_reference: transport_reference,
+            }],
+        )]))),
+        ..Default::default()
+    };
+    let submitted_messages = store.submitted_messages.clone();
+    let submitted_source_patches = store.submitted_source_patches.clone();
+    let emails = store.emails.clone();
+    let service = ExchangeService::new(store);
+    let (mut execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(14));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(14),
+        test_mapi_message_id(&draft_id.to_string()),
+    );
+    rops.extend_from_slice(&[0x24, 0x00, 0x02]); // RopDeleteAttachment
+    rops.extend_from_slice(&0u32.to_le_bytes());
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(
+        contains_bytes(&response_rops, &[0x24, 0x02, 0, 0, 0, 0]),
+        "unexpected RopDeleteAttachment response: {response_rops:02x?}"
+    );
+
+    emails.lock().unwrap()[0]
+        .calendar_meeting_request
+        .as_mut()
+        .unwrap()
+        .transport_attachment_id = Some(transport_attachment_id);
+    renew_mapi_request_id(&mut execute_headers);
+    let mut submit_rops = Vec::new();
+    append_rop_open_folder(&mut submit_rops, 0, 1, test_mapi_folder_id(14));
+    append_rop_open_message(
+        &mut submit_rops,
+        1,
+        2,
+        test_mapi_folder_id(14),
+        test_mapi_message_id(&draft_id.to_string()),
+    );
+    append_rop_submit_message(&mut submit_rops, 2);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &submit_rops,
+                &[logon_handle, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x32, 0x02, 0, 0, 0, 0]));
+
+    let submitted = submitted_messages.lock().unwrap();
+    assert_eq!(submitted.len(), 1);
+    assert_eq!(submitted[0].attachments.len(), 1);
+    let calendar = String::from_utf8_lossy(&submitted[0].attachments[0].blob_bytes);
+    assert!(calendar.contains("METHOD:REQUEST"));
+    assert!(calendar.contains("UID:saved-request-deleted-body@example.test"));
+    drop(submitted);
+    assert_eq!(
+        submitted_source_patches.lock().unwrap()[0].delete_attachment_ids,
+        vec![transport_attachment_id]
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_submit_saved_meeting_as_ordinary_deletes_stale_scheduling_body() {
+    let draft_id = Uuid::parse_str("51515151-5151-5151-5151-515151515151").unwrap();
+    let draft_mailbox_id = Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap();
+    let transport_attachment_id = Uuid::parse_str("adadadad-adad-adad-adad-adadadadadad").unwrap();
+    let transport_reference = format!("attachment:{draft_id}:{transport_attachment_id}");
+    let mut draft = FakeStore::email(
+        &draft_id.to_string(),
+        &draft_mailbox_id.to_string(),
+        "drafts",
+        "Meeting converted to note",
+    );
+    draft.calendar_invitation = true;
+    draft.has_attachments = true;
+    draft.calendar_meeting_request = Some(lpe_storage::CalendarMeetingRequest {
+        uid: "meeting-converted-to-note@example.test".to_string(),
+        transport_attachment_id: Some(transport_attachment_id),
+        organizer: Some(lpe_storage::CalendarMeetingIdentity {
+            email: "alice@example.test".to_string(),
+            display_name: "Alice".to_string(),
+        }),
+        attendees: vec![lpe_storage::CalendarMeetingAttendee {
+            email: "bob@example.test".to_string(),
+            display_name: "Bob".to_string(),
+            cutype: "INDIVIDUAL".to_string(),
+            role: "REQ-PARTICIPANT".to_string(),
+            partstat: "needs-action".to_string(),
+            rsvp: true,
+        }],
+        response_requested: true,
+        sent_at: Some("2026-08-24T08:00:00Z".to_string()),
+        meeting_start: "2026-08-25T09:00:00Z".to_string(),
+        meeting_end: "2026-08-25T09:30:00Z".to_string(),
+        meeting_location: None,
+        meeting_sequence: 2,
+        intended_busy_status: 2,
+    });
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &draft_mailbox_id.to_string(),
+            "drafts",
+            "Drafts",
+        )])),
+        emails: Arc::new(Mutex::new(vec![draft])),
+        attachments: Arc::new(Mutex::new(HashMap::from([(
+            draft_id,
+            vec![ActiveSyncAttachment {
+                id: transport_attachment_id,
+                message_id: draft_id,
+                file_name: "invite.ics".to_string(),
+                media_type: "text/calendar; method=REQUEST; charset=UTF-8".to_string(),
+                disposition: Some("inline".to_string()),
+                content_id: None,
+                size_octets: 64,
+                file_reference: transport_reference.clone(),
+            }],
+        )]))),
+        attachment_contents: Arc::new(Mutex::new(HashMap::from([(
+            transport_reference.clone(),
+            ActiveSyncAttachmentContent {
+                file_reference: transport_reference,
+                file_name: "invite.ics".to_string(),
+                media_type: "text/calendar; method=REQUEST; charset=UTF-8".to_string(),
+                blob_bytes: b"BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nEND:VCALENDAR\r\n".to_vec(),
+                ..Default::default()
+            },
+        )]))),
+        ..Default::default()
+    };
+    let submitted_messages = store.submitted_messages.clone();
+    let submitted_source_patches = store.submitted_source_patches.clone();
+    let service = ExchangeService::new(store);
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
+
+    let mut message_class = Vec::new();
+    append_mapi_utf16_property(&mut message_class, 0x001A_001F, "IPM.Note");
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(14));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(14),
+        test_mapi_message_id(&draft_id.to_string()),
+    );
+    append_rop_set_properties(&mut rops, 2, 1, &message_class);
+    append_rop_submit_message(&mut rops, 2);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x32, 0x02, 0, 0, 0, 0]));
+    let submitted = submitted_messages.lock().unwrap();
+    assert!(submitted[0].attachments.is_empty());
+    assert_eq!(submitted[0].to.len(), 1);
+    assert_eq!(submitted[0].to[0].address, "bob@example.test");
+    drop(submitted);
+    assert_eq!(
+        submitted_source_patches.lock().unwrap()[0].delete_attachment_ids,
+        vec![transport_attachment_id]
+    );
 }
 
 #[tokio::test]
@@ -1977,11 +2801,19 @@ async fn mapi_over_http_open_message_returns_visible_recipient_rows() {
         2
     );
     offset += 2;
+    let recipient_column_count =
+        u16::from_le_bytes(response_rops[offset..offset + 2].try_into().unwrap()) as usize;
     assert_eq!(
-        u16::from_le_bytes(response_rops[offset..offset + 2].try_into().unwrap()),
-        0
+        recipient_column_count,
+        crate::mapi::MESSAGE_RECIPIENT_COLUMNS.len()
     );
     offset += 2;
+    let recipient_columns = response_rops[offset..offset + recipient_column_count * 4]
+        .chunks_exact(4)
+        .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+        .collect::<Vec<_>>();
+    assert_eq!(recipient_columns, crate::mapi::MESSAGE_RECIPIENT_COLUMNS);
+    offset += recipient_column_count * 4;
     assert_eq!(response_rops[offset], 2);
     assert!(contains_bytes(
         &response_rops[offset + 1..],

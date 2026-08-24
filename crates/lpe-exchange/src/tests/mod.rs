@@ -1,5 +1,5 @@
-use anyhow::bail;
 use crate::store::EwsTransferExport;
+use anyhow::bail;
 use argon2::password_hash::{rand_core::OsRng, PasswordHasher, SaltString};
 use axum::body::{to_bytes, Body};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
@@ -28,10 +28,10 @@ use lpe_storage::{
     PublicFolderPermissionInput, PublicFolderReplica, PublicFolderRights, PublicFolderTree,
     ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput,
     SenderDelegationRight, SieveScriptDocument, Storage, StoredAccountAppPassword,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpdatePublicFolderInput,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
-    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
-    UpsertSearchFolderInput,
+    SubmissionSourcePatch, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    UpdatePublicFolderInput, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientNoteInput, UpsertClientTaskInput, UpsertConversationActionInput,
+    UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{PgPool, Row};
@@ -700,6 +700,7 @@ async fn postgres_mapi_mailbox_content_commit_time_tracks_canonical_mail_mutatio
                 media_type: "text/plain".to_string(),
                 disposition: Some("attachment".to_string()),
                 content_id: None,
+                is_scheduling_body: false,
                 blob_bytes: b"canonical attachment".to_vec(),
             },
             postgres_mapi_audit("mapi-add-attachment", imported.id),
@@ -4251,6 +4252,7 @@ struct FakeStore {
     attachment_contents: Arc<Mutex<HashMap<String, ActiveSyncAttachmentContent>>>,
     created_attachments: Arc<Mutex<Vec<AttachmentUploadInput>>>,
     submitted_messages: Arc<Mutex<Vec<SubmitMessageInput>>>,
+    submitted_source_patches: Arc<Mutex<Vec<SubmissionSourcePatch>>>,
     submitted_message_audits: Arc<Mutex<Vec<lpe_storage::AuditEntryInput>>>,
     submitted_draft_messages: Arc<Mutex<Vec<Uuid>>>,
     cancelled_submissions: Arc<Mutex<Vec<Uuid>>>,
@@ -4276,6 +4278,8 @@ struct FakeStore {
     ews_im_groups: Arc<Mutex<Vec<EwsImGroup>>>,
     ews_im_group_members: Arc<Mutex<Vec<EwsImGroupMember>>>,
     mapi_identities: Arc<Mutex<HashMap<Uuid, u64>>>,
+    fail_mapi_message_identity_allocation: bool,
+    mapi_message_identity_object_id_override: Option<u64>,
     retired_mapi_identities: Arc<Mutex<Vec<MapiIdentityLookupRecord>>>,
     mapi_identity_source_keys: Arc<Mutex<HashMap<Uuid, Vec<u8>>>>,
     mapi_identity_change_numbers: Arc<Mutex<HashMap<Uuid, u64>>>,
@@ -4347,6 +4351,7 @@ struct FakeStore {
     fail_query_jmap_email_ids: bool,
     respect_jmap_query_pagination: bool,
     fail_fetch_all_jmap_email_ids: bool,
+    fail_mapi_outbox_mirror: bool,
     mapi_mail_store_load_started: Option<Arc<tokio::sync::Notify>>,
     mapi_mail_store_load_continue: Option<Arc<tokio::sync::Notify>>,
 }
@@ -6379,16 +6384,17 @@ impl ExchangeStore for FakeStore {
             let exports = message_ids
                 .into_iter()
                 .filter_map(|message_id| {
-                    emails.iter().find(|email| email.id == message_id).map(|email| {
-                        EwsTransferExport {
+                    emails
+                        .iter()
+                        .find(|email| email.id == message_id)
+                        .map(|email| EwsTransferExport {
                             message_id,
                             raw_message: format!(
                                 "From: {}\r\nSubject: {}\r\n\r\n{}",
                                 email.from_address, email.subject, email.body_text
                             )
                             .into_bytes(),
-                        }
-                    })
+                        })
                 })
                 .collect::<Vec<_>>();
             Ok(exports)
@@ -6956,6 +6962,13 @@ impl ExchangeStore for FakeStore {
         requests: &'a [MapiIdentityRequest],
     ) -> StoreFuture<'a, Vec<MapiIdentityRecord>> {
         Box::pin(async move {
+            if self.fail_mapi_message_identity_allocation
+                && requests
+                    .iter()
+                    .any(|request| request.object_kind == MapiIdentityObjectKind::Message)
+            {
+                anyhow::bail!("simulated MAPI message identity allocation failure");
+            }
             let special_folder_aliases = self
                 .mapi_special_folder_aliases
                 .lock()
@@ -7016,7 +7029,12 @@ impl ExchangeStore for FakeStore {
                             }
                             Some(reserved_counter) => reserved_counter,
                         };
-                        let object_id = crate::mapi::identity::mapi_store_id(counter);
+                        let object_id = if request.object_kind == MapiIdentityObjectKind::Message {
+                            self.mapi_message_identity_object_id_override
+                                .unwrap_or_else(|| crate::mapi::identity::mapi_store_id(counter))
+                        } else {
+                            crate::mapi::identity::mapi_store_id(counter)
+                        };
                         if request.reserved_global_counter.is_some()
                             && counter > crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER
                         {
@@ -10929,12 +10947,14 @@ impl ExchangeStore for FakeStore {
         let name = self.active_sieve_script_name.lock().unwrap().clone();
         Box::pin(async move {
             Ok(content.map(|content| SieveScriptDocument {
-                name: name.unwrap_or_else(|| if content.contains("# LPE-EWS-OOF-State:") {
-                    "ews-oof".to_string()
-                } else if content.starts_with("# lpe-ews-inbox-rules-v1") {
-                    "lpe-ews-inbox-rules-v1".to_string()
-                } else {
-                    "jmap-vacation".to_string()
+                name: name.unwrap_or_else(|| {
+                    if content.contains("# LPE-EWS-OOF-State:") {
+                        "ews-oof".to_string()
+                    } else if content.starts_with("# lpe-ews-inbox-rules-v1") {
+                        "lpe-ews-inbox-rules-v1".to_string()
+                    } else {
+                        "jmap-vacation".to_string()
+                    }
                 }),
                 content,
                 is_active: true,
@@ -13359,6 +13379,9 @@ impl ExchangeStore for FakeStore {
         target_mailbox_id: Uuid,
         _audit: lpe_storage::AuditEntryInput,
     ) -> StoreFuture<'a, JmapEmail> {
+        if self.fail_mapi_outbox_mirror {
+            return Box::pin(async move { anyhow::bail!("simulated MAPI Outbox mirror failure") });
+        }
         let target = self
             .mailboxes
             .lock()
@@ -13733,6 +13756,13 @@ impl ExchangeStore for FakeStore {
     ) -> StoreFuture<'a, SubmittedMessage> {
         self.submitted_messages.lock().unwrap().push(input.clone());
         self.submitted_message_audits.lock().unwrap().push(audit);
+        let source_has_attachments = input.draft_message_id.is_some_and(|source_message_id| {
+            self.emails
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|email| email.id == source_message_id && email.has_attachments)
+        });
         let sent_mailbox = self
             .mailboxes
             .lock()
@@ -13782,7 +13812,7 @@ impl ExchangeStore for FakeStore {
         sent.size_octets = input.size_octets;
         sent.unread = input.unread.unwrap_or(false);
         sent.flagged = input.flagged.unwrap_or(false);
-        sent.has_attachments = !input.attachments.is_empty();
+        sent.has_attachments = !input.attachments.is_empty() || source_has_attachments;
         sent.delivery_status = submitted.delivery_status.clone();
         sent.mailbox_ids = vec![sent_mailbox_id];
         sent.mailbox_states = vec![JmapEmailMailboxState {
@@ -13815,6 +13845,70 @@ impl ExchangeStore for FakeStore {
         emails.push(sent);
 
         Box::pin(async move { Ok(submitted) })
+    }
+
+    fn submit_message_with_source_patch<'a>(
+        &'a self,
+        mut input: SubmitMessageInput,
+        patch: SubmissionSourcePatch,
+        audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, SubmittedMessage> {
+        if !input.replace_attachments {
+            if let Some(source_message_id) = input.draft_message_id {
+                let deleted_attachment_ids = patch
+                    .delete_attachment_ids
+                    .iter()
+                    .copied()
+                    .collect::<HashSet<_>>();
+                let source_attachments = self
+                    .attachments
+                    .lock()
+                    .unwrap()
+                    .get(&source_message_id)
+                    .cloned()
+                    .unwrap_or_default();
+                let scheduling_attachment_id = self
+                    .emails
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find(|email| email.id == source_message_id)
+                    .and_then(|email| {
+                        email
+                            .calendar_meeting_request
+                            .as_ref()
+                            .and_then(|request| request.transport_attachment_id)
+                            .or_else(|| {
+                                email
+                                    .calendar_meeting_response
+                                    .as_ref()
+                                    .and_then(|response| response.transport_attachment_id)
+                            })
+                    });
+                let source_contents = self.attachment_contents.lock().unwrap();
+                let mut persisted_attachments = source_attachments
+                    .into_iter()
+                    .filter(|attachment| !deleted_attachment_ids.contains(&attachment.id))
+                    .filter_map(|attachment| {
+                        source_contents
+                            .get(&attachment.file_reference)
+                            .map(|content| (attachment.id, content))
+                    })
+                    .map(|(attachment_id, content)| AttachmentUploadInput {
+                        file_name: content.file_name.clone(),
+                        media_type: content.media_type.clone(),
+                        disposition: content.disposition.clone(),
+                        content_id: content.content_id.clone(),
+                        is_scheduling_body: scheduling_attachment_id == Some(attachment_id),
+                        blob_bytes: content.blob_bytes.clone(),
+                    })
+                    .collect::<Vec<_>>();
+                persisted_attachments.append(&mut input.attachments);
+                input.attachments = persisted_attachments;
+            }
+        }
+        self.submitted_source_patches.lock().unwrap().push(patch);
+        self.submit_message(input, audit)
     }
 
     fn cancel_queued_submission<'a>(
@@ -14405,9 +14499,7 @@ fn resolve_names_request_for_values(search_addresses: &[&str], columns: &[u32]) 
     request.push(0xFF);
     request.extend_from_slice(&(search_addresses.len() as u32).to_le_bytes());
     for search_address in search_addresses {
-        let unresolved_name = utf16z(&format!("=SMTP:{search_address}"));
-        request.extend_from_slice(&(unresolved_name.len() as u16).to_le_bytes());
-        request.extend_from_slice(&unresolved_name);
+        request.extend_from_slice(&utf16z(&format!("=SMTP:{search_address}")));
     }
     request.extend_from_slice(&0u32.to_le_bytes());
     request
@@ -16078,7 +16170,7 @@ fn strict_decode_content_sync_stream(bytes: &[u8]) -> Result<StrictContentSyncSt
                 | PID_TAG_SMTP_ADDRESS_W => {
                     let _ = strict_decode_utf16z(&property.value)?;
                 }
-                PID_TAG_ENTRY_ID | PID_TAG_RECIPIENT_ENTRY_ID => {}
+                PID_TAG_SEARCH_KEY | PID_TAG_ENTRY_ID | PID_TAG_RECIPIENT_ENTRY_ID => {}
                 tag => return Err(format!("unexpected recipient property 0x{tag:08x}")),
             },
             StrictContentSection::Attachment => match property.tag {

@@ -1,6 +1,6 @@
 use lpe_storage::{
-    parse_calendar_participants_metadata, AccessibleContact, AccessibleEvent,
-    CalendarOrganizerMetadata, CalendarParticipantMetadata, DavTask,
+    external_calendar_uid, parse_calendar_participants_metadata, AccessibleContact,
+    AccessibleEvent, CalendarOrganizerMetadata, CalendarParticipantMetadata, DavTask,
 };
 
 pub(crate) fn serialize_vcard(contact: &AccessibleContact) -> String {
@@ -29,7 +29,7 @@ pub(crate) fn serialize_ical(event: &AccessibleEvent) -> String {
         "PRODID:-//LPE//DAV Adapter//EN".to_string(),
         "CALSCALE:GREGORIAN".to_string(),
         "BEGIN:VEVENT".to_string(),
-        format!("UID:{}", event.uid),
+        format!("UID:{}", external_calendar_uid(&event.uid)),
         format!(
             "{}:{dtstart}",
             property_name_with_tz("DTSTART", &event.time_zone)

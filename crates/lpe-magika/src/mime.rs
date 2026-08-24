@@ -10,16 +10,10 @@ struct ParsedVisiblePart {
     body_text: String,
 }
 
-#[derive(Clone, Copy)]
-enum AttachmentPartContext {
-    Root,
-    Alternative,
-    OtherMultipart,
-}
-
 pub fn collect_mime_attachment_parts(bytes: &[u8]) -> Result<Vec<MimeAttachmentPart>> {
     let mut attachments = Vec::new();
-    collect_attachment_parts(bytes, &mut attachments, AttachmentPartContext::Root)?;
+    let mut scheduling_body_selected = false;
+    collect_attachment_parts(bytes, &mut attachments, true, &mut scheduling_body_selected)?;
     Ok(attachments)
 }
 
@@ -70,7 +64,8 @@ pub fn extract_visible_body_parts(bytes: &[u8]) -> Result<VisibleBodyParts> {
 fn collect_attachment_parts(
     bytes: &[u8],
     attachments: &mut Vec<MimeAttachmentPart>,
-    context: AttachmentPartContext,
+    selected_body_path: bool,
+    scheduling_body_selected: &mut bool,
 ) -> Result<()> {
     let (header_block, body_block) = split_headers_and_body_bytes(bytes);
     let headers = parse_rfc822_headers_bytes(header_block);
@@ -83,26 +78,50 @@ fn collect_attachment_parts(
         .map(|value| value.to_ascii_lowercase())
         .unwrap_or_default();
     let decoded_body = decode_transfer_encoding(body_block, &transfer_encoding)?;
+    let content_disposition = headers.get("content-disposition").cloned();
+    let selected_body_path = selected_body_path
+        && !content_disposition
+            .as_deref()
+            .is_some_and(is_attachment_disposition);
 
     if content_type.to_ascii_lowercase().starts_with("multipart/") {
         let Some(boundary) = content_type_parameter(&content_type, "boundary") else {
             return Ok(());
         };
-        let child_context = if content_type
-            .to_ascii_lowercase()
-            .starts_with("multipart/alternative")
-        {
-            AttachmentPartContext::Alternative
-        } else {
-            AttachmentPartContext::OtherMultipart
-        };
-        for part in split_multipart_parts(&decoded_body, &boundary) {
-            collect_attachment_parts(&part, attachments, child_context)?;
+        let parts = split_multipart_parts(&decoded_body, &boundary);
+        let media_type = mime_media_type(&content_type).to_ascii_lowercase();
+        let selected_alternative_child =
+            if selected_body_path && media_type == "multipart/alternative" {
+                parts.iter().rposition(|part| is_direct_body_part(part))
+            } else {
+                None
+            };
+
+        for (index, part) in parts.into_iter().enumerate() {
+            let child_is_selected = if !selected_body_path {
+                false
+            } else if media_type == "multipart/alternative" {
+                selected_alternative_child == Some(index)
+            } else if media_type == "multipart/related" {
+                index == 0 && is_related_body_root(&part)?
+            } else if media_type == "multipart/mixed" {
+                // [MS-STANOICAL] V0334: Outlook 2010 and later search every
+                // mixed child for iMIP data; the first qualifying calendar
+                // wins and later calendars remain attachments.
+                selected_body_path
+            } else {
+                false
+            };
+            collect_attachment_parts(
+                &part,
+                attachments,
+                child_is_selected,
+                scheduling_body_selected,
+            )?;
         }
         return Ok(());
     }
 
-    let mut content_disposition = headers.get("content-disposition").cloned();
     let content_id = headers
         .get("content-id")
         .map(|value| value.trim().trim_matches(['<', '>']).to_string())
@@ -113,24 +132,17 @@ fn collect_attachment_parts(
         .or_else(|| content_type_parameter(&content_type, "name"));
     let is_attachment = content_disposition
         .as_deref()
-        .map(|value| value.to_ascii_lowercase().starts_with("attachment"))
+        .map(is_attachment_disposition)
         .unwrap_or(false);
-    // MS-STANOICAL, RFC 5545 section 3.7.2: a calendar MIME part carries the
-    // scheduling method even when Outlook does not give it a filename.
-    let is_calendar = content_type
-        .to_ascii_lowercase()
-        .starts_with("text/calendar");
-    if is_calendar
-        && !is_attachment
-        && content_disposition.is_none()
-        && matches!(
-            context,
-            AttachmentPartContext::Root | AttachmentPartContext::Alternative
-        )
-    {
-        // A root or multipart/alternative calendar part is the scheduling
-        // body even when Outlook omits Content-Disposition.
-        content_disposition = Some("inline".to_string());
+    let is_calendar = mime_media_type(&content_type).eq_ignore_ascii_case("text/calendar");
+    // [MS-OXCMAIL] section 2.2.3.3.2 and [MS-STANOICAL] V0334: the selected
+    // alternative/related body path plus the ordered mixed-child search,
+    // rather than Content-Disposition alone, determines whether text/calendar
+    // is the first scheduling body. Preserve the original disposition.
+    let is_scheduling_body =
+        is_calendar && selected_body_path && !is_attachment && !*scheduling_body_selected;
+    if is_scheduling_body {
+        *scheduling_body_selected = true;
     }
     if is_attachment || filename.is_some() || is_calendar {
         attachments.push(MimeAttachmentPart {
@@ -138,10 +150,89 @@ fn collect_attachment_parts(
             declared_mime: Some(content_type),
             content_disposition,
             content_id,
+            is_scheduling_body,
             bytes: decoded_body,
         });
     }
     Ok(())
+}
+
+fn is_direct_body_part(bytes: &[u8]) -> bool {
+    let (header_block, _) = split_headers_and_body_bytes(bytes);
+    let headers = parse_rfc822_headers_bytes(header_block);
+    !headers
+        .get("content-disposition")
+        .is_some_and(|value| is_attachment_disposition(value))
+        && headers
+            .get("content-type")
+            .map(|value| is_eligible_text_body_type(mime_media_type(value)))
+            .unwrap_or(true)
+}
+
+fn is_related_body_root(bytes: &[u8]) -> Result<bool> {
+    let (header_block, body_block) = split_headers_and_body_bytes(bytes);
+    let headers = parse_rfc822_headers_bytes(header_block);
+    if headers
+        .get("content-disposition")
+        .is_some_and(|value| is_attachment_disposition(value))
+    {
+        return Ok(false);
+    }
+
+    let content_type = headers
+        .get("content-type")
+        .cloned()
+        .unwrap_or_else(|| "text/plain".to_string());
+    match mime_media_type(&content_type).to_ascii_lowercase().as_str() {
+        "text/html" => Ok(true),
+        "multipart/alternative" => {
+            let Some(boundary) = content_type_parameter(&content_type, "boundary") else {
+                return Ok(false);
+            };
+            let transfer_encoding = headers
+                .get("content-transfer-encoding")
+                .map(|value| value.to_ascii_lowercase())
+                .unwrap_or_default();
+            let decoded_body = decode_transfer_encoding(body_block, &transfer_encoding)?;
+            Ok(split_multipart_parts(&decoded_body, &boundary)
+                .iter()
+                .any(|part| direct_part_has_media_type(part, "text/html")))
+        }
+        _ => Ok(false),
+    }
+}
+
+fn direct_part_has_media_type(bytes: &[u8], expected: &str) -> bool {
+    let (header_block, _) = split_headers_and_body_bytes(bytes);
+    let headers = parse_rfc822_headers_bytes(header_block);
+    !headers
+        .get("content-disposition")
+        .is_some_and(|value| is_attachment_disposition(value))
+        && headers
+            .get("content-type")
+            .is_some_and(|value| mime_media_type(value).eq_ignore_ascii_case(expected))
+}
+
+fn is_eligible_text_body_type(media_type: &str) -> bool {
+    media_type.eq_ignore_ascii_case("text/plain")
+        || media_type.eq_ignore_ascii_case("text/html")
+        || media_type.eq_ignore_ascii_case("text/enriched")
+        || media_type.eq_ignore_ascii_case("text/calendar")
+}
+
+fn mime_media_type(content_type: &str) -> &str {
+    content_type
+        .split(';')
+        .next()
+        .map(str::trim)
+        .unwrap_or_default()
+}
+
+fn is_attachment_disposition(content_disposition: &str) -> bool {
+    content_disposition
+        .split(';')
+        .next()
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("attachment"))
 }
 
 fn parse_visible_part(bytes: &[u8]) -> Result<ParsedVisiblePart> {

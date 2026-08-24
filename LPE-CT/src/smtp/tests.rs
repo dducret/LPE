@@ -1,19 +1,20 @@
 use super::{
     apply_authentication_scores, classify_inbound_message, delete_trace, dkim_disposition,
-    dnsbl_query_name, evaluate_greylisting, finalize_policy_decision, handle_smtp_command,
-    handle_smtp_session, initialize_spool, load_antivirus_providers, load_bayespam_corpus,
-    load_reputation_score, load_trace_details, parse_antivirus_output, parse_peer_ip,
-    persist_message, postfix_style_mail_log_line, process_outbound_handoff, receive_message,
-    receive_message_with_validator, release_trace, resolve_outbound_route, retry_after_seconds,
-    retry_trace, score_bayespam, smtp_starttls_acceptor_for_paths, spf_disposition, stable_key_id,
-    summarize_dkim, summarize_dmarc, summarize_spf, train_bayespam, unix_now, update_reputation,
-    write_smtp, AcceptedDomainConfig, AntivirusProviderConfig, AntivirusProviderDecision,
-    AuthSummary, AuthenticationAssessment, BayesLabel, DecisionTraceEntry, DkimDisposition,
-    FilterAction, GreylistEntry, OutboundRoutingRule, OutboundThrottleRule, ParsedSmtpPath,
-    QueuedMessage, RuntimeConfig, SmtpCommandOutcome, SmtpPathError, SmtpPathKind, SmtpTransaction,
-    SpfDisposition, TransportAuditEvent, TransportDsnReport, TransportRouteDecision,
-    TransportTechnicalStatus, TransportThrottleStatus, BAYESPAM_MIN_SCORING_TOKENS,
-    DEFAULT_GREYLIST_DELAY_SECONDS, MAX_SMTP_COMMAND_LINE_LEN, MAX_SMTP_RCPT_PER_TRANSACTION,
+    dnsbl_query_name, dot_stuff_smtp_data, evaluate_greylisting, finalize_policy_decision,
+    handle_smtp_command, handle_smtp_session, initialize_spool, load_antivirus_providers,
+    load_bayespam_corpus, load_reputation_score, load_trace_details, parse_antivirus_output,
+    parse_peer_ip, persist_message, postfix_style_mail_log_line, process_outbound_handoff,
+    receive_message, receive_message_with_validator, release_trace, resolve_outbound_route,
+    retry_after_seconds, retry_trace, score_bayespam, smtp_starttls_acceptor_for_paths,
+    spf_disposition, stable_key_id, summarize_dkim, summarize_dmarc, summarize_spf, train_bayespam,
+    unix_now, update_reputation, write_smtp, AcceptedDomainConfig, AntivirusProviderConfig,
+    AntivirusProviderDecision, AuthSummary, AuthenticationAssessment, BayesLabel,
+    DecisionTraceEntry, DkimDisposition, FilterAction, GreylistEntry, OutboundRoutingRule,
+    OutboundThrottleRule, ParsedSmtpPath, QueuedMessage, RuntimeConfig, SmtpCommandOutcome,
+    SmtpPathError, SmtpPathKind, SmtpTransaction, SpfDisposition, TransportAuditEvent,
+    TransportDsnReport, TransportRouteDecision, TransportTechnicalStatus, TransportThrottleStatus,
+    BAYESPAM_MIN_SCORING_TOKENS, DEFAULT_GREYLIST_DELAY_SECONDS, MAX_SMTP_COMMAND_LINE_LEN,
+    MAX_SMTP_RCPT_PER_TRANSACTION,
 };
 use crate::env_test_lock;
 use axum::{routing::post, Json, Router};
@@ -1809,6 +1810,11 @@ async fn outbound_handoff_relays_message() {
                 "MIME-Version: 1.0\r\n",
                 "Content-Type: multipart/alternative; boundary=calendar\r\n\r\n",
                 "--calendar\r\n",
+                "Content-Type: text/plain; charset=UTF-8\r\n\r\n",
+                "Please respond.\r\n",
+                ".\r\n",
+                "The calendar part follows.\r\n",
+                "--calendar\r\n",
                 "Content-Type: text/calendar; method=REQUEST; charset=UTF-8\r\n\r\n",
                 "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nDTSTAMP:20260810T090000Z\r\nEND:VCALENDAR\r\n",
                 "--calendar--\r\n"
@@ -1855,6 +1861,8 @@ async fn outbound_handoff_relays_message() {
     assert!(raw.contains("Content-Type: text/calendar; method=REQUEST; charset=UTF-8"));
     assert!(raw.contains("METHOD:REQUEST"));
     assert!(raw.contains("DTSTAMP:20260810T090000Z"));
+    assert!(raw.contains("Please respond.\r\n..\r\nThe calendar part follows."));
+    assert!(!raw.contains("Please respond.\r\n.\r\nThe calendar part follows."));
     assert!(!raw.contains("Bcc:"));
     assert!(!raw.contains("hidden@example.test"));
     assert!(captured_commands
@@ -3346,6 +3354,16 @@ fn retry_backoff_grows_with_attempt_count_and_caps() {
     assert_eq!(retry_after_seconds(300, 1), 600);
     assert_eq!(retry_after_seconds(300, 3), 2400);
     assert_eq!(retry_after_seconds(300, 9), 3600);
+}
+
+#[test]
+fn smtp_data_dot_stuffing_only_changes_crlf_delimited_line_starts() {
+    let data = b".first\r\nplain\r\n.\r\n..third\r\nbare\n.dot\rtrailing.";
+
+    assert_eq!(
+        dot_stuff_smtp_data(data),
+        b"..first\r\nplain\r\n..\r\n...third\r\nbare\n.dot\rtrailing."
+    );
 }
 
 #[test]

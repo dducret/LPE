@@ -94,7 +94,13 @@ mapi_store_identity_shape_ok="$(
   mapi_store_identity_shape_ok "${DATABASE_URL}"
 )"
 calendar_event_lifecycle_column_count="$(
-  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'calendar_events' AND column_name IN ('lifecycle_state', 'deleted_at') AND is_nullable = CASE column_name WHEN 'lifecycle_state' THEN 'NO' WHEN 'deleted_at' THEN 'YES' END AND data_type = CASE column_name WHEN 'lifecycle_state' THEN 'text' WHEN 'deleted_at' THEN 'timestamp with time zone' END"
+  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'calendar_events' AND column_name IN ('lifecycle_state', 'deleted_at', 'meeting_response_state_json') AND is_nullable = CASE column_name WHEN 'deleted_at' THEN 'YES' ELSE 'NO' END AND data_type = CASE column_name WHEN 'lifecycle_state' THEN 'text' WHEN 'deleted_at' THEN 'timestamp with time zone' ELSE 'jsonb' END"
+)"
+calendar_meeting_response_state_shape_status="$(
+  calendar_meeting_response_state_shape_ok "${DATABASE_URL}"
+)"
+calendar_meeting_request_correlation_index_shape_status="$(
+  calendar_meeting_request_correlation_index_shape_ok "${DATABASE_URL}"
 )"
 mapi_calendar_event_identity_moves_table="$(
   psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT to_regclass('public.mapi_calendar_event_identity_moves')"
@@ -124,7 +130,9 @@ mail_change_log_copy_kind_shape_status="$(
 if [[ "${schema_version}" != "${expected_schema_version}" \
   || "${mapi_identity_version_column_count}" != "2" \
   || "${mapi_store_identity_shape_ok}" != "1" \
-  || "${calendar_event_lifecycle_column_count}" != "2" \
+  || "${calendar_event_lifecycle_column_count}" != "3" \
+  || "${calendar_meeting_response_state_shape_status}" != "1" \
+  || "${calendar_meeting_request_correlation_index_shape_status}" != "1" \
   || "${mapi_calendar_event_identity_moves_table}" != "mapi_calendar_event_identity_moves" \
   || "${mapi_local_replica_range_shape_ok}" != "1" \
   || "${mapi_outlook_cache_fidelity_shape_ok}" != "1" \
@@ -133,7 +141,7 @@ if [[ "${schema_version}" != "${expected_schema_version}" \
   || "${mapi_calendar_event_move_change_key_constraint_count}" != "2" \
   || "${mapi_special_folder_alias_shape_ok}" != "1" \
   || "${mail_change_log_copy_kind_shape_status}" != "1" ]]; then
-  echo "Schema initialization validation failed: version=${schema_version}, MAPI identity version shape count=${mapi_identity_version_column_count}, MAPI store identity shape=${mapi_store_identity_shape_ok}, Calendar lifecycle shape count=${calendar_event_lifecycle_column_count}, Calendar identity-move table=${mapi_calendar_event_identity_moves_table:-missing}, MAPI local replica range table shape=${mapi_local_replica_range_shape_ok}, MAPI WLink/configuration FAI fidelity shape=${mapi_outlook_cache_fidelity_shape_ok}, deleted Calendar object-kind constraint count=${deleted_calendar_event_constraint_count}, MAPI identity key constraint count=${mapi_identity_constraint_count}, Calendar move ChangeKey constraint count=${mapi_calendar_event_move_change_key_constraint_count}, MAPI special-folder alias shape=${mapi_special_folder_alias_shape_ok}, mailbox copy change-kind shape=${mail_change_log_copy_kind_shape_status}." >&2
+  echo "Schema initialization validation failed: version=${schema_version}, MAPI identity version shape count=${mapi_identity_version_column_count}, MAPI store identity shape=${mapi_store_identity_shape_ok}, Calendar lifecycle/replay shape count=${calendar_event_lifecycle_column_count}, Calendar meeting-response replay default/check shape=${calendar_meeting_response_state_shape_status}, Calendar meeting-request correlation index shape=${calendar_meeting_request_correlation_index_shape_status}, Calendar identity-move table=${mapi_calendar_event_identity_moves_table:-missing}, MAPI local replica range table shape=${mapi_local_replica_range_shape_ok}, MAPI WLink/configuration FAI fidelity shape=${mapi_outlook_cache_fidelity_shape_ok}, deleted Calendar object-kind constraint count=${deleted_calendar_event_constraint_count}, MAPI identity key constraint count=${mapi_identity_constraint_count}, Calendar move ChangeKey constraint count=${mapi_calendar_event_move_change_key_constraint_count}, MAPI special-folder alias shape=${mapi_special_folder_alias_shape_ok}, mailbox copy change-kind shape=${mail_change_log_copy_kind_shape_status}." >&2
   echo "Initialize a fresh LPE ${expected_schema_version%-sql} database after correcting the canonical schema source." >&2
   exit 1
 fi
@@ -144,4 +152,4 @@ if ! canonical_schema_shape_is_current "${DATABASE_URL}" "${expected_schema_vers
   exit 1
 fi
 
-echo "LPE schema ${schema_version}, including MAPI local replica ranges, WLink/configuration FAI fidelity, and mailbox-copy replay, initialized successfully."
+echo "LPE schema ${schema_version}, including meeting-request Event correlation, MAPI local replica ranges, WLink/configuration FAI fidelity, and mailbox-copy replay, initialized successfully."

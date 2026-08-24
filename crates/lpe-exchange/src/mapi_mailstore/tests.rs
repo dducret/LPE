@@ -824,6 +824,21 @@ fn microsoft_oxcfxics_content_sync_emits_sender_and_delivery_identity_properties
         PID_TAG_SENDER_EMAIL_ADDRESS_W,
         &utf16z("relay@example.test"),
     );
+    assert_variable_property(
+        &buffer,
+        PID_TAG_SENDER_SMTP_ADDRESS_W,
+        &utf16z("relay@example.test"),
+    );
+    assert_variable_property(
+        &buffer,
+        PID_TAG_SENDER_ENTRY_ID,
+        &crate::mapi::properties::sender_entry_id(&email),
+    );
+    assert_variable_property(
+        &buffer,
+        PID_TAG_SENDER_SEARCH_KEY,
+        &crate::mapi::properties::smtp_search_key("relay@example.test"),
+    );
     assert_variable_property(&buffer, PID_TAG_SENT_REPRESENTING_NAME_W, &utf16z("Alice"));
     assert_variable_property(
         &buffer,
@@ -834,6 +849,21 @@ fn microsoft_oxcfxics_content_sync_emits_sender_and_delivery_identity_properties
         &buffer,
         PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
         &utf16z("alice@example.test"),
+    );
+    assert_variable_property(
+        &buffer,
+        PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W,
+        &utf16z("alice@example.test"),
+    );
+    assert_variable_property(
+        &buffer,
+        PID_TAG_SENT_REPRESENTING_ENTRY_ID,
+        &crate::mapi::properties::sent_representing_entry_id(&email),
+    );
+    assert_variable_property(
+        &buffer,
+        PID_TAG_SENT_REPRESENTING_SEARCH_KEY,
+        &crate::mapi::properties::smtp_search_key("alice@example.test"),
     );
     assert_variable_property(&buffer, PID_TAG_MESSAGE_CLASS_W, &utf16z("IPM.Note"));
     assert_variable_property(
@@ -847,9 +877,15 @@ fn microsoft_oxcfxics_content_sync_emits_sender_and_delivery_identity_properties
         PID_TAG_SENDER_NAME_W,
         PID_TAG_SENDER_ADDRESS_TYPE_W,
         PID_TAG_SENDER_EMAIL_ADDRESS_W,
+        PID_TAG_SENDER_SMTP_ADDRESS_W,
+        PID_TAG_SENDER_ENTRY_ID,
+        PID_TAG_SENDER_SEARCH_KEY,
         PID_TAG_SENT_REPRESENTING_NAME_W,
         PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W,
         PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
+        PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W,
+        PID_TAG_SENT_REPRESENTING_ENTRY_ID,
+        PID_TAG_SENT_REPRESENTING_SEARCH_KEY,
         PID_TAG_MESSAGE_CLASS_W,
     ];
     let excluded = sync_manifest_buffer_with_attachments(
@@ -1151,7 +1187,7 @@ fn microsoft_oxcfxics_content_sync_uses_recipient_markers() {
         );
     }
 
-    assert_tag_order(
+    assert_tag_sequence(
         &buffer,
         &[
             PID_TAG_SUBJECT_W,
@@ -1208,6 +1244,237 @@ fn microsoft_oxcfxics_content_sync_uses_recipient_markers() {
         PID_TAG_EMAIL_ADDRESS_W,
         &utf16z("carol@example.test"),
     );
+}
+
+#[test]
+fn meeting_response_fast_transfer_uses_ics_organizer_and_responder_rows() {
+    let mut email = test_email();
+    crate::mapi::identity::remember_mapi_identity(
+        email.id,
+        crate::mapi::identity::mapi_store_id(50),
+    );
+    email.to = vec![JmapEmailAddress {
+        address: "stale-rfc-recipient@example.test".to_string(),
+        display_name: Some("Stale RFC recipient".to_string()),
+    }];
+    email.cc = vec![JmapEmailAddress {
+        address: "stale-rfc-cc@example.test".to_string(),
+        display_name: None,
+    }];
+    email.calendar_meeting_response = Some(lpe_storage::CalendarMeetingResponse {
+        method: "REPLY".to_string(),
+        transport_attachment_id: None,
+        server_processed: false,
+        organizer: Some(lpe_storage::CalendarMeetingIdentity {
+            email: "organizer@example.test".to_string(),
+            display_name: "Organizer".to_string(),
+        }),
+        attendee_email: "responder@example.test".to_string(),
+        attendee_name: "Responder".to_string(),
+        partstat: "accepted".to_string(),
+        uid: "recipient-projection@example.test".to_string(),
+        response_sent_at: Some("2026-08-24T18:00:00Z".to_string()),
+        meeting_start: None,
+        meeting_end: None,
+        meeting_location: None,
+        meeting_sequence: None,
+        proposed_start: None,
+        proposed_end: None,
+        original_start: None,
+        original_end: None,
+    });
+    let buffer = sync_manifest_buffer_with_attachments(
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_NORMAL,
+        0,
+        &[],
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &[],
+        &[email],
+        &[],
+        &[],
+        1,
+    );
+
+    let first_start = buffer
+        .windows(4)
+        .position(|window| window == START_RECIP.to_le_bytes())
+        .expect("organizer StartRecip");
+    let second_end = buffer[first_start..]
+        .windows(4)
+        .enumerate()
+        .filter(|(_, window)| *window == END_TO_RECIP.to_le_bytes())
+        .nth(1)
+        .map(|(offset, _)| first_start + offset + 4)
+        .expect("responder EndToRecip");
+    let recipient_collection = &buffer[first_start..second_end];
+
+    assert_eq!(
+        recipient_collection
+            .windows(4)
+            .filter(|window| *window == START_RECIP.to_le_bytes())
+            .count(),
+        2
+    );
+    let organizer_prefix = [
+        START_RECIP.to_le_bytes(),
+        PID_TAG_ROWID.to_le_bytes(),
+        0_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_TYPE.to_le_bytes(),
+        1_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_FLAGS.to_le_bytes(),
+        3_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_ORDER.to_le_bytes(),
+        0_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_TRACK_STATUS.to_le_bytes(),
+        0_i32.to_le_bytes(),
+    ]
+    .concat();
+    let responder_prefix = [
+        START_RECIP.to_le_bytes(),
+        PID_TAG_ROWID.to_le_bytes(),
+        1_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_TYPE.to_le_bytes(),
+        1_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_FLAGS.to_le_bytes(),
+        1_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_ORDER.to_le_bytes(),
+        1_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_TRACK_STATUS.to_le_bytes(),
+        3_i32.to_le_bytes(),
+    ]
+    .concat();
+    assert!(contains_bytes(recipient_collection, &organizer_prefix));
+    assert!(contains_bytes(recipient_collection, &responder_prefix));
+    assert_variable_property_present(
+        recipient_collection,
+        PID_TAG_SMTP_ADDRESS_W,
+        &utf16z("organizer@example.test"),
+    );
+    assert_variable_property_present(
+        recipient_collection,
+        PID_TAG_SMTP_ADDRESS_W,
+        &utf16z("responder@example.test"),
+    );
+    assert_variable_property_present(
+        recipient_collection,
+        PID_TAG_SEARCH_KEY,
+        b"SMTP:ORGANIZER@EXAMPLE.TEST\0",
+    );
+    assert_eq!(
+        recipient_collection
+            .windows(PID_TAG_ENTRY_ID.to_le_bytes().len())
+            .filter(|window| *window == PID_TAG_ENTRY_ID.to_le_bytes())
+            .count(),
+        2
+    );
+    assert_eq!(
+        recipient_collection
+            .windows(PID_TAG_RECIPIENT_ENTRY_ID.to_le_bytes().len())
+            .filter(|window| *window == PID_TAG_RECIPIENT_ENTRY_ID.to_le_bytes())
+            .count(),
+        2
+    );
+    assert!(!contains_bytes(
+        recipient_collection,
+        &utf16z("stale-rfc-recipient@example.test")
+    ));
+    assert!(!contains_bytes(
+        recipient_collection,
+        &utf16z("stale-rfc-cc@example.test")
+    ));
+}
+
+#[test]
+fn meeting_request_fast_transfer_preserves_attendee_type_status_and_order() {
+    let mut email = test_email();
+    crate::mapi::identity::remember_mapi_identity(
+        email.id,
+        crate::mapi::identity::mapi_store_id(50),
+    );
+    email.calendar_meeting_request = Some(lpe_storage::CalendarMeetingRequest {
+        uid: "request-recipient-projection@example.test".to_string(),
+        transport_attachment_id: None,
+        organizer: Some(lpe_storage::CalendarMeetingIdentity {
+            email: "organizer@example.test".to_string(),
+            display_name: "Organizer".to_string(),
+        }),
+        attendees: vec![
+            lpe_storage::CalendarMeetingAttendee {
+                email: "required@example.test".to_string(),
+                display_name: "Required".to_string(),
+                cutype: "INDIVIDUAL".to_string(),
+                role: "REQ-PARTICIPANT".to_string(),
+                partstat: "accepted".to_string(),
+                rsvp: true,
+            },
+            lpe_storage::CalendarMeetingAttendee {
+                email: "optional@example.test".to_string(),
+                display_name: "Optional".to_string(),
+                cutype: "INDIVIDUAL".to_string(),
+                role: "OPT-PARTICIPANT".to_string(),
+                partstat: "tentative".to_string(),
+                rsvp: false,
+            },
+            lpe_storage::CalendarMeetingAttendee {
+                email: "room@example.test".to_string(),
+                display_name: "Room".to_string(),
+                cutype: "ROOM".to_string(),
+                role: "NON-PARTICIPANT".to_string(),
+                partstat: "declined".to_string(),
+                rsvp: false,
+            },
+        ],
+        response_requested: true,
+        sent_at: Some("2026-08-24T18:00:00Z".to_string()),
+        meeting_start: "2026-08-25T08:00:00Z".to_string(),
+        meeting_end: "2026-08-25T09:00:00Z".to_string(),
+        meeting_location: None,
+        meeting_sequence: 1,
+        intended_busy_status: 2,
+    });
+    let buffer = sync_manifest_buffer_with_attachments(
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_NORMAL,
+        0,
+        &[],
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &[],
+        &[email],
+        &[],
+        &[],
+        1,
+    );
+
+    assert_eq!(
+        buffer
+            .windows(4)
+            .filter(|window| *window == START_RECIP.to_le_bytes())
+            .count(),
+        4
+    );
+    for (row_id, recipient_type, flags, status) in [
+        (0_i32, 1_i32, 3_i32, 0_i32),
+        (1, 1, 1, 3),
+        (2, 2, 1, 2),
+        (3, 3, 1, 4),
+    ] {
+        let prefix = [
+            START_RECIP.to_le_bytes(),
+            PID_TAG_ROWID.to_le_bytes(),
+            row_id.to_le_bytes(),
+            PID_TAG_RECIPIENT_TYPE.to_le_bytes(),
+            recipient_type.to_le_bytes(),
+            PID_TAG_RECIPIENT_FLAGS.to_le_bytes(),
+            flags.to_le_bytes(),
+            PID_TAG_RECIPIENT_ORDER.to_le_bytes(),
+            row_id.to_le_bytes(),
+            PID_TAG_RECIPIENT_TRACK_STATUS.to_le_bytes(),
+            status.to_le_bytes(),
+        ]
+        .concat();
+        assert!(contains_bytes(&buffer, &prefix));
+    }
 }
 
 #[test]
@@ -1513,7 +1780,8 @@ fn microsoft_oxcfxics_content_sync_uses_embedded_message_markers() {
 #[test]
 fn microsoft_oxcfxics_fast_transfer_copy_messages_uses_message_markers() {
     let email = test_email();
-    let buffer = fast_transfer_message_list_buffer_with_attachments(&[email], &[]);
+    let buffer =
+        fast_transfer_message_list_buffer_with_attachments(std::slice::from_ref(&email), &[]);
 
     assert_tag_sequence(
         &buffer,
@@ -1523,9 +1791,15 @@ fn microsoft_oxcfxics_fast_transfer_copy_messages_uses_message_markers() {
             PID_TAG_SENDER_NAME_W,
             PID_TAG_SENDER_ADDRESS_TYPE_W,
             PID_TAG_SENDER_EMAIL_ADDRESS_W,
+            PID_TAG_SENDER_SMTP_ADDRESS_W,
+            PID_TAG_SENDER_ENTRY_ID,
+            PID_TAG_SENDER_SEARCH_KEY,
             PID_TAG_SENT_REPRESENTING_NAME_W,
             PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W,
             PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
+            PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W,
+            PID_TAG_SENT_REPRESENTING_ENTRY_ID,
+            PID_TAG_SENT_REPRESENTING_SEARCH_KEY,
             PID_TAG_MESSAGE_CLASS_W,
             PID_TAG_SUBJECT_W,
             PID_TAG_BODY_W,
@@ -1545,6 +1819,21 @@ fn microsoft_oxcfxics_fast_transfer_copy_messages_uses_message_markers() {
         PID_TAG_SENDER_EMAIL_ADDRESS_W,
         &utf16z("alice@example.test"),
     );
+    assert_variable_property_present(
+        &buffer,
+        PID_TAG_SENDER_SMTP_ADDRESS_W,
+        &utf16z("alice@example.test"),
+    );
+    assert_variable_property_present(
+        &buffer,
+        PID_TAG_SENDER_ENTRY_ID,
+        &crate::mapi::properties::sender_entry_id(&email),
+    );
+    assert_variable_property_present(
+        &buffer,
+        PID_TAG_SENDER_SEARCH_KEY,
+        &crate::mapi::properties::smtp_search_key("alice@example.test"),
+    );
     assert_variable_property_present(&buffer, PID_TAG_SENT_REPRESENTING_NAME_W, &utf16z("Alice"));
     assert_variable_property_present(
         &buffer,
@@ -1556,13 +1845,98 @@ fn microsoft_oxcfxics_fast_transfer_copy_messages_uses_message_markers() {
         PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
         &utf16z("alice@example.test"),
     );
+    assert_variable_property_present(
+        &buffer,
+        PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W,
+        &utf16z("alice@example.test"),
+    );
+    assert_variable_property_present(
+        &buffer,
+        PID_TAG_SENT_REPRESENTING_ENTRY_ID,
+        &crate::mapi::properties::sent_representing_entry_id(&email),
+    );
+    assert_variable_property_present(
+        &buffer,
+        PID_TAG_SENT_REPRESENTING_SEARCH_KEY,
+        &crate::mapi::properties::smtp_search_key("alice@example.test"),
+    );
     assert_variable_property_present(&buffer, PID_TAG_MESSAGE_CLASS_W, &utf16z("IPM.Note"));
     assert_variable_property_present(&buffer, PID_TAG_SUBJECT_W, &utf16z("Hello"));
     assert_variable_property_present(&buffer, PID_TAG_BODY_W, &utf16z("Hello body"));
 }
 
 #[test]
+fn fast_transfer_keeps_distinct_from_and_sender_identity_families() {
+    let mut email = test_email();
+    email.from_display = Some("Meeting Organizer".to_string());
+    email.from_address = "organizer@example.test".to_string();
+    email.sender_display = Some("Transport Agent".to_string());
+    email.sender_address = Some("agent@example.test".to_string());
+
+    let buffer = fast_transfer_message_content_buffer_with_attachments(
+        &email,
+        &[],
+        None,
+        FastTransferDirectPropertyFilter::CopyToExcluding(&[]),
+        FastTransferMessageChildren::new(false, false),
+    );
+    assert_variable_property_present(&buffer, PID_TAG_SENDER_NAME_W, &utf16z("Transport Agent"));
+    assert_variable_property_present(
+        &buffer,
+        PID_TAG_SENDER_EMAIL_ADDRESS_W,
+        &utf16z("agent@example.test"),
+    );
+    assert_variable_property_present(
+        &buffer,
+        PID_TAG_SENT_REPRESENTING_NAME_W,
+        &utf16z("Meeting Organizer"),
+    );
+    assert_variable_property_present(
+        &buffer,
+        PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
+        &utf16z("organizer@example.test"),
+    );
+}
+
+#[test]
+fn fast_transfer_named_property_boolean_tracks_plain_categorized_and_rss_mail() {
+    const PID_TAG_HAS_NAMED_PROPERTIES: u32 = 0x664A_000B;
+
+    let plain = test_email();
+    let mut categorized = plain.clone();
+    categorized.categories = vec!["Customer".to_string()];
+    let mut rss = plain.clone();
+    rss.mailbox_role = "rss_feeds".to_string();
+    rss.mailbox_name = "RSS Feeds".to_string();
+
+    for (email, expected) in [(plain, false), (categorized, true), (rss, true)] {
+        let copy_to = fast_transfer_message_content_buffer_with_attachments(
+            &email,
+            &[],
+            None,
+            FastTransferDirectPropertyFilter::CopyToExcluding(&[]),
+            FastTransferMessageChildren::new(false, false),
+        );
+        let contents_sync = sync_manifest_buffer_with_attachments(
+            SYNC_TYPE_CONTENTS,
+            SYNC_FLAG_NORMAL,
+            0,
+            &[],
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            &[],
+            &[email],
+            &[],
+            &[],
+            1,
+        );
+        assert_bool_property(&copy_to, PID_TAG_HAS_NAMED_PROPERTIES, expected);
+        assert_bool_property(&contents_sync, PID_TAG_HAS_NAMED_PROPERTIES, expected);
+    }
+}
+
+#[test]
 fn meeting_request_fast_transfer_projects_actionable_properties() {
+    const PID_TAG_HAS_NAMED_PROPERTIES: u32 = 0x664A_000B;
     const PID_TAG_START_DATE: u32 = 0x0060_0040;
     const PID_TAG_END_DATE: u32 = 0x0061_0040;
     const PID_TAG_REPLY_REQUESTED: u32 = 0x0C17_000B;
@@ -1571,13 +1945,14 @@ fn meeting_request_fast_transfer_projects_actionable_properties() {
     const PID_LID_APPOINTMENT_START_WHOLE_TAG: u32 = 0x820D_0040;
     const PID_LID_LOCATION_W_TAG: u32 = 0x8208_001F;
     const PID_LID_GLOBAL_OBJECT_ID_TAG: u32 = 0x8001_0102;
+    const PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG: u32 = 0x8002_0102;
     const PSETID_APPOINTMENT_GUID: [u8; 16] = [
-        0x02, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x46,
+        0x02, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
     ];
     const PSETID_MEETING_GUID: [u8; 16] = [
-        0x90, 0xDA, 0xD8, 0x6E, 0x0B, 0x45, 0x1B, 0x10, 0x98, 0xDA, 0x00, 0xAA, 0x00,
-        0x3F, 0x13, 0x05,
+        0x90, 0xDA, 0xD8, 0x6E, 0x0B, 0x45, 0x1B, 0x10, 0x98, 0xDA, 0x00, 0xAA, 0x00, 0x3F, 0x13,
+        0x05,
     ];
 
     let mut email = test_email();
@@ -1587,8 +1962,10 @@ fn meeting_request_fast_transfer_projects_actionable_properties() {
     );
     email.calendar_invitation = true;
     email.calendar_meeting_request = Some(lpe_storage::CalendarMeetingRequest {
-        uid: "probe-7@example.test".to_string(),
+        uid: "mapi-goid:040000008200e00074c5b7101a82e00807ea0818c08470cd9e31dd01000000000000000010000000ecff8aec00ce584390f914bf6a87f955".to_string(),
         transport_attachment_id: None,
+        organizer: None,
+        attendees: Vec::new(),
         response_requested: true,
         sent_at: Some("2026-08-23T18:00:00Z".to_string()),
         meeting_start: "2026-08-24T06:30:00Z".to_string(),
@@ -1606,7 +1983,7 @@ fn meeting_request_fast_transfer_projects_actionable_properties() {
     );
     let contents_sync = sync_manifest_buffer_with_attachments(
         SYNC_TYPE_CONTENTS,
-        SYNC_FLAG_NORMAL,
+        SYNC_FLAG_NORMAL | SYNC_FLAG_UNICODE,
         0,
         &[],
         crate::mapi::identity::INBOX_FOLDER_ID,
@@ -1618,21 +1995,28 @@ fn meeting_request_fast_transfer_projects_actionable_properties() {
     );
     let start = filetime_from_rfc3339_utc("2026-08-24T06:30:00Z") as i64;
     let end = filetime_from_rfc3339_utc("2026-08-24T07:00:00Z") as i64;
-    let goid = match crate::mapi::properties::email_property_value(
-        &email,
-        PID_LID_GLOBAL_OBJECT_ID_TAG,
-    ) {
-        Some(crate::mapi::properties::MapiValue::Binary(value)) => value,
-        value => panic!("expected request GlobalObjectId, got {value:?}"),
-    };
+    let goid =
+        match crate::mapi::properties::email_property_value(&email, PID_LID_GLOBAL_OBJECT_ID_TAG) {
+            Some(crate::mapi::properties::MapiValue::Binary(value)) => value,
+            value => panic!("expected request GlobalObjectId, got {value:?}"),
+        };
     let mut encoded_goid = (goid.len() as u32).to_le_bytes().to_vec();
     encoded_goid.extend_from_slice(&goid);
-    let mut encoded_location = (utf16z("Les Planches").len() as u32)
-        .to_le_bytes()
-        .to_vec();
+    let clean_goid = match crate::mapi::properties::email_property_value(
+        &email,
+        PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG,
+    ) {
+        Some(crate::mapi::properties::MapiValue::Binary(value)) => value,
+        value => panic!("expected request CleanGlobalObjectId, got {value:?}"),
+    };
+    assert_ne!(goid, clean_goid);
+    let mut encoded_clean_goid = (clean_goid.len() as u32).to_le_bytes().to_vec();
+    encoded_clean_goid.extend_from_slice(&clean_goid);
+    let mut encoded_location = (utf16z("Les Planches").len() as u32).to_le_bytes().to_vec();
     encoded_location.extend_from_slice(&utf16z("Les Planches"));
 
     for buffer in [&copy_to, &contents_sync] {
+        assert_bool_property(buffer, PID_TAG_HAS_NAMED_PROPERTIES, true);
         assert_variable_property_present(
             buffer,
             PID_TAG_MESSAGE_CLASS_W,
@@ -1664,20 +2048,175 @@ fn meeting_request_fast_transfer_projects_actionable_properties() {
             0x0003,
             &encoded_goid,
         );
+        assert_named_lid_property(
+            buffer,
+            PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG,
+            PSETID_MEETING_GUID,
+            0x0023,
+            &encoded_clean_goid,
+        );
     }
 
     let response_only = fast_transfer_message_content_buffer_with_attachments(
         &email,
         &[],
         None,
-        FastTransferDirectPropertyFilter::CopyPropertiesIncluding(&[
-            PID_TAG_RESPONSE_REQUESTED,
-        ]),
+        FastTransferDirectPropertyFilter::CopyPropertiesIncluding(&[PID_TAG_RESPONSE_REQUESTED]),
         FastTransferMessageChildren::new(false, false),
     );
     assert_bool_property(&response_only, PID_TAG_RESPONSE_REQUESTED, true);
     assert_absent_property(&response_only, PID_TAG_START_DATE);
     assert_absent_property(&response_only, PID_LID_LOCATION_W_TAG);
+}
+
+#[test]
+fn meeting_response_subject_relationship_matches_copy_to_and_contents_sync() {
+    const PID_TAG_HAS_NAMED_PROPERTIES: u32 = 0x664A_000B;
+    const PID_TAG_SUBJECT_PREFIX_W: u32 = 0x003D_001F;
+
+    for (method, partstat, prefix) in [
+        ("REPLY", "accepted", "Accepted: "),
+        ("REPLY", "declined", "Declined: "),
+        ("COUNTER", "tentative", "New Time Proposed: "),
+    ] {
+        let email = meeting_response_subject_test_email(method, partstat, prefix);
+        let copy_to = fast_transfer_message_content_buffer_with_attachments(
+            &email,
+            &[],
+            None,
+            FastTransferDirectPropertyFilter::CopyToExcluding(&[]),
+            FastTransferMessageChildren::new(false, false),
+        );
+        let contents_sync = sync_manifest_buffer_with_attachments(
+            SYNC_TYPE_CONTENTS,
+            SYNC_FLAG_NORMAL | SYNC_FLAG_UNICODE,
+            0,
+            &[],
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            &[],
+            &[email],
+            &[],
+            &[],
+            1,
+        );
+        for buffer in [&copy_to, &contents_sync] {
+            assert_bool_property(buffer, PID_TAG_HAS_NAMED_PROPERTIES, true);
+            assert_variable_property_present(buffer, PID_TAG_SUBJECT_PREFIX_W, &utf16z(prefix));
+            assert_variable_property_present(
+                buffer,
+                PID_TAG_NORMALIZED_SUBJECT_W,
+                &utf16z("Probe 10"),
+            );
+        }
+    }
+}
+
+#[test]
+fn meeting_response_fast_transfer_projects_counter_proposal_named_properties() {
+    const PID_TAG_HAS_NAMED_PROPERTIES: u32 = 0x664A_000B;
+    const PID_TAG_SUBJECT_PREFIX_W: u32 = 0x003D_001F;
+    const PID_LID_APPOINTMENT_COUNTER_PROPOSAL_TAG: u32 = 0x8257_000B;
+    const PID_LID_APPOINTMENT_PROPOSED_START_WHOLE_TAG: u32 = 0x8250_0040;
+    const PID_LID_APPOINTMENT_PROPOSED_END_WHOLE_TAG: u32 = 0x8251_0040;
+    const PID_LID_IS_SILENT_TAG: u32 = 0x81E6_000B;
+    const PSETID_APPOINTMENT_GUID: [u8; 16] = [
+        0x02, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
+    const PSETID_MEETING_GUID: [u8; 16] = [
+        0x90, 0xDA, 0xD8, 0x6E, 0x0B, 0x45, 0x1B, 0x10, 0x98, 0xDA, 0x00, 0xAA, 0x00, 0x3F, 0x13,
+        0x05,
+    ];
+
+    let mut email = test_email();
+    crate::mapi::identity::remember_mapi_identity(
+        email.id,
+        crate::mapi::identity::mapi_store_id(51),
+    );
+    email.subject = "New Time Proposed: Probe 10".to_string();
+    email.calendar_meeting_response = Some(lpe_storage::CalendarMeetingResponse {
+        method: "COUNTER".to_string(),
+        transport_attachment_id: None,
+        server_processed: false,
+        organizer: None,
+        attendee_email: "denis.ducret@sdic.ch".to_string(),
+        attendee_name: "Denis Ducret".to_string(),
+        partstat: "declined".to_string(),
+        uid: "probe-10@example.test".to_string(),
+        response_sent_at: Some("2026-08-24T05:44:30Z".to_string()),
+        meeting_start: Some("2026-08-24T06:30:00Z".to_string()),
+        meeting_end: Some("2026-08-24T07:00:00Z".to_string()),
+        meeting_location: Some("Les Planches".to_string()),
+        meeting_sequence: Some(2),
+        proposed_start: Some("2026-08-24T07:30:00Z".to_string()),
+        proposed_end: Some("2026-08-24T08:00:00Z".to_string()),
+        original_start: Some("2026-08-24T06:30:00Z".to_string()),
+        original_end: Some("2026-08-24T07:00:00Z".to_string()),
+    });
+    let copy_to = fast_transfer_message_content_buffer_with_attachments(
+        &email,
+        &[],
+        None,
+        FastTransferDirectPropertyFilter::CopyToExcluding(&[]),
+        FastTransferMessageChildren::new(false, false),
+    );
+    let contents_sync = sync_manifest_buffer_with_attachments(
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_NORMAL | SYNC_FLAG_UNICODE,
+        0,
+        &[],
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &[],
+        &[email],
+        &[],
+        &[],
+        1,
+    );
+    let proposed_start = filetime_from_rfc3339_utc("2026-08-24T07:30:00Z") as i64;
+    let proposed_end = filetime_from_rfc3339_utc("2026-08-24T08:00:00Z") as i64;
+
+    for buffer in [&copy_to, &contents_sync] {
+        assert_bool_property(buffer, PID_TAG_HAS_NAMED_PROPERTIES, true);
+        assert_variable_property_present(
+            buffer,
+            PID_TAG_MESSAGE_CLASS_W,
+            &utf16z("IPM.Schedule.Meeting.Resp.Tent"),
+        );
+        assert_variable_property_present(
+            buffer,
+            PID_TAG_SUBJECT_PREFIX_W,
+            &utf16z("New Time Proposed: "),
+        );
+        assert_variable_property_present(buffer, PID_TAG_NORMALIZED_SUBJECT_W, &utf16z("Probe 10"));
+        assert_named_lid_property(
+            buffer,
+            PID_LID_APPOINTMENT_COUNTER_PROPOSAL_TAG,
+            PSETID_APPOINTMENT_GUID,
+            0x8257,
+            &[1, 0],
+        );
+        assert_named_lid_property(
+            buffer,
+            PID_LID_APPOINTMENT_PROPOSED_START_WHOLE_TAG,
+            PSETID_APPOINTMENT_GUID,
+            0x8250,
+            &proposed_start.to_le_bytes(),
+        );
+        assert_named_lid_property(
+            buffer,
+            PID_LID_APPOINTMENT_PROPOSED_END_WHOLE_TAG,
+            PSETID_APPOINTMENT_GUID,
+            0x8251,
+            &proposed_end.to_le_bytes(),
+        );
+        assert_named_lid_property(
+            buffer,
+            PID_LID_IS_SILENT_TAG,
+            PSETID_MEETING_GUID,
+            0x0004,
+            &[0, 0],
+        );
+    }
 }
 
 #[test]
@@ -4831,4 +5370,29 @@ fn test_email() -> JmapEmail {
         mime_blob_ref: None,
         delivery_status: "stored".to_string(),
     }
+}
+
+fn meeting_response_subject_test_email(method: &str, partstat: &str, prefix: &str) -> JmapEmail {
+    let mut email = test_email();
+    email.subject = format!("{prefix}Probe 10");
+    email.calendar_meeting_response = Some(lpe_storage::CalendarMeetingResponse {
+        method: method.to_string(),
+        transport_attachment_id: None,
+        server_processed: false,
+        organizer: None,
+        attendee_email: "denis.ducret@sdic.ch".to_string(),
+        attendee_name: "Denis Ducret".to_string(),
+        partstat: partstat.to_string(),
+        uid: "probe-10@example.test".to_string(),
+        response_sent_at: Some("2026-08-24T05:44:30Z".to_string()),
+        meeting_start: Some("2026-08-24T06:30:00Z".to_string()),
+        meeting_end: Some("2026-08-24T07:00:00Z".to_string()),
+        meeting_location: Some("Les Planches".to_string()),
+        meeting_sequence: Some(2),
+        proposed_start: (method == "COUNTER").then(|| "2026-08-24T07:30:00Z".to_string()),
+        proposed_end: (method == "COUNTER").then(|| "2026-08-24T08:00:00Z".to_string()),
+        original_start: Some("2026-08-24T06:30:00Z".to_string()),
+        original_end: Some("2026-08-24T07:00:00Z".to_string()),
+    });
+    email
 }

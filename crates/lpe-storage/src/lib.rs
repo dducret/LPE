@@ -14,6 +14,7 @@ pub mod inbound;
 pub mod jmap_blobs;
 pub mod jmap_queries;
 pub mod mail;
+mod mail_followup;
 pub mod mail_items;
 pub mod mailboxes;
 pub mod mapi_contacts;
@@ -62,9 +63,6 @@ pub use crate::calendar::{
     serialize_calendar_participants_metadata, CalendarOrganizerMetadata,
     CalendarParticipantMetadata, CalendarParticipantsMetadata,
 };
-pub use crate::mail::{
-    normalize_calendar_meeting_uid, CalendarMeetingRequest, CalendarMeetingResponse,
-};
 pub use crate::change::{
     CanonicalChangeCategory, CanonicalChangeListener, CanonicalChangeReplay, CanonicalPushChangeSet,
 };
@@ -81,6 +79,11 @@ pub use crate::core::Storage;
 pub use crate::imap::{ImapEmail, ImapMailboxState, ImapMimePart};
 pub use crate::jmap_blobs::{JmapQuota, JmapUploadBlob};
 pub use crate::jmap_queries::{JmapEmailQuery, JmapStoredQueryState, JmapThreadQuery};
+pub use crate::mail::{
+    calendar_uid_from_global_object_id, decode_calendar_global_object_id_uid,
+    external_calendar_uid, normalize_calendar_meeting_uid, CalendarMeetingAttendee,
+    CalendarMeetingIdentity, CalendarMeetingRequest, CalendarMeetingResponse,
+};
 pub use crate::mailboxes::{
     JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, ManagedRetentionFolderCreateInput,
 };
@@ -121,7 +124,8 @@ pub use crate::submission::{
     DelegatePreferencesPatch, MailboxAccountAccess, MailboxDelegationGrant,
     MailboxDelegationGrantInput, MailboxDelegationOverview, MailboxFolderDelegationGrantInput,
     SavedDraftMessage, SenderAuthorizationKind, SenderDelegationGrant, SenderDelegationGrantInput,
-    SenderDelegationRight, SenderIdentity, SubmissionAccountIdentity, SubmitMessageInput,
+    SenderDelegationRight, SenderIdentity, SubmissionAccountIdentity,
+    SubmissionMessageCustomPropertyInput, SubmissionSourcePatch, SubmitMessageInput,
     SubmittedMessage, SubmittedRecipientInput,
 };
 pub use crate::tasks::{

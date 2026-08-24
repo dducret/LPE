@@ -13,6 +13,8 @@ mod folder_copy;
 mod folders;
 mod hierarchy_properties;
 mod manifest;
+mod message_identity;
+mod recipient_projection;
 mod special_message;
 #[cfg(test)]
 mod tests;
@@ -133,11 +135,17 @@ const PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W: u32 = 0x36E5_001F;
 const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 const PID_TAG_MESSAGE_DELIVERY_TIME: u32 = 0x0E06_0040;
 const PID_TAG_SENDER_NAME_W: u32 = 0x0C1A_001F;
+const PID_TAG_SENDER_ENTRY_ID: u32 = 0x0C19_0102;
+const PID_TAG_SENDER_SEARCH_KEY: u32 = 0x0C1D_0102;
 const PID_TAG_SENDER_ADDRESS_TYPE_W: u32 = 0x0C1E_001F;
 const PID_TAG_SENDER_EMAIL_ADDRESS_W: u32 = 0x0C1F_001F;
+const PID_TAG_SENDER_SMTP_ADDRESS_W: u32 = 0x5D01_001F;
 const PID_TAG_SENT_REPRESENTING_NAME_W: u32 = 0x0042_001F;
+const PID_TAG_SENT_REPRESENTING_ENTRY_ID: u32 = 0x0041_0102;
+const PID_TAG_SENT_REPRESENTING_SEARCH_KEY: u32 = 0x003B_0102;
 const PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W: u32 = 0x0064_001F;
 const PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W: u32 = 0x0065_001F;
+const PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W: u32 = 0x5D02_001F;
 const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
 const PID_TAG_MESSAGE_RECIPIENTS: u32 = 0x0E12_000D;
 const PID_TAG_MESSAGE_ATTACHMENTS: u32 = 0x0E13_000D;
@@ -773,7 +781,7 @@ pub(crate) fn fast_transfer_manifest_buffer_with_attachments(
             &mut buffer,
             email.from_display.as_deref().unwrap_or_default().as_bytes(),
         );
-        write_visible_recipient_facts(&mut buffer, email);
+        recipient_projection::write_visible_recipient_facts(&mut buffer, email);
         buffer.extend_from_slice(&(attachments.len().min(u16::MAX as usize) as u16).to_le_bytes());
         let mut attachments = attachments.iter().collect::<Vec<_>>();
         attachments.sort_by(|left, right| {
@@ -858,7 +866,7 @@ fn write_fast_transfer_message_children(
             PID_TAG_MESSAGE_RECIPIENTS as i32,
         );
         if let Some(email) = email {
-            write_fast_transfer_visible_recipients(buffer, email);
+            recipient_projection::write_fast_transfer_visible_recipients(buffer, email);
         } else {
             write_fast_transfer_special_recipients(buffer, special_recipients);
         }
@@ -1158,58 +1166,6 @@ pub(crate) fn canonical_flag_status(email: &JmapEmail) -> u32 {
         "flagged" => FOLLOWUP_FLAGGED,
         _ if email.flagged => FOLLOWUP_FLAGGED,
         _ => 0,
-    }
-}
-
-fn write_visible_recipient_facts(buffer: &mut Vec<u8>, email: &JmapEmail) {
-    let recipient_count = email
-        .to
-        .len()
-        .saturating_add(email.cc.len())
-        .min(u16::MAX as usize);
-    buffer.extend_from_slice(&(recipient_count as u16).to_le_bytes());
-
-    let visible_recipients = email
-        .to
-        .iter()
-        .map(|recipient| (1u8, recipient))
-        .chain(email.cc.iter().map(|recipient| (2u8, recipient)));
-    for (recipient_type, recipient) in visible_recipients.take(u16::MAX as usize) {
-        buffer.push(recipient_type);
-        write_prefixed_bytes(buffer, recipient.address.as_bytes());
-        write_prefixed_bytes(
-            buffer,
-            recipient
-                .display_name
-                .as_deref()
-                .unwrap_or_default()
-                .as_bytes(),
-        );
-    }
-}
-
-fn write_fast_transfer_visible_recipients(buffer: &mut Vec<u8>, email: &JmapEmail) {
-    let visible_recipients = email
-        .to
-        .iter()
-        .map(|recipient| (1i32, recipient))
-        .chain(email.cc.iter().map(|recipient| (2i32, recipient)));
-    for (row_id, (recipient_type, recipient)) in visible_recipients.enumerate() {
-        write_u32(buffer, START_RECIP);
-        // [MS-OXCFXICS] section 2.2.4.3.23: PidTagRowid is required in
-        // fixed first position for every recipient element.
-        write_i32_property(buffer, PID_TAG_ROWID, row_id as i32);
-        write_i32_property(buffer, PID_TAG_RECIPIENT_TYPE, recipient_type);
-        write_utf16_property(
-            buffer,
-            PID_TAG_DISPLAY_NAME_W,
-            recipient
-                .display_name
-                .as_deref()
-                .unwrap_or(&recipient.address),
-        );
-        write_utf16_property(buffer, PID_TAG_EMAIL_ADDRESS_W, &recipient.address);
-        write_u32(buffer, END_TO_RECIP);
     }
 }
 

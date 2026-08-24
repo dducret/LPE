@@ -1,44 +1,47 @@
+use super::meeting_property_tags::{
+    EMAIL_MEETING_REQUEST_PROPERTY_TAGS, EMAIL_MEETING_RESPONSE_PROPERTY_TAGS,
+};
+use super::meeting_submission::{is_mapi_meeting_request, meeting_scheduling_attachments};
+use super::message_computed::{
+    calendar_meeting_owner_appointment_id, calendar_response_icon_index, transport_headers,
+};
 use super::*;
 
-pub(crate) const EMAIL_MEETING_REQUEST_FAST_TRANSFER_TAGS: &[u32] = &[
-    PID_TAG_START_DATE,
-    PID_TAG_END_DATE,
-    PID_TAG_OWNER_APPOINTMENT_ID,
-    PID_TAG_REPLY_REQUESTED,
-    PID_TAG_RESPONSE_REQUESTED,
-    PID_TAG_ICON_INDEX,
-    PID_LID_COMMON_START_TAG,
-    PID_LID_COMMON_END_TAG,
-    PID_LID_APPOINTMENT_START_WHOLE_TAG,
-    PID_LID_APPOINTMENT_END_WHOLE_TAG,
-    PID_LID_LOCATION_W_TAG,
-    PID_LID_APPOINTMENT_SEQUENCE_TAG,
-    PID_LID_BUSY_STATUS_TAG,
-    PID_LID_INTENDED_BUSY_STATUS_TAG,
-    PID_LID_APPOINTMENT_STATE_FLAGS_TAG,
-    PID_LID_RESPONSE_STATUS_TAG,
-    PID_LID_F_INVITED_TAG,
-    PID_LID_SIDE_EFFECTS_TAG,
-    PID_LID_APPOINTMENT_MESSAGE_CLASS_W_TAG,
-    PID_LID_MEETING_TYPE_TAG,
-    PID_LID_IS_RECURRING_TAG,
-    PID_LID_RECURRING_TAG,
-    PID_LID_IS_EXCEPTION_TAG,
-    PID_LID_GLOBAL_OBJECT_ID_TAG,
-    PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG,
-    PID_LID_ATTENDEE_CRITICAL_CHANGE_TAG,
-    PID_LID_OWNER_CRITICAL_CHANGE_TAG,
-    PID_LID_WHERE_W_TAG,
-    PID_LID_ALL_ATTENDEES_STRING_W_TAG,
-    PID_LID_TO_ATTENDEES_STRING_W_TAG,
-    PID_LID_CC_ATTENDEES_STRING_W_TAG,
-    PID_NAME_CONTENT_CLASS_W_TAG,
-];
+pub(crate) fn email_meeting_property_tags(email: &JmapEmail) -> Vec<u32> {
+    if !message_class_for_email(email).starts_with("IPM.Schedule.Meeting.") {
+        return Vec::new();
+    }
+    let (candidates, response) = if let Some(response) = email.calendar_meeting_response.as_ref() {
+        (EMAIL_MEETING_RESPONSE_PROPERTY_TAGS, Some(response))
+    } else if email.calendar_meeting_request.is_some() {
+        (EMAIL_MEETING_REQUEST_PROPERTY_TAGS, None)
+    } else {
+        return Vec::new();
+    };
 
-pub(crate) fn email_property_value(
-    email: &JmapEmail,
-    property_tag: u32,
-) -> Option<MapiValue> {
+    candidates
+        .iter()
+        .copied()
+        .filter(|property_tag| {
+            response.is_none_or(|response| match *property_tag {
+                PID_TAG_START_DATE
+                | PID_TAG_OWNER_APPOINTMENT_ID
+                | PID_LID_COMMON_START_TAG
+                | PID_LID_APPOINTMENT_START_WHOLE_TAG => response.meeting_start.is_some(),
+                PID_TAG_END_DATE | PID_LID_COMMON_END_TAG | PID_LID_APPOINTMENT_END_WHOLE_TAG => {
+                    response.meeting_end.is_some()
+                }
+                _ => true,
+            })
+        })
+        .filter(|property_tag| {
+            *property_tag == PID_TAG_HAS_NAMED_PROPERTIES
+                || email_property_value(email, *property_tag).is_some()
+        })
+        .collect()
+}
+
+pub(crate) fn email_property_value(email: &JmapEmail, property_tag: u32) -> Option<MapiValue> {
     let property_tag = canonical_property_storage_tag(property_tag);
     if let Some(value) = rss_email_named_property_value(email, property_tag) {
         return Some(value);
@@ -51,9 +54,12 @@ pub(crate) fn email_property_value(
             Some(MapiValue::U64(mapi_folder_id_for_email(email)))
         }
         PID_TAG_MID => Some(MapiValue::U64(mapi_message_id(email))),
-        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_CONVERSATION_TOPIC_W => {
+        PID_TAG_SUBJECT_W | PID_TAG_CONVERSATION_TOPIC_W => {
             Some(MapiValue::String(email.subject.clone()))
         }
+        PID_TAG_NORMALIZED_SUBJECT_W => Some(MapiValue::String(
+            email_normalized_subject(email).to_string(),
+        )),
         PID_TAG_ORIGINAL_SUBJECT_W => Some(MapiValue::String(email.subject.clone())),
         PID_TAG_MESSAGE_CLASS_W | PID_TAG_ORIGINAL_MESSAGE_CLASS_W => Some(MapiValue::String(
             message_class_for_email(email).to_string(),
@@ -76,9 +82,7 @@ pub(crate) fn email_property_value(
             .filter(|response| response.method == "COUNTER")
             .and_then(|response| response.proposed_end.as_deref())
             .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
-        PID_TAG_START_DATE
-        | PID_LID_COMMON_START_TAG
-        | PID_LID_APPOINTMENT_START_WHOLE_TAG => {
+        PID_TAG_START_DATE | PID_LID_COMMON_START_TAG | PID_LID_APPOINTMENT_START_WHOLE_TAG => {
             calendar_meeting_time(email, true).or(Some(MapiValue::U64(0)))
         }
         PID_TAG_END_DATE | PID_LID_COMMON_END_TAG | PID_LID_APPOINTMENT_END_WHOLE_TAG => {
@@ -138,14 +142,13 @@ pub(crate) fn email_property_value(
             .calendar_meeting_request
             .as_ref()
             .map(|_| MapiValue::Bool(false)),
-        PID_LID_OWNER_CRITICAL_CHANGE_TAG => email
-            .calendar_meeting_request
-            .as_ref()
-            .map(|request| {
+        PID_LID_OWNER_CRITICAL_CHANGE_TAG => {
+            email.calendar_meeting_request.as_ref().map(|request| {
                 MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
                     request.sent_at.as_deref().unwrap_or(&email.received_at),
                 ))
-            }),
+            })
+        }
         // [MS-OXOCAL] section 3.1.4.8.4 requires a Meeting Response to carry
         // the sent time, the copied Location, and whether it has a user body.
         PID_LID_ATTENDEE_CRITICAL_CHANGE_TAG => email
@@ -193,20 +196,23 @@ pub(crate) fn email_property_value(
         PID_LID_ALL_ATTENDEES_STRING_W_TAG => email
             .calendar_meeting_request
             .as_ref()
-            .map(|_| calendar_request_attendees(email.to.iter().chain(&email.cc)))
+            .map(|request| calendar_request_attendees(request, None))
             .map(MapiValue::String),
         PID_LID_TO_ATTENDEES_STRING_W_TAG => email
             .calendar_meeting_request
             .as_ref()
-            .map(|_| calendar_request_attendees(email.to.iter()))
+            .map(|request| calendar_request_attendees(request, Some(0x01)))
             .map(MapiValue::String),
         PID_LID_CC_ATTENDEES_STRING_W_TAG => email
             .calendar_meeting_request
             .as_ref()
-            .map(|_| calendar_request_attendees(email.cc.iter()))
+            .map(|request| calendar_request_attendees(request, Some(0x02)))
             .map(MapiValue::String),
-        PID_LID_GLOBAL_OBJECT_ID_TAG | PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG => {
+        PID_LID_GLOBAL_OBJECT_ID_TAG => {
             calendar_meeting_global_object_id(email).map(MapiValue::Binary)
+        }
+        PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG => {
+            calendar_meeting_clean_global_object_id(email).map(MapiValue::Binary)
         }
         PID_TAG_CREATION_TIME
         | PID_TAG_MESSAGE_DELIVERY_TIME
@@ -238,10 +244,18 @@ pub(crate) fn email_property_value(
                 .as_ref()
                 .is_some_and(|request| request.response_requested),
         )),
+        // [MS-OXOCAL] section 3.1.4.8.5.1: Outlook must not record a Meeting
+        // Response again after the server has correlated and processed it.
         PID_TAG_PROCESSED => email
-            .calendar_meeting_request
-            .is_none()
-            .then_some(MapiValue::Bool(false)),
+            .calendar_meeting_response
+            .as_ref()
+            .map(|response| MapiValue::Bool(response.server_processed))
+            .or_else(|| {
+                email
+                    .calendar_meeting_request
+                    .is_none()
+                    .then_some(MapiValue::Bool(false))
+            }),
         PID_TAG_DEFERRED_DELIVERY_TIME
         | PID_TAG_DEFERRED_SEND_TIME
         | PID_TAG_ARCHIVE_DATE
@@ -268,11 +282,13 @@ pub(crate) fn email_property_value(
         | PID_TAG_PRIMARY_SEND_ACCOUNT_W
         | PID_TAG_REPORT_DISPOSITION_W
         | PID_TAG_REPLY_RECIPIENT_NAMES_W => Some(MapiValue::String(String::new())),
-        PID_TAG_ICON_INDEX => Some(MapiValue::U32(if email.calendar_meeting_request.is_some() {
-            u32::MAX
-        } else {
-            calendar_response_icon_index(email).unwrap_or(0)
-        })),
+        PID_TAG_ICON_INDEX => Some(MapiValue::U32(
+            if email.calendar_meeting_request.is_some() {
+                u32::MAX
+            } else {
+                calendar_response_icon_index(email).unwrap_or(0)
+            },
+        )),
         PID_TAG_INTERNET_MAIL_OVERRIDE_FORMAT
         | PID_TAG_BLOCK_STATUS
         | PID_TAG_LAST_VERB_EXECUTED
@@ -280,11 +296,9 @@ pub(crate) fn email_property_value(
         PID_TAG_OWNER_APPOINTMENT_ID => Some(MapiValue::U32(
             calendar_meeting_owner_appointment_id(email).unwrap_or(0),
         )),
-        PID_TAG_SUBJECT_PREFIX_W => Some(MapiValue::String(
-            calendar_response_subject_prefix(email)
-                .unwrap_or_default()
-                .to_string(),
-        )),
+        PID_TAG_SUBJECT_PREFIX_W => {
+            Some(MapiValue::String(email_subject_prefix(email).to_string()))
+        }
         PID_TAG_MESSAGE_STATUS => Some(MapiValue::U32(0)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(message_flags(email))),
         PID_TAG_READ => Some(MapiValue::Bool(!email.unread)),
@@ -332,12 +346,19 @@ pub(crate) fn email_property_value(
         PID_TAG_SENDER_EMAIL_ADDRESS_W | PID_TAG_SENDER_SMTP_ADDRESS_W => {
             Some(MapiValue::String(email_sender_address(email).to_string()))
         }
+        PID_TAG_SENDER_ENTRY_ID => Some(MapiValue::Binary(sender_entry_id(email))),
+        PID_TAG_SENDER_SEARCH_KEY => Some(MapiValue::Binary(smtp_search_key(
+            email_sender_address(email),
+        ))),
         PID_TAG_SENT_REPRESENTING_NAME_W => Some(MapiValue::String(
             email_sent_representing_name(email).to_string(),
         )),
         PID_TAG_SENT_REPRESENTING_ENTRY_ID => {
             Some(MapiValue::Binary(sent_representing_entry_id(email)))
         }
+        PID_TAG_SENT_REPRESENTING_SEARCH_KEY => Some(MapiValue::Binary(smtp_search_key(
+            email_sent_representing_address(email),
+        ))),
         PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W => Some(MapiValue::String("SMTP".to_string())),
         PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W | PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W => {
             Some(MapiValue::String(
@@ -348,6 +369,7 @@ pub(crate) fn email_property_value(
         PID_TAG_DISPLAY_CC_W => Some(MapiValue::String(display_cc(email))),
         PID_TAG_DISPLAY_BCC_W => Some(MapiValue::String(display_bcc(email))),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(email.has_attachments)),
+        PID_TAG_HAS_NAMED_PROPERTIES => Some(MapiValue::Bool(email_has_named_properties(email))),
         PID_TAG_RTF_IN_SYNC => Some(MapiValue::Bool(false)),
         PID_TAG_BODY_W => Some(MapiValue::String(email.body_text.clone())),
         PID_TAG_RTF_COMPRESSED => Some(MapiValue::Binary(uncompressed_rtf_body(&email.body_text))),
@@ -432,7 +454,7 @@ pub(in crate::mapi) fn email_property_value_with_durable_identity(
     email_property_value(email, property_tag)
 }
 
-pub(in crate::mapi) fn email_sender_name(email: &JmapEmail) -> &str {
+pub(crate) fn email_sender_name(email: &JmapEmail) -> &str {
     email
         .sender_display
         .as_deref()
@@ -447,18 +469,18 @@ pub(in crate::mapi) fn email_client_submit_time_filetime(email: &JmapEmail) -> u
     )
 }
 
-pub(in crate::mapi) fn email_sender_address(email: &JmapEmail) -> &str {
+pub(crate) fn email_sender_address(email: &JmapEmail) -> &str {
     email
         .sender_address
         .as_deref()
         .unwrap_or(&email.from_address)
 }
 
-pub(in crate::mapi) fn email_sent_representing_name(email: &JmapEmail) -> &str {
+pub(crate) fn email_sent_representing_name(email: &JmapEmail) -> &str {
     email.from_display.as_deref().unwrap_or(&email.from_address)
 }
 
-pub(in crate::mapi) fn email_sent_representing_address(email: &JmapEmail) -> &str {
+pub(crate) fn email_sent_representing_address(email: &JmapEmail) -> &str {
     &email.from_address
 }
 
@@ -499,16 +521,37 @@ pub(crate) fn content_class_for_email(email: &JmapEmail) -> &'static str {
     }
 }
 
-fn calendar_request_attendees<'a>(
-    addresses: impl Iterator<Item = &'a lpe_storage::JmapEmailAddress>,
+fn calendar_request_attendees(
+    request: &lpe_storage::CalendarMeetingRequest,
+    recipient_type: Option<u8>,
 ) -> String {
-    addresses
-        .map(|address| {
-            address
-                .display_name
-                .as_deref()
-                .filter(|name| !name.trim().is_empty())
-                .unwrap_or(&address.address)
+    request
+        .attendees
+        .iter()
+        .filter(|attendee| {
+            recipient_type.is_none_or(|recipient_type| {
+                // [MS-OXCICAL] section 2.1.3.1.1.20 gives ROLE precedence
+                // over CUTYPE when projecting RecipientType.
+                let actual = if matches!(attendee.role.as_str(), "CHAIR" | "REQ-PARTICIPANT") {
+                    0x01
+                } else if attendee.role == "OPT-PARTICIPANT" {
+                    0x02
+                } else if matches!(attendee.cutype.as_str(), "RESOURCE" | "ROOM")
+                    || attendee.role == "NON-PARTICIPANT"
+                {
+                    0x03
+                } else {
+                    0x01
+                };
+                actual == recipient_type
+            })
+        })
+        .map(|attendee| {
+            if attendee.display_name.trim().is_empty() {
+                attendee.email.as_str()
+            } else {
+                attendee.display_name.as_str()
+            }
         })
         .collect::<Vec<_>>()
         .join("; ")
@@ -530,17 +573,30 @@ fn calendar_meeting_global_object_id(email: &JmapEmail) -> Option<Vec<u8>> {
     ))
 }
 
-fn calendar_meeting_time(email: &JmapEmail, start: bool) -> Option<MapiValue> {
-    let request_time = email
+fn calendar_meeting_clean_global_object_id(email: &JmapEmail) -> Option<Vec<u8>> {
+    let uid = email
         .calendar_meeting_request
         .as_ref()
-        .map(|request| {
-            if start {
-                request.meeting_start.as_str()
-            } else {
-                request.meeting_end.as_str()
-            }
-        });
+        .map(|request| request.uid.as_str())
+        .or_else(|| {
+            email
+                .calendar_meeting_response
+                .as_ref()
+                .map(|response| response.uid.as_str())
+        })?;
+    Some(super::calendar::calendar_clean_global_object_id_from_uid(
+        uid, email.id,
+    ))
+}
+
+fn calendar_meeting_time(email: &JmapEmail, start: bool) -> Option<MapiValue> {
+    let request_time = email.calendar_meeting_request.as_ref().map(|request| {
+        if start {
+            request.meeting_start.as_str()
+        } else {
+            request.meeting_end.as_str()
+        }
+    });
     let response_time = email
         .calendar_meeting_response
         .as_ref()
@@ -552,51 +608,9 @@ fn calendar_meeting_time(email: &JmapEmail, start: bool) -> Option<MapiValue> {
             }
         });
     let value = request_time.or(response_time)?;
-    Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value)))
-}
-
-fn calendar_response_subject_prefix(email: &JmapEmail) -> Option<&'static str> {
-    let response = email.calendar_meeting_response.as_ref()?;
-    match response.method.as_str() {
-        "COUNTER" => Some("New Time Proposed: "),
-        "REPLY" => match response.partstat.as_str() {
-            "accepted" => Some("Accepted: "),
-            "tentative" => Some("Tentative: "),
-            "declined" => Some("Declined: "),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-fn calendar_response_icon_index(email: &JmapEmail) -> Option<u32> {
-    let response = email.calendar_meeting_response.as_ref()?;
-    match response.method.as_str() {
-        "COUNTER" => Some(0x0000_0407),
-        "REPLY" => match response.partstat.as_str() {
-            "accepted" => Some(0x0000_0405),
-            "declined" => Some(0x0000_0406),
-            "tentative" => Some(0x0000_0407),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-fn calendar_meeting_owner_appointment_id(email: &JmapEmail) -> Option<u32> {
-    let start = email
-        .calendar_meeting_request
-        .as_ref()
-        .map(|request| request.meeting_start.as_str())
-        .or_else(|| {
-            email
-                .calendar_meeting_response
-                .as_ref()
-                .and_then(|response| response.meeting_start.as_deref())
-        })?;
-    Some(super::calendar::owner_appointment_id_from_filetime(
-        mapi_mailstore::filetime_from_rfc3339_utc(start),
-    ))
+    Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+        value,
+    )))
 }
 
 pub(in crate::mapi) fn native_body_format(email: &JmapEmail) -> u32 {
@@ -675,27 +689,6 @@ fn rtf_uncompressed_container(raw: &[u8]) -> Vec<u8> {
     value.extend_from_slice(&0_u32.to_le_bytes());
     value.extend_from_slice(raw);
     value
-}
-
-fn transport_headers(email: &JmapEmail) -> String {
-    let mut headers = Vec::new();
-    if let Some(message_id) = email.internet_message_id.as_deref() {
-        headers.push(format!("Message-ID: {message_id}"));
-    }
-    headers.push(format!(
-        "From: {}",
-        email.from_display.as_deref().unwrap_or(&email.from_address)
-    ));
-    let to = display_to(email);
-    if !to.is_empty() {
-        headers.push(format!("To: {to}"));
-    }
-    let cc = display_cc(email);
-    if !cc.is_empty() {
-        headers.push(format!("Cc: {cc}"));
-    }
-    headers.push(format!("Subject: {}", email.subject));
-    headers.join("\r\n")
 }
 
 pub(in crate::mapi) fn conversation_id_from_index(value: &[u8]) -> Option<Uuid> {
@@ -780,18 +773,15 @@ pub(in crate::mapi) fn jmap_import_from_pending_message(
     mailbox: &JmapMailbox,
     properties: &HashMap<u32, MapiValue>,
     recipients: &[PendingRecipient],
-    attachments: Vec<AttachmentUploadInput>,
-) -> JmapImportedEmailInput {
+    mut attachments: Vec<AttachmentUploadInput>,
+) -> Result<JmapImportedEmailInput> {
     let subject = pending_text_property(
         properties,
         &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
     );
     let body_text = pending_body_text_property(properties);
-    let from_address =
-        optional_pending_text_property(properties, &[PID_TAG_SENDER_EMAIL_ADDRESS_W])
-            .unwrap_or_else(|| principal.email.clone());
-    let from_display = optional_pending_text_property(properties, &[PID_TAG_SENDER_NAME_W])
-        .or_else(|| Some(principal.display_name.clone()));
+    let (from_address, from_display, sender_address, sender_display) =
+        pending_message_submit_identity(principal, properties);
     let internet_message_id =
         optional_pending_text_property(properties, &[PID_TAG_INTERNET_MESSAGE_ID_W]);
     let thread_id = match properties.get(&PID_TAG_CONVERSATION_INDEX) {
@@ -804,8 +794,15 @@ pub(in crate::mapi) fn jmap_import_from_pending_message(
         .min(i64::MAX as usize) as i64;
     let (to, cc, bcc) =
         pending_recipients_for_import(recipients, is_mapi_meeting_request(properties));
+    let scheduling_attachments = meeting_scheduling_attachments(
+        properties,
+        recipients,
+        &from_address,
+        from_display.as_deref(),
+    )?;
+    attachments.extend(scheduling_attachments);
 
-    JmapImportedEmailInput {
+    Ok(JmapImportedEmailInput {
         account_id: principal.account_id,
         submitted_by_account_id: principal.account_id,
         mailbox_id: mailbox.id,
@@ -813,8 +810,8 @@ pub(in crate::mapi) fn jmap_import_from_pending_message(
         raw_message: None,
         from_display,
         from_address,
-        sender_display: None,
-        sender_address: None,
+        sender_display,
+        sender_address,
         to,
         cc,
         bcc,
@@ -827,7 +824,7 @@ pub(in crate::mapi) fn jmap_import_from_pending_message(
         received_at: None,
         thread_id,
         attachments,
-    }
+    })
 }
 
 pub(in crate::mapi) fn pending_recipients_for_import(
@@ -864,53 +861,27 @@ pub(in crate::mapi) fn mapi_submit_from_pending_message(
     principal: &AccountPrincipal,
     properties: &HashMap<u32, MapiValue>,
     recipients: &[PendingRecipient],
-) -> SubmitMessageInput {
+) -> Result<SubmitMessageInput> {
     let subject = pending_text_property(
         properties,
         &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
     );
     let body_text = pending_body_text_property(properties);
-    // [MS-OXOMSG] sections 2.2.1.49 and 2.2.1.55 distinguish the sending
-    // mailbox owner from the end user the message represents.
-    let from_address = optional_pending_submit_address(
-        properties,
-        &[
-            PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
-            PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W,
-            PID_TAG_SENDER_EMAIL_ADDRESS_W,
-            PID_TAG_SENDER_SMTP_ADDRESS_W,
-        ],
-    )
-    .unwrap_or_else(|| principal.email.clone());
-    let from_display = optional_pending_text_property(
-        properties,
-        &[PID_TAG_SENT_REPRESENTING_NAME_W, PID_TAG_SENDER_NAME_W],
-    )
-    .or_else(|| Some(principal.display_name.clone()));
-    let sender_address = optional_pending_submit_address(
-        properties,
-        &[
-            PID_TAG_SENDER_EMAIL_ADDRESS_W,
-            PID_TAG_SENDER_SMTP_ADDRESS_W,
-        ],
-    )
-    .filter(|sender_address| sender_address != &from_address);
-    let sender_display = sender_address
-        .as_ref()
-        .and_then(|_| optional_pending_text_property(properties, &[PID_TAG_SENDER_NAME_W]));
+    let (from_address, from_display, sender_address, sender_display) =
+        pending_message_submit_identity(principal, properties);
     let internet_message_id =
         optional_pending_text_property(properties, &[PID_TAG_INTERNET_MESSAGE_ID_W]);
     let (to, cc, bcc) =
         pending_recipients_for_import(recipients, is_mapi_meeting_request(properties));
 
-    let attachments = meeting_request_attachment(
+    let attachments = meeting_scheduling_attachments(
         properties,
         recipients,
         &from_address,
         from_display.as_deref(),
-    );
+    )?;
 
-    SubmitMessageInput {
+    Ok(SubmitMessageInput {
         draft_message_id: None,
         account_id: principal.account_id,
         submitted_by_account_id: principal.account_id,
@@ -932,142 +903,51 @@ pub(in crate::mapi) fn mapi_submit_from_pending_message(
         flagged: Some(false),
         replace_attachments: false,
         attachments,
-    }
+    })
 }
 
-fn meeting_request_attachment(
+fn pending_message_submit_identity(
+    principal: &AccountPrincipal,
     properties: &HashMap<u32, MapiValue>,
-    recipients: &[PendingRecipient],
-    organizer_address: &str,
-    organizer_name: Option<&str>,
-) -> Vec<AttachmentUploadInput> {
-    if !is_mapi_meeting_request(properties) {
-        return Vec::new();
-    }
-
-    let start = properties
-        .get(&PID_LID_APPOINTMENT_START_WHOLE_TAG)
-        .or_else(|| properties.get(&PID_LID_COMMON_START_TAG))
-        .or_else(|| properties.get(&PID_TAG_START_DATE))
-        .and_then(MapiValue::as_i64)
-        .and_then(ical_utc_filetime);
-    let end = properties
-        .get(&PID_LID_APPOINTMENT_END_WHOLE_TAG)
-        .or_else(|| properties.get(&PID_LID_COMMON_END_TAG))
-        .or_else(|| properties.get(&PID_TAG_END_DATE))
-        .and_then(MapiValue::as_i64)
-        .and_then(ical_utc_filetime);
-    let uid = properties
-        .get(&PID_LID_GLOBAL_OBJECT_ID_TAG)
-        .or_else(|| properties.get(&PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG))
-        .and_then(|value| match value {
-            MapiValue::Binary(value) => Some(format!(
-                "mapi-goid:{}",
-                lpe_domain::crypto::hex_lower(value)
-            )),
-            _ => None,
-        });
-    let (Some(start), Some(end), Some(uid)) = (start, end, uid) else {
-        return Vec::new();
-    };
-    let dtstamp = properties
-        .get(&PID_TAG_CLIENT_SUBMIT_TIME)
-        .or_else(|| properties.get(&PID_TAG_LAST_MODIFICATION_TIME))
-        .or_else(|| properties.get(&PID_TAG_CREATION_TIME))
-        .and_then(MapiValue::as_i64)
-        .and_then(ical_utc_filetime)
-        .unwrap_or_else(|| start.clone());
-
-    let subject = pending_text_property(
+) -> (String, Option<String>, Option<String>, Option<String>) {
+    // [MS-OXOMSG] sections 2.2.1.49 and 2.2.1.55 distinguish the sending
+    // mailbox owner from the end user the message represents. SaveChanges and
+    // direct SubmitMessage must persist the same identity tuple.
+    let sent_representing_address = optional_pending_submit_address(
         properties,
-        &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
+        &[
+            PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
+            PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W,
+        ],
     );
-    let body = pending_body_text_property(properties);
-    let location = optional_pending_text_property(properties, &[PID_LID_LOCATION_W_TAG]);
-    let mut lines = vec![
-        "BEGIN:VCALENDAR".to_string(),
-        "VERSION:2.0".to_string(),
-        "PRODID:-//LPE//MAPI//EN".to_string(),
-        "METHOD:REQUEST".to_string(),
-        "BEGIN:VEVENT".to_string(),
-        format!("UID:{uid}"),
-        format!("DTSTAMP:{dtstamp}"),
-        format!("DTSTART:{start}"),
-        format!("DTEND:{end}"),
-        format!("SUMMARY:{}", ical_text_escape(&subject)),
-        format!(
-            "ORGANIZER;CN={}:mailto:{}",
-            ical_parameter_escape(organizer_name.unwrap_or(organizer_address)),
-            organizer_address
-        ),
-    ];
-    if let Some(location) = location.filter(|value| !value.trim().is_empty()) {
-        lines.push(format!("LOCATION:{}", ical_text_escape(&location)));
-    }
-    if !body.trim().is_empty() {
-        lines.push(format!("DESCRIPTION:{}", ical_text_escape(&body)));
-    }
-    for recipient in recipients {
-        if recipient.is_calendar_organizer()
-            || matches!(recipient.recipient_type & 0x0F, 0x03)
-            || recipient.address.trim().is_empty()
-        {
-            continue;
-        }
-        let role = if recipient.recipient_type & 0x0F == 0x02 {
-            "OPT-PARTICIPANT"
-        } else {
-            "REQ-PARTICIPANT"
-        };
-        let name = recipient
-            .display_name
-            .as_deref()
-            .unwrap_or(&recipient.address);
-        lines.push(format!(
-            "ATTENDEE;CN={};ROLE={role};PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:{}",
-            ical_parameter_escape(name),
-            recipient.address.trim()
-        ));
-    }
-    lines.push("END:VEVENT".to_string());
-    lines.push("END:VCALENDAR".to_string());
-    vec![AttachmentUploadInput {
-        file_name: "invite.ics".to_string(),
-        media_type: "text/calendar; method=REQUEST; charset=UTF-8".to_string(),
-        disposition: Some("inline".to_string()),
-        content_id: None,
-        blob_bytes: lines.join("\r\n").into_bytes(),
-    }]
-}
-
-fn is_mapi_meeting_request(properties: &HashMap<u32, MapiValue>) -> bool {
-    optional_pending_text_property(properties, &[PID_TAG_MESSAGE_CLASS_W]).is_some_and(|value| {
-        value
-            .trim()
-            .eq_ignore_ascii_case("IPM.Schedule.Meeting.Request")
-    }) || properties
-        .get(&PID_LID_APPOINTMENT_STATE_FLAGS_TAG)
-        .and_then(MapiValue::as_i64)
-        .is_some_and(|flags| flags & 0x0000_0001 != 0)
-}
-
-fn ical_utc_filetime(value: i64) -> Option<String> {
-    filetime_to_rfc3339_utc(value).map(|value| value.replace('-', "").replace(':', ""))
-}
-
-fn ical_text_escape(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('\n', "\\n")
-        .replace(';', "\\;")
-        .replace(',', "\\,")
-}
-
-fn ical_parameter_escape(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('"', "'")
-        .replace(';', "\\;")
+    let submit_sender_address = optional_pending_submit_address(
+        properties,
+        &[
+            PID_TAG_SENDER_EMAIL_ADDRESS_W,
+            PID_TAG_SENDER_SMTP_ADDRESS_W,
+        ],
+    );
+    let (from_address, from_display) = if let Some(address) = sent_representing_address {
+        (
+            address,
+            optional_pending_text_property(properties, &[PID_TAG_SENT_REPRESENTING_NAME_W]),
+        )
+    } else if let Some(address) = submit_sender_address.clone() {
+        (
+            address,
+            optional_pending_text_property(properties, &[PID_TAG_SENDER_NAME_W]),
+        )
+    } else {
+        (
+            principal.email.clone(),
+            Some(principal.display_name.clone()),
+        )
+    };
+    let sender_address = submit_sender_address.filter(|address| address != &from_address);
+    let sender_display = sender_address
+        .as_ref()
+        .and_then(|_| optional_pending_text_property(properties, &[PID_TAG_SENDER_NAME_W]));
+    (from_address, from_display, sender_address, sender_display)
 }
 
 fn optional_pending_submit_address(

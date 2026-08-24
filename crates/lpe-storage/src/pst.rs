@@ -339,6 +339,7 @@ impl Storage {
                         media_type: decode_pst_field(parts[2]),
                         disposition: Some("attachment".to_string()),
                         content_id: None,
+                        is_scheduling_body: false,
                         blob_bytes: BASE64
                             .decode(parts[3])
                             .context("decode PST attachment payload")?,
@@ -752,6 +753,7 @@ mod tests {
                     media_type: "text/plain".to_string(),
                     disposition: Some("attachment".to_string()),
                     content_id: None,
+                    is_scheduling_body: false,
                     blob_bytes: b"attachment body".to_vec(),
                 }],
             )

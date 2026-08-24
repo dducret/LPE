@@ -127,9 +127,9 @@ fn event_property_value_with_optional_version(
         | PID_LID_COMMON_END_TAG
         | PID_LID_APPOINTMENT_END_WHOLE_TAG
         | PID_LID_CLIP_END_TAG => Some(MapiValue::I64(event_end_filetime(event) as i64)),
-        PID_TAG_OWNER_APPOINTMENT_ID => Some(MapiValue::U32(
-            owner_appointment_id_from_filetime(event_start_filetime(event)),
-        )),
+        PID_TAG_OWNER_APPOINTMENT_ID => Some(MapiValue::U32(owner_appointment_id_from_filetime(
+            event_start_filetime(event),
+        ))),
         PID_LID_LOCATION_W_TAG => Some(MapiValue::String(event.location.clone())),
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Appointment".to_string())),
         PID_TAG_ACCESS => Some(MapiValue::U32(event_mapi_access(event))),
@@ -203,8 +203,9 @@ fn event_property_value_with_optional_version(
             Some(MapiValue::Binary(calendar_time_zone_definition(event)))
         }
         PID_LID_APPOINTMENT_RECUR_TAG => calendar_recurrence_blob(event).map(MapiValue::Binary),
-        PID_LID_GLOBAL_OBJECT_ID_TAG | PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG => {
-            Some(MapiValue::Binary(calendar_global_object_id(event)))
+        PID_LID_GLOBAL_OBJECT_ID_TAG => Some(MapiValue::Binary(calendar_global_object_id(event))),
+        PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG => {
+            Some(MapiValue::Binary(calendar_clean_global_object_id(event)))
         }
         // [MS-OXCDATA] section 2.2.4.2: a message EntryID is a store
         // provider EntryID, distinct from the eight-byte InstanceKey.
@@ -298,7 +299,10 @@ pub(super) fn calendar_organizer_identity(event: &AccessibleEvent) -> CalendarPa
     )
 }
 
-fn calendar_one_off_entry_id(display_name: &str, email_address: &str) -> Vec<u8> {
+pub(in crate::mapi) fn calendar_one_off_entry_id(
+    display_name: &str,
+    email_address: &str,
+) -> Vec<u8> {
     // [MS-OXCDATA] section 2.2.5.1 and [MS-OXCICAL] section
     // 2.1.3.1.1.20.2: unresolved SMTP participants use a Unicode One-Off EntryID.
     let mut entry_id = Vec::new();

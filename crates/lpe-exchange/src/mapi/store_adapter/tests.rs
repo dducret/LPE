@@ -28,11 +28,12 @@ fn empty_session() -> MapiSession {
         message_save_generations: HashMap::new(),
         message_handle_generations: HashMap::new(),
         pending_message_recipient_replacements: HashMap::new(),
+        pending_message_property_deletions: HashMap::new(),
         pending_message_attachments: HashMap::new(),
         pending_contact_photo_attachments: HashMap::new(),
         pending_attachment_parent_messages: HashMap::new(),
         pending_event_attachment_transactions: HashMap::new(),
-        pending_attachment_deletions: HashSet::new(),
+        pending_attachment_deletions: HashMap::new(),
         pending_embedded_message_ids: HashMap::new(),
         pending_embedded_message_attachments: HashMap::new(),
         saved_embedded_messages: HashMap::new(),
@@ -122,6 +123,26 @@ fn deduplicate_mapi_identity_requests_keeps_distinct_kinds() {
         MapiIdentityObjectKind::ConversationAction
     );
     assert_eq!(deduplicated[2].canonical_id, other_id);
+}
+
+#[test]
+fn selective_loader_allocates_message_identity_after_canonical_message_fetch() {
+    let source = include_str!("../store_adapter.rs");
+    let loader = source
+        .split_once("pub(in crate::mapi) async fn load_mapi_store_for_access_plan")
+        .expect("selective MAPI store loader must exist")
+        .1;
+    let fetch = loader
+        .find("let emails = if message_ids.is_empty()")
+        .expect("selective loader must fetch canonical messages");
+    let allocate = loader
+        .find("let allocated_message_identities = store")
+        .expect("selective loader must allocate message identities");
+
+    assert!(
+        fetch < allocate,
+        "calendar-mail lazy repair must finish before the selective snapshot reads its durable message identity"
+    );
 }
 
 fn release_handle_zero_rop_buffer() -> Vec<u8> {

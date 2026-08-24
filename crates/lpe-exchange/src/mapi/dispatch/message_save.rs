@@ -530,9 +530,14 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 .pending_message_recipient_replacements
                 .get(&handle)
                 .cloned();
+            let staged_property_deletions = session
+                .pending_message_property_deletions
+                .get(&handle)
+                .cloned()
+                .unwrap_or_default();
             let pending = session
                 .pending_attachment_deletions
-                .iter()
+                .keys()
                 .filter_map(|(pending_folder_id, pending_message_id, attach_num)| {
                     (*pending_folder_id == folder_id && *pending_message_id == message_id)
                         .then_some(*attach_num)
@@ -540,6 +545,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 .collect::<Vec<_>>();
             let has_pending_changes = staged_property_write
                 || staged_recipient_replacement.is_some()
+                || !staged_property_deletions.is_empty()
                 || !pending.is_empty();
             let force_save = request.payload.first().copied().unwrap_or(0) & 0x04 != 0;
             let current_generation = session.message_save_generation(folder_id, message_id);
@@ -618,15 +624,99 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                     return;
                 }
             }
+            if !staged_property_deletions.is_empty() {
+                let deletion_object = MapiObject::Message {
+                    folder_id,
+                    message_id,
+                    saved_email: saved_email.clone(),
+                    pending_properties: HashMap::new(),
+                };
+                let mut property_tags = staged_property_deletions
+                    .iter()
+                    .copied()
+                    .collect::<Vec<_>>();
+                property_tags.sort_unstable();
+                let custom_property_tags = property_tags
+                    .iter()
+                    .copied()
+                    .filter(|tag| is_custom_property_tag(*tag))
+                    .collect::<Vec<_>>();
+                if delete_custom_property_values(
+                    store,
+                    principal,
+                    Some(&deletion_object),
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &custom_property_tags,
+                )
+                .await
+                .is_err()
+                    || delete_canonical_message_text_properties(
+                        store,
+                        principal,
+                        Some(&deletion_object),
+                        &property_tags,
+                        mailboxes,
+                        emails,
+                        snapshot,
+                    )
+                    .await
+                    .is_err()
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x0C,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    return;
+                }
+                let mut followup_update = lpe_storage::JmapEmailFollowupUpdate::default();
+                apply_message_followup_property_deletions(
+                    &mut followup_update,
+                    &staged_property_deletions,
+                );
+                let canonical_id = saved_email
+                    .as_ref()
+                    .map(|saved| saved.email.id)
+                    .or_else(|| {
+                        message_for_id(folder_id, message_id, mailboxes, emails)
+                            .map(|email| email.id)
+                    });
+                if !message_followup_update_is_empty(&followup_update)
+                    && match canonical_id {
+                        Some(canonical_id) => store
+                            .update_jmap_email_followup_flags(
+                                principal.account_id,
+                                canonical_id,
+                                followup_update,
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "mapi-delete-message-properties".to_string(),
+                                    subject: format!("message:{canonical_id}"),
+                                },
+                            )
+                            .await
+                            .is_err(),
+                        None => true,
+                    }
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x0C,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    return;
+                }
+                session.pending_message_property_deletions.remove(&handle);
+            }
             let mut delete_failed = false;
             for attach_num in pending.iter().copied() {
                 let Some(attachment) =
                     snapshot.attachment_for_message(folder_id, message_id, attach_num)
                 else {
-                    session
-                        .pending_attachment_deletions
-                        .remove(&(folder_id, message_id, attach_num));
-                    continue;
+                    delete_failed = true;
+                    break;
                 };
                 match store
                     .delete_message_attachment(
@@ -1181,13 +1271,34 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
         .into_iter()
         .map(|(_, attachment)| attachment)
         .collect::<Vec<_>>();
-    let input = jmap_import_from_pending_message(
+    let input = match jmap_import_from_pending_message(
         principal,
         mailbox,
         &properties,
         &recipients,
         pending_attachments,
-    );
+    ) {
+        Ok(input) => input,
+        Err(error) => {
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                mailbox = %principal.email,
+                request_type = "Execute",
+                request_rop_id = "0x0c",
+                input_handle = handle,
+                invalid_scheduling_fields = %error,
+                "rca debug mapi save changes message"
+            );
+            responses.extend_from_slice(&rop_error_response(
+                0x0C,
+                request.response_handle_index(),
+                0x8007_0057,
+            ));
+            return;
+        }
+    };
     let imported_source_key = imported_message_source_key(&properties);
     let imported_source_key_global_counter = imported_source_key
         .as_deref()

@@ -2,7 +2,9 @@ use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{normalize_email, MailboxDelegationGrantRow, SenderDelegationGrantRow};
+use crate::{
+    normalize_email, JmapEmailFollowupUpdate, MailboxDelegationGrantRow, SenderDelegationGrantRow,
+};
 
 #[derive(Debug, Clone)]
 pub struct SubmitMessageInput {
@@ -43,7 +45,24 @@ pub struct AttachmentUploadInput {
     pub media_type: String,
     pub disposition: Option<String>,
     pub content_id: Option<String>,
+    pub is_scheduling_body: bool,
     pub blob_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubmissionMessageCustomPropertyInput {
+    pub property_tag: u32,
+    pub property_type: u16,
+    pub property_value: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SubmissionSourcePatch {
+    pub expected_source_modseq: Option<u64>,
+    pub delete_attachment_ids: Vec<Uuid>,
+    pub custom_property_upserts: Vec<SubmissionMessageCustomPropertyInput>,
+    pub delete_custom_property_tags: Vec<u32>,
+    pub canonical_followup_update: Option<JmapEmailFollowupUpdate>,
 }
 
 #[derive(Debug, Clone)]
@@ -86,7 +105,7 @@ pub(super) enum CanonicalSubmissionPhase {
     EnsureSentMailbox,
     PersistSentMessage,
     PersistOutboundQueue,
-    DeleteSourceDraft,
+    DeleteSubmissionSource,
 }
 
 pub(super) fn canonical_submission_phases(has_source_draft: bool) -> Vec<CanonicalSubmissionPhase> {
@@ -96,7 +115,7 @@ pub(super) fn canonical_submission_phases(has_source_draft: bool) -> Vec<Canonic
         CanonicalSubmissionPhase::PersistOutboundQueue,
     ];
     if has_source_draft {
-        phases.push(CanonicalSubmissionPhase::DeleteSourceDraft);
+        phases.push(CanonicalSubmissionPhase::DeleteSubmissionSource);
     }
     phases
 }
@@ -482,7 +501,7 @@ mod tests {
                 CanonicalSubmissionPhase::EnsureSentMailbox,
                 CanonicalSubmissionPhase::PersistSentMessage,
                 CanonicalSubmissionPhase::PersistOutboundQueue,
-                CanonicalSubmissionPhase::DeleteSourceDraft,
+                CanonicalSubmissionPhase::DeleteSubmissionSource,
             ]
         );
     }

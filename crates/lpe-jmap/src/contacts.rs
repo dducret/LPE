@@ -371,9 +371,13 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     Ok(contact_id) => match self
                         .contact_update_input(account_id, contact_id, value)
                         .await
-                        .map(|input| (contact_id, input))
+                        .map(|(input, validate_photo)| (contact_id, input, validate_photo))
                     {
-                        Ok((contact_id, input)) => match self.validate_contact_photo(&input) {
+                        Ok((contact_id, input, validate_photo)) => match if validate_photo {
+                            self.validate_contact_photo(&input)
+                        } else {
+                            Ok(())
+                        } {
                             Ok(()) => match self
                                 .store
                                 .update_accessible_contact(account_id, contact_id, input)
@@ -488,13 +492,16 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         account_id: Uuid,
         contact_id: Uuid,
         value: Value,
-    ) -> Result<UpsertClientContactInput> {
+    ) -> Result<(UpsertClientContactInput, bool)> {
         let object = value
             .as_object()
             .ok_or_else(|| anyhow!("contact card arguments must be an object"))?;
+        let validate_photo = object
+            .keys()
+            .any(|key| key == "photo" || key.starts_with("photo/"));
         if !has_jmap_property_patch(object) {
             return parse_contact_input(Some(contact_id), account_id, value)
-                .map(|(_, input)| input);
+                .map(|(_, input)| (input, validate_photo));
         }
 
         let existing = self
@@ -506,7 +513,8 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .ok_or_else(|| anyhow!("contact not found"))?;
         let mut patched = contact_to_value(&existing, &contact_properties(None));
         apply_jmap_property_patch(&mut patched, object)?;
-        parse_contact_input(Some(contact_id), account_id, patched).map(|(_, input)| input)
+        parse_contact_input(Some(contact_id), account_id, patched)
+            .map(|(_, input)| (input, validate_photo))
     }
 
     fn validate_contact_photo(&self, input: &UpsertClientContactInput) -> Result<()> {

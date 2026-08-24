@@ -2,20 +2,24 @@ use super::hierarchy_properties::{
     write_multi_binary_property, OWNER_INBOX_SPECIAL_FOLDER_ENTRY_IDS,
     PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
 };
+use super::message_identity::write_fast_transfer_message_identity;
 use super::special_message::{
     special_message_access, special_message_access_level, special_message_change_key,
     special_message_change_number, special_message_delivery_sort_time, special_message_flags,
     special_message_has_attachments, special_message_predecessor_change_list,
     special_message_property_is_ics_identity, special_message_property_is_server_projected,
     special_message_search_key, special_message_status, special_message_sync_parent_source_key,
-    special_message_sync_source_key, write_special_message_property, PID_TAG_HAS_ATTACHMENTS,
-    write_fast_transfer_property, PID_TAG_MESSAGE_STATUS,
+    special_message_sync_source_key, write_fast_transfer_property, write_special_message_property,
+    PID_TAG_HAS_ATTACHMENTS, PID_TAG_MESSAGE_STATUS,
 };
 use super::*;
 use crate::mapi::properties::{
-    email_property_value, message_class_for_email, EMAIL_MEETING_REQUEST_FAST_TRANSFER_TAGS,
+    email_generated_property_tags, email_has_named_properties, email_normalized_subject,
+    email_property_value, message_class_for_email,
 };
 use sha2::{Digest, Sha256};
+
+const PID_TAG_HAS_NAMED_PROPERTIES: u32 = 0x664A_000B;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AttachmentSyncFact {
@@ -75,39 +79,25 @@ fn email_delivery_time(email: &JmapEmail, attachments: &[AttachmentSyncFact]) ->
     })
 }
 
-fn fast_transfer_sender_name(email: &JmapEmail) -> &str {
-    email
-        .sender_display
-        .as_deref()
-        .or(email.sender_address.as_deref())
-        .or(email.from_display.as_deref())
-        .unwrap_or(&email.from_address)
-}
-
-fn fast_transfer_sender_address(email: &JmapEmail) -> &str {
-    email
-        .sender_address
-        .as_deref()
-        .unwrap_or(&email.from_address)
-}
-
-fn fast_transfer_sent_representing_name(email: &JmapEmail) -> &str {
-    email.from_display.as_deref().unwrap_or(&email.from_address)
-}
-
-fn write_email_meeting_request_properties(
+fn write_email_generated_properties(
     buffer: &mut Vec<u8>,
     email: &JmapEmail,
     mut includes: impl FnMut(u32) -> bool,
 ) {
-    if email.calendar_meeting_request.is_none() {
-        return;
+    if includes(PID_TAG_HAS_NAMED_PROPERTIES) {
+        write_fast_transfer_property(
+            buffer,
+            message_class_for_email(email),
+            None,
+            PID_TAG_HAS_NAMED_PROPERTIES,
+            &SpecialMessagePropertyValue::Bool(email_has_named_properties(email)),
+        );
     }
-    for property_tag in EMAIL_MEETING_REQUEST_FAST_TRANSFER_TAGS {
-        if !includes(*property_tag) {
+    for property_tag in email_generated_property_tags(email) {
+        if property_tag == PID_TAG_HAS_NAMED_PROPERTIES || !includes(property_tag) {
             continue;
         }
-        let Some(value) = email_property_value(email, *property_tag)
+        let Some(value) = email_property_value(email, property_tag)
             .and_then(SpecialMessagePropertyValue::from_mapi_value)
         else {
             continue;
@@ -116,7 +106,7 @@ fn write_email_meeting_request_properties(
             buffer,
             message_class_for_email(email),
             None,
-            *property_tag,
+            property_tag,
             &value,
         );
     }
@@ -154,40 +144,9 @@ pub(super) fn write_fast_transfer_message_content(
         write_u32(buffer, PID_TAG_MESSAGE_DELIVERY_TIME);
         write_i64(buffer, delivery_time as i64);
     }
-    if property_filter.includes(PID_TAG_SENDER_NAME_W) {
-        write_utf16_property(
-            buffer,
-            PID_TAG_SENDER_NAME_W,
-            fast_transfer_sender_name(email),
-        );
-    }
-    if property_filter.includes(PID_TAG_SENDER_ADDRESS_TYPE_W) {
-        write_utf16_property(buffer, PID_TAG_SENDER_ADDRESS_TYPE_W, "SMTP");
-    }
-    if property_filter.includes(PID_TAG_SENDER_EMAIL_ADDRESS_W) {
-        write_utf16_property(
-            buffer,
-            PID_TAG_SENDER_EMAIL_ADDRESS_W,
-            fast_transfer_sender_address(email),
-        );
-    }
-    if property_filter.includes(PID_TAG_SENT_REPRESENTING_NAME_W) {
-        write_utf16_property(
-            buffer,
-            PID_TAG_SENT_REPRESENTING_NAME_W,
-            fast_transfer_sent_representing_name(email),
-        );
-    }
-    if property_filter.includes(PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W) {
-        write_utf16_property(buffer, PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W, "SMTP");
-    }
-    if property_filter.includes(PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W) {
-        write_utf16_property(
-            buffer,
-            PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
-            &email.from_address,
-        );
-    }
+    write_fast_transfer_message_identity(buffer, email, |property_tag| {
+        property_filter.includes(property_tag)
+    });
     if property_filter.includes(PID_TAG_MESSAGE_CLASS_W) {
         write_utf16_property(
             buffer,
@@ -198,10 +157,17 @@ pub(super) fn write_fast_transfer_message_content(
     if property_filter.includes(PID_TAG_SUBJECT_W) {
         write_utf16_property(buffer, PID_TAG_SUBJECT_W, &email.subject);
     }
+    if property_filter.includes(PID_TAG_NORMALIZED_SUBJECT_W) {
+        write_utf16_property(
+            buffer,
+            PID_TAG_NORMALIZED_SUBJECT_W,
+            email_normalized_subject(email),
+        );
+    }
     if property_filter.includes(PID_TAG_BODY_W) {
         write_utf16_property(buffer, PID_TAG_BODY_W, &email.body_text);
     }
-    write_email_meeting_request_properties(buffer, email, |property_tag| {
+    write_email_generated_properties(buffer, email, |property_tag| {
         property_filter.includes(property_tag)
     });
     write_fast_transfer_message_children(buffer, message_children, Some(email), &[], attachments);
@@ -1144,74 +1110,9 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             write_u32(&mut buffer, PID_TAG_MESSAGE_DELIVERY_TIME);
             write_i64(&mut buffer, delivery_time as i64);
         }
-        if content_property_in_scope(
-            sync_type,
-            sync_flags,
-            sync_property_tags,
-            PID_TAG_SENDER_NAME_W,
-        ) {
-            write_utf16_property(
-                &mut buffer,
-                PID_TAG_SENDER_NAME_W,
-                fast_transfer_sender_name(email),
-            );
-        }
-        if content_property_in_scope(
-            sync_type,
-            sync_flags,
-            sync_property_tags,
-            PID_TAG_SENDER_ADDRESS_TYPE_W,
-        ) {
-            write_utf16_property(&mut buffer, PID_TAG_SENDER_ADDRESS_TYPE_W, "SMTP");
-        }
-        if content_property_in_scope(
-            sync_type,
-            sync_flags,
-            sync_property_tags,
-            PID_TAG_SENDER_EMAIL_ADDRESS_W,
-        ) {
-            write_utf16_property(
-                &mut buffer,
-                PID_TAG_SENDER_EMAIL_ADDRESS_W,
-                fast_transfer_sender_address(email),
-            );
-        }
-        if content_property_in_scope(
-            sync_type,
-            sync_flags,
-            sync_property_tags,
-            PID_TAG_SENT_REPRESENTING_NAME_W,
-        ) {
-            write_utf16_property(
-                &mut buffer,
-                PID_TAG_SENT_REPRESENTING_NAME_W,
-                fast_transfer_sent_representing_name(email),
-            );
-        }
-        if content_property_in_scope(
-            sync_type,
-            sync_flags,
-            sync_property_tags,
-            PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W,
-        ) {
-            write_utf16_property(
-                &mut buffer,
-                PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W,
-                "SMTP",
-            );
-        }
-        if content_property_in_scope(
-            sync_type,
-            sync_flags,
-            sync_property_tags,
-            PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
-        ) {
-            write_utf16_property(
-                &mut buffer,
-                PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
-                &email.from_address,
-            );
-        }
+        write_fast_transfer_message_identity(&mut buffer, email, |property_tag| {
+            content_property_in_scope(sync_type, sync_flags, sync_property_tags, property_tag)
+        });
         let subject_in_scope =
             content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_SUBJECT_W);
         if subject_in_scope {
@@ -1224,7 +1125,11 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             sync_property_tags,
             normalized_subject_tag,
         ) {
-            write_normalized_subject_property(&mut buffer, normalized_subject_tag, &email.subject);
+            write_normalized_subject_property(
+                &mut buffer,
+                normalized_subject_tag,
+                email_normalized_subject(email),
+            );
         }
         if content_property_in_scope(
             sync_type,
@@ -1243,13 +1148,8 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
         if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_BODY_W) {
             write_utf16_property(&mut buffer, PID_TAG_BODY_W, &email.body_text);
         }
-        write_email_meeting_request_properties(&mut buffer, email, |property_tag| {
-            content_property_in_scope(
-                sync_type,
-                sync_flags,
-                sync_property_tags,
-                property_tag,
-            )
+        write_email_generated_properties(&mut buffer, email, |property_tag| {
+            content_property_in_scope(sync_type, sync_flags, sync_property_tags, property_tag)
         });
         write_fast_transfer_message_children(
             &mut buffer,

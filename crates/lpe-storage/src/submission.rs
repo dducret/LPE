@@ -3,15 +3,18 @@ use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use crate::{
-    blob_store::{DurableBlobKind, PostgresBlobStore},
+    mail::{parse_calendar_meeting_request, parse_calendar_meeting_response_with_content_sha256},
     mapi_message_identity::rotate_active_mapi_message_identity_in_tx,
-    normalize_email, normalize_subject, sha256_hex, trim_optional_text, AuditEntryInput,
-    JmapEmailRecipientRow, Storage,
+    normalize_email, normalize_subject, sha256_hex, trim_optional_text, AuditEntryInput, Storage,
 };
 
 mod delegate_preferences;
 mod delegation;
+mod meeting_request;
 mod mime;
+mod source;
+mod source_mutation;
+mod source_patch;
 mod types;
 
 use types::{
@@ -27,9 +30,33 @@ pub use types::{
     DelegatePreferencesPatch, MailboxAccountAccess, MailboxDelegationGrant,
     MailboxDelegationGrantInput, MailboxDelegationOverview, MailboxFolderDelegationGrantInput,
     SavedDraftMessage, SenderAuthorizationKind, SenderDelegationGrant, SenderDelegationGrantInput,
-    SenderDelegationRight, SenderIdentity, SubmissionAccountIdentity, SubmitMessageInput,
+    SenderDelegationRight, SenderIdentity, SubmissionAccountIdentity,
+    SubmissionMessageCustomPropertyInput, SubmissionSourcePatch, SubmitMessageInput,
     SubmittedMessage, SubmittedRecipientInput,
 };
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SubmissionSourceBehavior {
+    ReplaceWithInput,
+    UsePersisted,
+}
+
+fn exact_editor_submission_input(
+    mut input: SubmitMessageInput,
+    mut persisted: SubmitMessageInput,
+    authorization: &ResolvedSubmissionAuthorization,
+) -> SubmitMessageInput {
+    if !input.replace_attachments {
+        persisted.attachments.append(&mut input.attachments);
+        input.attachments = persisted.attachments;
+    }
+    input.from_address = authorization.from_address.clone();
+    input.from_display = authorization.from_display.clone();
+    input.sender_address = authorization.sender_address.clone();
+    input.sender_display = authorization.sender_display.clone();
+    input.replace_attachments = false;
+    input
+}
 
 async fn insert_visible_recipient(
     tx: &mut sqlx::Transaction<'_, Postgres>,
@@ -60,191 +87,6 @@ async fn insert_visible_recipient(
 }
 
 impl Storage {
-    async fn fetch_draft_attachment_inputs_in_tx(
-        &self,
-        tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &Uuid,
-        account_id: Uuid,
-        draft_message_id: Uuid,
-    ) -> Result<Vec<AttachmentUploadInput>> {
-        let rows = sqlx::query(
-            r#"
-            SELECT a.file_name, a.disposition, a.content_id, a.domain_id, a.blob_id
-            FROM attachments a
-            JOIN mailbox_messages mm
-              ON mm.tenant_id = a.tenant_id
-             AND mm.account_id = a.account_id
-             AND mm.message_id = a.message_id
-             AND mm.visibility = 'visible'
-             AND mm.is_draft = TRUE
-            WHERE a.tenant_id = $1
-              AND a.account_id = $2
-              AND a.message_id = $3
-            ORDER BY a.ordinal ASC, a.id ASC
-            "#,
-        )
-        .bind(tenant_id)
-        .bind(account_id)
-        .bind(draft_message_id)
-        .fetch_all(&mut **tx)
-        .await?;
-
-        let blob_store = PostgresBlobStore;
-        let mut attachments = Vec::with_capacity(rows.len());
-        for row in rows {
-            let file_name: String = row.try_get("file_name")?;
-            let domain_id: Uuid = row.try_get("domain_id")?;
-            let blob_id: Uuid = row.try_get("blob_id")?;
-            let blob = blob_store
-                .read_durable_blob(
-                    &self.pool,
-                    tenant_id,
-                    domain_id,
-                    DurableBlobKind::Attachment,
-                    blob_id,
-                )
-                .await?
-                .ok_or_else(|| anyhow!("draft attachment blob is unavailable"))?;
-            attachments.push(AttachmentUploadInput {
-                file_name,
-                media_type: blob.media_type,
-                disposition: row.try_get("disposition")?,
-                content_id: row.try_get("content_id")?,
-                blob_bytes: blob.bytes,
-            });
-        }
-        Ok(attachments)
-    }
-
-    pub async fn replace_message_recipients(
-        &self,
-        account_id: Uuid,
-        message_id: Uuid,
-        to: &[SubmittedRecipientInput],
-        cc: &[SubmittedRecipientInput],
-        bcc: &[SubmittedRecipientInput],
-        audit: AuditEntryInput,
-    ) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
-        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
-        self.ensure_account_exists(&mut tx, &tenant_id, account_id)
-            .await?;
-        let exists = sqlx::query_scalar::<_, bool>(
-            r#"
-            SELECT EXISTS (
-                SELECT 1
-                FROM mailbox_messages
-                WHERE tenant_id = $1
-                  AND account_id = $2
-                  AND message_id = $3
-                  AND visibility = 'visible'
-            )
-            "#,
-        )
-        .bind(&tenant_id)
-        .bind(account_id)
-        .bind(message_id)
-        .fetch_one(&mut *tx)
-        .await?;
-        if !exists {
-            bail!("message not found");
-        }
-
-        sqlx::query("DELETE FROM message_recipients WHERE tenant_id = $1 AND message_id = $2")
-            .bind(&tenant_id)
-            .bind(message_id)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query(
-            "DELETE FROM protected_bcc_recipients WHERE tenant_id = $1 AND message_id = $2",
-        )
-        .bind(&tenant_id)
-        .bind(message_id)
-        .execute(&mut *tx)
-        .await?;
-
-        for (ordinal, recipient) in to.iter().enumerate() {
-            insert_visible_recipient(&mut tx, &tenant_id, message_id, "to", ordinal, recipient)
-                .await?;
-        }
-        for (ordinal, recipient) in cc.iter().enumerate() {
-            insert_visible_recipient(&mut tx, &tenant_id, message_id, "cc", ordinal, recipient)
-                .await?;
-        }
-        for (ordinal, recipient) in bcc.iter().enumerate() {
-            sqlx::query(
-                r#"
-                INSERT INTO protected_bcc_recipients (
-                    id, tenant_id, message_id, owner_account_id, address, display_name, ordinal
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                "#,
-            )
-            .bind(Uuid::new_v4())
-            .bind(&tenant_id)
-            .bind(message_id)
-            .bind(account_id)
-            .bind(&recipient.address)
-            .bind(recipient.display_name.as_deref())
-            .bind(ordinal as i32)
-            .execute(&mut *tx)
-            .await?;
-        }
-
-        let modseq = self
-            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
-            .await?;
-        let rows = sqlx::query(
-            r#"
-            UPDATE mailbox_messages
-            SET modseq = $4, updated_at = NOW()
-            WHERE tenant_id = $1
-              AND account_id = $2
-              AND message_id = $3
-              AND visibility = 'visible'
-            RETURNING id, mailbox_id, thread_id, imap_uid
-            "#,
-        )
-        .bind(&tenant_id)
-        .bind(account_id)
-        .bind(message_id)
-        .bind(modseq)
-        .fetch_all(&mut *tx)
-        .await?;
-        if rows.is_empty() {
-            bail!("message not found");
-        }
-        rotate_active_mapi_message_identity_in_tx(&mut tx, &tenant_id, account_id, message_id)
-            .await?;
-
-        self.insert_audit(&mut tx, &tenant_id, audit).await?;
-        let principals =
-            Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
-        for row in rows {
-            Self::insert_mail_change_log_in_tx(
-                &mut tx,
-                &tenant_id,
-                Some(account_id),
-                Some(row.try_get("mailbox_id")?),
-                "mailbox_message",
-                row.try_get("id")?,
-                "updated",
-                modseq,
-                &principals,
-                serde_json::json!({
-                    "messageId": message_id,
-                    "threadId": row.try_get::<Uuid, _>("thread_id")?,
-                    "imapUid": row.try_get::<i64, _>("imap_uid")?,
-                    "recipientsChanged": true
-                }),
-            )
-            .await?;
-        }
-        Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
-        tx.commit().await?;
-        Ok(())
-    }
-
     pub async fn save_draft_message(
         &self,
         input: SubmitMessageInput,
@@ -261,6 +103,9 @@ impl Storage {
         }
 
         let mut tx = self.pool.begin().await?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            .execute(&mut *tx)
+            .await?;
         let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
         self.ensure_account_exists(&mut tx, &tenant_id, input.account_id)
             .await?;
@@ -282,6 +127,61 @@ impl Storage {
             .await?;
 
         let message_id = input.draft_message_id.unwrap_or_else(Uuid::new_v4);
+        let draft_claim = if input.draft_message_id.is_some() {
+            Some(
+                self.claim_submission_source_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    input.account_id,
+                    message_id,
+                    false,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+        if draft_claim.is_some() {
+            self.ensure_message_shared_state_is_private_to_account_in_tx(
+                &mut tx,
+                &tenant_id,
+                input.account_id,
+                message_id,
+            )
+            .await?;
+        }
+        let mut effective_attachments = if let Some(claim) = draft_claim.as_ref() {
+            if input.replace_attachments {
+                Vec::new()
+            } else {
+                self.fetch_claimed_submission_source_attachment_inputs_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    input.account_id,
+                    claim,
+                )
+                .await?
+            }
+        } else {
+            Vec::new()
+        };
+        effective_attachments.extend(input.attachments.iter().cloned());
+        let calendar_request = parse_calendar_meeting_request(&effective_attachments);
+        let (calendar_response, authorized_calendar_response_content_sha256) =
+            match parse_calendar_meeting_response_with_content_sha256(&effective_attachments) {
+                Some((response, content_sha256))
+                    if meeting_request::validate_outbound_response_envelope(
+                        &response,
+                        &authorization.from_address,
+                        &visible_recipients,
+                        &bcc_recipients,
+                    )
+                    .is_ok() =>
+                {
+                    (Some(response), Some(content_sha256))
+                }
+                _ => (None, None),
+            };
         let thread_id = Uuid::new_v4();
         let participants_normalized = participants_normalized(&from_address, &visible_recipients);
         let unread = input.unread.unwrap_or(false);
@@ -318,6 +218,8 @@ impl Storage {
                     received_at = NOW(),
                     sent_at = NULL,
                     size_octets = $9,
+                    authorized_calendar_response_content_sha256 = $11,
+                    calendar_response_processed = FALSE,
                     has_attachments = CASE WHEN $10 THEN FALSE ELSE has_attachments END
                 WHERE tenant_id = $1
                   AND id = $3
@@ -347,6 +249,7 @@ impl Storage {
             .bind(&subject)
             .bind(input.size_octets.max(0))
             .bind(input.replace_attachments)
+            .bind(authorized_calendar_response_content_sha256.as_deref())
             .execute(&mut *tx)
             .await?;
 
@@ -374,13 +277,17 @@ impl Storage {
             .execute(&mut *tx)
             .await?;
             if input.replace_attachments {
-                sqlx::query("DELETE FROM attachments WHERE tenant_id = $1 AND message_id = $2")
-                    .bind(&tenant_id)
-                    .bind(message_id)
-                    .execute(&mut *tx)
-                    .await?;
+                self.delete_claimed_submission_source_attachments_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    draft_claim
+                        .as_ref()
+                        .ok_or_else(|| anyhow!("draft source claim is missing"))?,
+                    None,
+                )
+                .await?;
             }
-            sqlx::query(
+            let membership = sqlx::query(
                 r#"
                 UPDATE mailbox_messages
                 SET modseq = $4,
@@ -404,6 +311,9 @@ impl Storage {
             .bind(draft_mailbox_id)
             .execute(&mut *tx)
             .await?;
+            if membership.rows_affected() != 1 {
+                bail!("draft membership changed while saving");
+            }
             Self::recalculate_mailbox_counts_in_tx(
                 &mut tx,
                 &tenant_id,
@@ -417,11 +327,12 @@ impl Storage {
                 r#"
                 INSERT INTO messages (
                     id, tenant_id, domain_id, blob_id, internet_message_id, message_hash,
-                    normalized_subject, sent_at, received_at, size_octets, has_attachments
+                    authorized_calendar_response_content_sha256, normalized_subject,
+                    sent_at, received_at, size_octets, has_attachments
                 )
                 VALUES (
                     $1, $2, $3, $4, $5, $6,
-                    $7, NULL, NOW(), $8, FALSE
+                    $7, $8, NULL, NOW(), $9, FALSE
                 )
                 "#,
             )
@@ -431,6 +342,7 @@ impl Storage {
             .bind(blob_id)
             .bind(input.internet_message_id)
             .bind(sha256_hex(raw_message.as_bytes()))
+            .bind(authorized_calendar_response_content_sha256.as_deref())
             .bind(&subject)
             .bind(input.size_octets.max(0))
             .execute(&mut *tx)
@@ -535,6 +447,32 @@ impl Storage {
             &input.attachments,
         )
         .await?;
+        if draft_claim.is_some() {
+            sqlx::query(
+                r#"
+                UPDATE calendar_mail_classifications
+                SET needs_reclassification = TRUE,
+                    scheduling_mime_part_id = NULL,
+                    updated_at = NOW()
+                WHERE tenant_id = $1 AND message_id = $2
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(message_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        if draft_claim.is_none() {
+            self.persist_new_calendar_mail_classification_in_tx(
+                &mut tx,
+                &tenant_id,
+                input.account_id,
+                message_id,
+                calendar_request.as_ref(),
+                calendar_response.as_ref(),
+            )
+            .await?;
+        }
         let (membership_id, membership_thread_id, membership_imap_uid, existing_draft_update) =
             if input.draft_message_id.is_some() {
                 let row = sqlx::query(
@@ -579,6 +517,15 @@ impl Storage {
                     .await?;
                 (membership_id, thread_id, 0, false)
             };
+        if !existing_draft_update {
+            self.mark_calendar_mail_classification_applied_in_tx(
+                &mut tx,
+                &tenant_id,
+                input.account_id,
+                message_id,
+            )
+            .await?;
+        }
         if existing_draft_update {
             let principals =
                 Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, input.account_id).await?;
@@ -643,25 +590,80 @@ impl Storage {
         })
     }
 
+    /// Submits a new message, or atomically replaces and submits the visible
+    /// Drafts/Outbox source named by `draft_message_id`.
     pub async fn submit_message(
         &self,
         input: SubmitMessageInput,
         audit: AuditEntryInput,
     ) -> Result<SubmittedMessage> {
-        let subject = normalize_subject(&input.subject);
-        let body_text = input.body_text.trim().to_string();
-        let visible_recipients = normalize_visible_recipients(&input);
-        let bcc_recipients = normalize_bcc_recipients(&input);
+        self.submit_message_with_source_behavior(
+            input,
+            audit,
+            SubmissionSourceBehavior::ReplaceWithInput,
+            None,
+        )
+        .await
+    }
 
-        if visible_recipients.is_empty() && bcc_recipients.is_empty() {
-            bail!("at least one recipient is required");
+    /// Atomically applies a complete editor overlay plus selective protocol
+    /// metadata changes to one claimed Drafts/Outbox source and submits it.
+    pub async fn submit_message_with_source_patch(
+        &self,
+        input: SubmitMessageInput,
+        patch: SubmissionSourcePatch,
+        audit: AuditEntryInput,
+    ) -> Result<SubmittedMessage> {
+        if input.draft_message_id.is_none() {
+            bail!("submission source patch requires a Drafts/Outbox source");
         }
-        if subject.is_empty() && body_text.is_empty() {
-            bail!("subject or body_text is required");
-        }
+        self.submit_message_with_source_behavior(
+            input,
+            audit,
+            SubmissionSourceBehavior::ReplaceWithInput,
+            Some(patch),
+        )
+        .await
+    }
 
-        let mut tx = self.pool.begin().await?;
+    async fn submit_message_with_source_behavior(
+        &self,
+        mut input: SubmitMessageInput,
+        audit: AuditEntryInput,
+        source_behavior: SubmissionSourceBehavior,
+        source_patch: Option<SubmissionSourcePatch>,
+    ) -> Result<SubmittedMessage> {
         let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            .execute(&mut *tx)
+            .await?;
+        let source_context = input.draft_message_id.map(|message_id| {
+            (
+                message_id,
+                input.account_id,
+                input.submitted_by_account_id,
+                input.source.clone(),
+            )
+        });
+        let source_claim = if let Some((message_id, account_id, _, _)) = source_context.as_ref() {
+            // Keep PostgreSQL READ COMMITTED here. The shared claim helper first
+            // locks the parent message row, which serializes cross-account copy;
+            // its following membership statement must see a copier's commit if
+            // that parent lock had to wait.
+            Some(
+                self.claim_submission_source_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    *account_id,
+                    *message_id,
+                    true,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
 
         let account_exists = sqlx::query(
             r#"
@@ -680,25 +682,81 @@ impl Storage {
             bail!("account not found");
         }
 
+        if let (Some(claim), Some((_, account_id, submitted_by_account_id, source))) =
+            (source_claim.as_ref(), source_context.as_ref())
+        {
+            if source_behavior == SubmissionSourceBehavior::ReplaceWithInput {
+                self.ensure_message_shared_state_is_private_to_account_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    *account_id,
+                    claim.message_id,
+                )
+                .await?;
+            }
+            if let Some(patch) = source_patch.as_ref() {
+                self.apply_claimed_submission_source_patch_in_tx(&mut tx, &tenant_id, claim, patch)
+                    .await?;
+            }
+            let persisted = self
+                .load_claimed_submission_source_input_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    *account_id,
+                    *submitted_by_account_id,
+                    source,
+                    claim,
+                )
+                .await?;
+            if source_behavior == SubmissionSourceBehavior::ReplaceWithInput {
+                let update_authorization = self
+                    .resolve_submission_authorization_in_tx(&mut tx, &tenant_id, &input)
+                    .await?;
+                self.replace_claimed_submission_source_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    claim,
+                    &input,
+                    &update_authorization,
+                )
+                .await?;
+                input = exact_editor_submission_input(input, persisted, &update_authorization);
+            } else {
+                input = persisted;
+            }
+        }
+
+        let subject = normalize_subject(&input.subject);
+        let body_text = input.body_text.trim().to_string();
+        let visible_recipients = normalize_visible_recipients(&input);
+        let bcc_recipients = normalize_bcc_recipients(&input);
+        if visible_recipients.is_empty() && bcc_recipients.is_empty() {
+            bail!("at least one recipient is required");
+        }
+        if subject.is_empty() && body_text.is_empty() {
+            bail!("subject or body_text is required");
+        }
         let authorization = self
             .resolve_submission_authorization_in_tx(&mut tx, &tenant_id, &input)
             .await?;
-        let submission_attachments = if input.attachments.is_empty() {
-            match input.draft_message_id {
-                Some(draft_message_id) => {
-                    self.fetch_draft_attachment_inputs_in_tx(
-                        &mut tx,
-                        &tenant_id,
-                        input.account_id,
-                        draft_message_id,
-                    )
-                    .await?
-                }
-                None => Vec::new(),
-            }
-        } else {
-            input.attachments.clone()
-        };
+        meeting_request::validate_outbound_scheduling_body_in_tx(
+            self,
+            &mut tx,
+            &tenant_id,
+            input.account_id,
+            &authorization.from_address,
+            &input.attachments,
+            &visible_recipients,
+            &bcc_recipients,
+        )
+        .await?;
+        let submission_attachments = input.attachments.clone();
+        let calendar_request = parse_calendar_meeting_request(&submission_attachments);
+        let (calendar_response, authorized_calendar_response_content_sha256) =
+            match parse_calendar_meeting_response_with_content_sha256(&submission_attachments) {
+                Some((response, content_sha256)) => (Some(response), Some(content_sha256)),
+                None => (None, None),
+            };
 
         let message_id = Uuid::new_v4();
         let thread_id = Uuid::new_v4();
@@ -750,11 +808,12 @@ impl Storage {
                         r#"
                         INSERT INTO messages (
                             id, tenant_id, domain_id, blob_id, internet_message_id, message_hash,
-                            normalized_subject, sent_at, received_at, size_octets, has_attachments
+                            authorized_calendar_response_content_sha256, normalized_subject,
+                            sent_at, received_at, size_octets, has_attachments
                         )
                         VALUES (
                             $1, $2, $3, $4, $5, $6,
-                            $7, NOW(), NOW(), $8, FALSE
+                            $7, $8, NOW(), NOW(), $9, FALSE
                         )
                         "#,
                     )
@@ -764,10 +823,22 @@ impl Storage {
                     .bind(blob_id)
                     .bind(input.internet_message_id.clone())
                     .bind(sha256_hex(raw_message.as_bytes()))
+                    .bind(authorized_calendar_response_content_sha256.as_deref())
                     .bind(&subject)
                     .bind(input.size_octets.max(0))
                     .execute(&mut *tx)
                     .await?;
+
+                    if let Some(claim) = source_claim.as_ref() {
+                        self.copy_claimed_submission_source_custom_properties_to_sent_in_tx(
+                            &mut tx,
+                            &tenant_id,
+                            input.account_id,
+                            claim,
+                            message_id,
+                        )
+                        .await?;
+                    }
 
                     self.replace_message_headers_in_tx(
                         &mut tx,
@@ -867,6 +938,15 @@ impl Storage {
                         &submission_attachments,
                     )
                     .await?;
+                    self.persist_new_calendar_mail_classification_in_tx(
+                        &mut tx,
+                        &tenant_id,
+                        input.account_id,
+                        message_id,
+                        calendar_request.as_ref(),
+                        calendar_response.as_ref(),
+                    )
+                    .await?;
                     let mailbox_message_id = self
                         .allocate_mailbox_membership_in_tx(
                             &mut tx,
@@ -882,6 +962,23 @@ impl Storage {
                             "created",
                         )
                         .await?;
+                    self.mark_calendar_mail_classification_applied_in_tx(
+                        &mut tx,
+                        &tenant_id,
+                        input.account_id,
+                        message_id,
+                    )
+                    .await?;
+                    if let Some(claim) = source_claim.as_ref() {
+                        self.copy_claimed_submission_source_followup_to_sent_in_tx(
+                            &mut tx,
+                            &tenant_id,
+                            input.account_id,
+                            claim,
+                            mailbox_message_id,
+                        )
+                        .await?;
+                    }
                     self.assign_message_attachments_membership_in_tx(
                         &mut tx,
                         &tenant_id,
@@ -992,13 +1089,13 @@ impl Storage {
                     )
                     .await?;
                 }
-                CanonicalSubmissionPhase::DeleteSourceDraft => {
-                    if let Some(draft_message_id) = input.draft_message_id {
-                        self.delete_draft_message_in_tx(
+                CanonicalSubmissionPhase::DeleteSubmissionSource => {
+                    if let Some(claim) = source_claim.as_ref() {
+                        self.delete_submission_source_message_in_tx(
                             &mut tx,
                             &tenant_id,
                             input.account_id,
-                            draft_message_id,
+                            claim,
                         )
                         .await?;
                     }
@@ -1023,6 +1120,8 @@ impl Storage {
         })
     }
 
+    /// Submits the exact persisted version of one visible Drafts/Outbox source.
+    /// Caller-provided message content is intentionally not part of this API.
     pub async fn submit_draft_message(
         &self,
         account_id: Uuid,
@@ -1031,93 +1130,33 @@ impl Storage {
         source: &str,
         audit: AuditEntryInput,
     ) -> Result<SubmittedMessage> {
-        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
-        let draft = self
-            .fetch_jmap_draft(account_id, draft_message_id)
-            .await?
-            .ok_or_else(|| anyhow!("draft not found"))?;
-
-        let recipient_rows = sqlx::query_as::<_, JmapEmailRecipientRow>(
-            r#"
-            SELECT
-                r.message_id,
-                r.role AS kind,
-                r.address,
-                r.display_name,
-                r.ordinal AS _ordinal
-            FROM message_recipients r
-            WHERE r.tenant_id = $1
-              AND r.message_id = $2
-            ORDER BY r.role ASC, r.ordinal ASC
-            "#,
-        )
-        .bind(&tenant_id)
-        .bind(draft_message_id)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let bcc_rows = sqlx::query(
-            r#"
-            SELECT address, display_name
-            FROM protected_bcc_recipients
-            WHERE tenant_id = $1 AND message_id = $2
-            ORDER BY ordinal ASC
-            "#,
-        )
-        .bind(&tenant_id)
-        .bind(draft_message_id)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let to = recipient_rows
-            .iter()
-            .filter(|recipient| recipient.kind == "to")
-            .map(|recipient| SubmittedRecipientInput {
-                address: recipient.address.clone(),
-                display_name: recipient.display_name.clone(),
-            })
-            .collect();
-        let cc = recipient_rows
-            .iter()
-            .filter(|recipient| recipient.kind == "cc")
-            .map(|recipient| SubmittedRecipientInput {
-                address: recipient.address.clone(),
-                display_name: recipient.display_name.clone(),
-            })
-            .collect();
-        let bcc = bcc_rows
-            .into_iter()
-            .map(|row| SubmittedRecipientInput {
-                address: row.try_get("address").unwrap_or_default(),
-                display_name: row.try_get("display_name").ok(),
-            })
-            .collect();
-
-        self.submit_message(
+        self.submit_message_with_source_behavior(
             SubmitMessageInput {
                 draft_message_id: Some(draft_message_id),
                 account_id,
                 submitted_by_account_id,
                 source: source.trim().to_lowercase(),
-                from_display: draft.from_display,
-                from_address: draft.from_address,
-                sender_display: draft.sender_display,
-                sender_address: draft.sender_address,
-                to,
-                cc,
-                bcc,
-                subject: draft.subject,
-                body_text: draft.body_text,
-                body_html_sanitized: draft.body_html_sanitized,
-                internet_message_id: draft.internet_message_id,
+                from_display: None,
+                from_address: String::new(),
+                sender_display: None,
+                sender_address: None,
+                to: Vec::new(),
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: String::new(),
+                body_text: String::new(),
+                body_html_sanitized: None,
+                internet_message_id: None,
                 mime_blob_ref: None,
-                size_octets: draft.size_octets,
-                unread: Some(draft.unread),
-                flagged: Some(draft.flagged),
+                size_octets: 0,
+                unread: None,
+                flagged: None,
                 replace_attachments: false,
                 attachments: Vec::new(),
             },
             audit,
+            SubmissionSourceBehavior::UsePersisted,
+            None,
         )
         .await
     }
@@ -1238,6 +1277,9 @@ impl Storage {
         audit: AuditEntryInput,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            .execute(&mut *tx)
+            .await?;
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         self.delete_draft_message_in_tx(&mut tx, &tenant_id, account_id, message_id)
             .await?;
@@ -1496,130 +1538,5 @@ impl Storage {
             email: row.get("primary_email"),
             display_name: row.get("display_name"),
         }))
-    }
-
-    async fn delete_draft_message_in_tx(
-        &self,
-        tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &Uuid,
-        account_id: Uuid,
-        message_id: Uuid,
-    ) -> Result<()> {
-        let modseq = self
-            .allocate_mail_modseq_in_tx(tx, tenant_id, account_id)
-            .await?;
-        let row = sqlx::query(
-            r#"
-            SELECT mm.id, mm.mailbox_id, mm.thread_id, mm.imap_uid, mm.is_seen
-            FROM mailbox_messages mm
-            JOIN mailboxes mb
-              ON mb.tenant_id = mm.tenant_id
-             AND mb.account_id = mm.account_id
-             AND mb.id = mm.mailbox_id
-            WHERE mm.tenant_id = $1
-              AND mm.account_id = $2
-              AND mm.message_id = $3
-              AND mm.visibility = 'visible'
-              AND mb.role = 'drafts'
-            LIMIT 1
-            "#,
-        )
-        .bind(tenant_id)
-        .bind(account_id)
-        .bind(message_id)
-        .fetch_optional(&mut **tx)
-        .await?
-        .ok_or_else(|| anyhow!("draft not found"))?;
-        let mailbox_message_id: Uuid = row.try_get("id")?;
-        let mailbox_id: Uuid = row.try_get("mailbox_id")?;
-        let imap_uid: i64 = row.try_get("imap_uid")?;
-        let is_seen: bool = row.try_get("is_seen")?;
-        let principals = Self::affected_mail_principals_in_tx(tx, tenant_id, account_id).await?;
-        let cursor = Self::insert_mail_change_log_in_tx(
-            tx,
-            tenant_id,
-            Some(account_id),
-            Some(mailbox_id),
-            "mailbox_message",
-            mailbox_message_id,
-            "destroyed",
-            modseq,
-            &principals,
-            serde_json::json!({
-                "messageId": message_id,
-                "threadId": row.try_get::<Uuid, _>("thread_id")?,
-                "imapUid": imap_uid
-            }),
-        )
-        .await?;
-        sqlx::query(
-            r#"
-            INSERT INTO tombstones (
-                id, tenant_id, account_id, mailbox_id, object_kind, object_id,
-                message_id, mailbox_message_id, imap_uid, deleted_modseq,
-                change_cursor, reason
-            )
-            VALUES ($1, $2, $3, $4, 'mailbox_message', $5, $6, $5, $7, $8, $9, 'destroyed')
-            "#,
-        )
-        .bind(Uuid::new_v4())
-        .bind(tenant_id)
-        .bind(account_id)
-        .bind(mailbox_id)
-        .bind(mailbox_message_id)
-        .bind(message_id)
-        .bind(imap_uid)
-        .bind(modseq)
-        .bind(cursor)
-        .execute(&mut **tx)
-        .await?;
-        sqlx::query(
-            r#"
-            UPDATE mailbox_messages
-            SET visibility = 'expunged',
-                expunged_at = NOW(),
-                modseq = $4,
-                updated_at = NOW()
-            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
-            "#,
-        )
-        .bind(tenant_id)
-        .bind(account_id)
-        .bind(mailbox_message_id)
-        .bind(modseq)
-        .execute(&mut **tx)
-        .await?;
-        sqlx::query(
-            r#"
-            DELETE FROM mail_search_documents
-            WHERE tenant_id = $1 AND account_id = $2 AND mailbox_message_id = $3
-            "#,
-        )
-        .bind(tenant_id)
-        .bind(account_id)
-        .bind(mailbox_message_id)
-        .execute(&mut **tx)
-        .await?;
-        sqlx::query(
-            r#"
-            UPDATE mailboxes
-            SET total_messages = GREATEST(0, total_messages - 1),
-                unread_messages = GREATEST(0, unread_messages - CASE WHEN $4 THEN 0 ELSE 1 END),
-                modseq = GREATEST(modseq + 1, $5),
-                updated_at = NOW()
-            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
-            "#,
-        )
-        .bind(tenant_id)
-        .bind(account_id)
-        .bind(mailbox_id)
-        .bind(is_seen)
-        .bind(modseq)
-        .execute(&mut **tx)
-        .await?;
-        Self::recalculate_mailbox_counts_in_tx(tx, tenant_id, account_id, mailbox_id, modseq)
-            .await?;
-
-        Ok(())
     }
 }

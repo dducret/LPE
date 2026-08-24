@@ -269,14 +269,37 @@ impl Storage {
             return Ok(Vec::new());
         }
 
+        self.lock_message_for_mime_graph_in_tx(tx, tenant_id, message_id)
+            .await?;
+
         let domain_id = self
             .load_account_domain_id_in_tx(tx, tenant_id, account_id)
             .await?;
+        let first_ordinal = sqlx::query_scalar::<_, i32>(
+            r#"
+            SELECT COALESCE(MAX(ordinal) + 1, 0)::INTEGER
+            FROM attachments
+            WHERE tenant_id = $1 AND account_id = $2 AND message_id = $3
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(message_id)
+        .fetch_one(&mut **tx)
+        .await?;
         let mut attachment_ids = Vec::with_capacity(attachments.len());
 
-        for (ordinal, attachment) in attachments.iter().enumerate() {
+        for (offset, attachment) in attachments.iter().enumerate() {
+            let ordinal = first_ordinal
+                .checked_add(offset as i32)
+                .ok_or_else(|| anyhow::anyhow!("attachment ordinal exceeds canonical range"))?;
             let attachment_id = Uuid::new_v4();
             let content_id = normalize_attachment_content_id(attachment.content_id.as_deref());
+            let mime_disposition = normalized_mime_disposition(attachment.disposition.as_deref());
+            let stored_attachment_disposition = message_attachment_disposition(
+                attachment.is_scheduling_body,
+                attachment.disposition.as_deref(),
+            );
             let blob = self
                 .store_attachment_blob_in_tx(
                     tx,
@@ -294,9 +317,9 @@ impl Storage {
                 INSERT INTO mime_parts (
                     id, tenant_id, message_id, domain_id, part_path, ordinal,
                     content_type, content_disposition, content_id, file_name,
-                    size_octets, blob_id, blob_kind
+                    size_octets, blob_id, blob_kind, is_scheduling_body
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'attachment')
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'attachment', $13)
                 "#,
             )
             .bind(mime_part_id)
@@ -304,13 +327,14 @@ impl Storage {
             .bind(message_id)
             .bind(blob.domain_id)
             .bind(format!("attachment.{}", ordinal + 1))
-            .bind(ordinal as i32)
+            .bind(ordinal)
             .bind(attachment.media_type.trim())
-            .bind(attachment_disposition(attachment.disposition.as_deref()))
+            .bind(mime_disposition)
             .bind(content_id.as_deref())
             .bind(attachment.file_name.trim())
             .bind(attachment.blob_bytes.len() as i64)
             .bind(blob.id)
+            .bind(attachment.is_scheduling_body)
             .execute(&mut **tx)
             .await?;
 
@@ -331,13 +355,32 @@ impl Storage {
             .bind(mime_part_id)
             .bind(blob.id)
             .bind(attachment.file_name.trim())
-            .bind(attachment_disposition(attachment.disposition.as_deref()))
+            .bind(stored_attachment_disposition)
             .bind(content_id.as_deref())
-            .bind(ordinal as i32)
+            .bind(ordinal)
             .bind(attachment.blob_bytes.len() as i64)
             .execute(&mut **tx)
             .await?;
             attachment_ids.push(attachment_id);
+        }
+
+        if attachments
+            .iter()
+            .any(|attachment| attachment.is_scheduling_body)
+        {
+            sqlx::query(
+                r#"
+                UPDATE calendar_mail_classifications
+                SET needs_reclassification = TRUE,
+                    scheduling_mime_part_id = NULL,
+                    updated_at = NOW()
+                WHERE tenant_id = $1 AND message_id = $2
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(message_id)
+            .execute(&mut **tx)
+            .await?;
         }
 
         sqlx::query(
@@ -837,6 +880,20 @@ impl Storage {
 
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let mut tx = self.pool.begin().await?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            .execute(&mut *tx)
+            .await?;
+        let memberships = self
+            .lock_visible_message_memberships_in_tx(&mut tx, &tenant_id, account_id, message_id)
+            .await?;
+        if memberships.is_empty() {
+            tx.commit().await?;
+            return Ok(None);
+        }
+        self.ensure_message_shared_state_is_private_to_account_in_tx(
+            &mut tx, &tenant_id, account_id, message_id,
+        )
+        .await?;
         let exists = sqlx::query(
             r#"
             SELECT id
@@ -904,7 +961,7 @@ impl Storage {
         )
         .await?;
 
-        sqlx::query(
+        let updated_memberships = sqlx::query(
             r#"
             UPDATE mailbox_messages
             SET modseq = $3, updated_at = NOW()
@@ -918,6 +975,9 @@ impl Storage {
         .bind(account_id)
         .execute(&mut *tx)
         .await?;
+        if updated_memberships.rows_affected() != memberships.len() as u64 {
+            anyhow::bail!("visible message memberships changed while adding attachment");
+        }
 
         rotate_active_mapi_message_identity_in_tx(&mut tx, &tenant_id, account_id, message_id)
             .await?;
@@ -955,8 +1015,24 @@ impl Storage {
         };
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let mut tx = self.pool.begin().await?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            .execute(&mut *tx)
+            .await?;
+        let memberships = self
+            .lock_visible_message_memberships_in_tx(&mut tx, &tenant_id, account_id, message_id)
+            .await?;
+        if memberships.is_empty() {
+            tx.commit().await?;
+            return Ok(None);
+        }
+        self.ensure_message_shared_state_is_private_to_account_in_tx(
+            &mut tx, &tenant_id, account_id, message_id,
+        )
+        .await?;
         let modseq = self
             .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+            .await?;
+        self.lock_message_for_mime_graph_in_tx(&mut tx, &tenant_id, message_id)
             .await?;
 
         let deleted = sqlx::query(
@@ -992,6 +1068,22 @@ impl Storage {
         let deleted_message_id: Uuid = deleted.try_get("message_id")?;
         let deleted_mime_part_id: Option<Uuid> = deleted.try_get("mime_part_id")?;
         if let Some(mime_part_id) = deleted_mime_part_id {
+            sqlx::query(
+                r#"
+                UPDATE calendar_mail_classifications
+                SET needs_reclassification = TRUE,
+                    scheduling_mime_part_id = NULL,
+                    updated_at = NOW()
+                WHERE tenant_id = $1
+                  AND message_id = $2
+                  AND scheduling_mime_part_id = $3
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(deleted_message_id)
+            .bind(mime_part_id)
+            .execute(&mut *tx)
+            .await?;
             sqlx::query(
                 r#"
                 DELETE FROM mime_parts
@@ -1041,7 +1133,7 @@ impl Storage {
         .execute(&mut *tx)
         .await?;
 
-        sqlx::query(
+        let updated_memberships = sqlx::query(
             r#"
             UPDATE mailbox_messages
             SET modseq = $3, updated_at = NOW()
@@ -1055,6 +1147,9 @@ impl Storage {
         .bind(account_id)
         .execute(&mut *tx)
         .await?;
+        if updated_memberships.rows_affected() != memberships.len() as u64 {
+            anyhow::bail!("visible message memberships changed while deleting attachment");
+        }
 
         rotate_active_mapi_message_identity_in_tx(&mut tx, &tenant_id, account_id, message_id)
             .await?;
@@ -1228,9 +1323,25 @@ pub(crate) fn supports_attachment_text_extraction(media_type: &str, file_name: &
 }
 
 fn attachment_disposition(value: Option<&str>) -> &'static str {
-    match value.map(str::trim) {
-        Some(value) if value.eq_ignore_ascii_case("inline") => "inline",
-        _ => "attachment",
+    normalized_mime_disposition(value).unwrap_or("attachment")
+}
+
+fn message_attachment_disposition(is_scheduling_body: bool, value: Option<&str>) -> &'static str {
+    if is_scheduling_body {
+        "inline"
+    } else {
+        attachment_disposition(value)
+    }
+}
+
+fn normalized_mime_disposition(value: Option<&str>) -> Option<&'static str> {
+    match value
+        .and_then(|value| value.split(';').next())
+        .map(str::trim)
+    {
+        Some(value) if value.eq_ignore_ascii_case("inline") => Some("inline"),
+        Some(value) if value.eq_ignore_ascii_case("attachment") => Some("attachment"),
+        _ => None,
     }
 }
 
@@ -1299,7 +1410,29 @@ fn media_type_label(media_type: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_attachment_content_id, supports_attachment_text_extraction};
+    use super::{
+        attachment_disposition, message_attachment_disposition, normalize_attachment_content_id,
+        normalized_mime_disposition, supports_attachment_text_extraction,
+    };
+
+    #[test]
+    fn mime_disposition_preserves_absence_and_normalizes_parameters() {
+        assert_eq!(normalized_mime_disposition(None), None);
+        assert_eq!(
+            normalized_mime_disposition(Some("inline; filename=invite.ics")),
+            Some("inline")
+        );
+        assert_eq!(
+            normalized_mime_disposition(Some("attachment; filename=copy.ics")),
+            Some("attachment")
+        );
+        assert_eq!(attachment_disposition(None), "attachment");
+        assert_eq!(message_attachment_disposition(true, None), "inline");
+        assert_eq!(
+            message_attachment_disposition(false, Some("attachment; filename=copy.ics")),
+            "attachment"
+        );
+    }
 
     #[test]
     fn extraction_queue_scope_is_limited_to_document_text_formats() {

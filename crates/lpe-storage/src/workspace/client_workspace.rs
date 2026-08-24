@@ -2,8 +2,8 @@ use anyhow::Result;
 use uuid::Uuid;
 
 use crate::{
-    attachments, AccessibleContact, AccessibleEvent, ClientAttachment, ClientAttachmentRow,
-    ClientMessageRow, Storage,
+    attachments, external_calendar_uid, AccessibleContact, AccessibleEvent, ClientAttachment,
+    ClientAttachmentRow, ClientMessageRow, Storage,
 };
 
 use super::{ClientMailbox, ClientMessage, ClientWorkspace};
@@ -272,7 +272,7 @@ fn format_size(size_octets: i64) -> String {
 fn client_event_from_accessible(event: AccessibleEvent) -> super::ClientEvent {
     super::ClientEvent {
         id: event.id,
-        uid: event.uid,
+        uid: external_calendar_uid(&event.uid),
         date: event.date,
         time: event.time,
         time_zone: event.time_zone,

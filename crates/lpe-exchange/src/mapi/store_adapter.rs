@@ -263,6 +263,24 @@ where
             message_ids.push(message_id);
         }
     }
+    log_mapi_store_load_step(
+        account_id,
+        plan,
+        "fetch content messages",
+        message_ids.len(),
+    );
+    let emails = if message_ids.is_empty() {
+        Vec::new()
+    } else {
+        store
+            .fetch_jmap_emails(account_id, &message_ids)
+            .await
+            .with_context(|| format!("fetch {} MAPI content messages", message_ids.len()))?
+    };
+    // Loading the canonical message can lazily repair its calendar-mail
+    // classification, which rotates the durable MAPI identity. Allocate the
+    // snapshot identity only after that repair so this Execute cannot combine
+    // current meeting metadata with a stale CN/ChangeKey tuple.
     let message_identity_requests = message_ids
         .iter()
         .map(|message_id| MapiIdentityRequest {
@@ -289,20 +307,6 @@ where
             Some(identity.source_key.clone()),
         );
     }
-    log_mapi_store_load_step(
-        account_id,
-        plan,
-        "fetch content messages",
-        message_ids.len(),
-    );
-    let emails = if message_ids.is_empty() {
-        Vec::new()
-    } else {
-        store
-            .fetch_jmap_emails(account_id, &message_ids)
-            .await
-            .with_context(|| format!("fetch {} MAPI content messages", message_ids.len()))?
-    };
     let mut attachments = Vec::with_capacity(emails.len());
     for (email_index, email) in emails.iter().enumerate() {
         log_mapi_store_load_step(account_id, plan, "fetch message attachments", email_index);

@@ -112,9 +112,8 @@ pub(in crate::service) fn validate_required_item_change_key(
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_update_item_message_flags, requested_update_item_changes,
-        update_item_change_content, validate_required_item_change_key,
-        validate_supplied_item_change_key,
+        parse_update_item_message_flags, requested_update_item_changes, update_item_change_content,
+        validate_required_item_change_key, validate_supplied_item_change_key,
     };
     use crate::service::ews::request_ids::RequestedItemReference;
 
@@ -134,16 +133,22 @@ mod tests {
 
         assert_eq!(
             parse_update_item_message_flags(
-                update_item_change_content(&changes, "message:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-                    .unwrap()
+                update_item_change_content(
+                    &changes,
+                    "message:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+                )
+                .unwrap()
             )
             .unwrap(),
             (Some(false), None)
         );
         assert_eq!(
             parse_update_item_message_flags(
-                update_item_change_content(&changes, "message:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
-                    .unwrap()
+                update_item_change_content(
+                    &changes,
+                    "message:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+                )
+                .unwrap()
             )
             .unwrap(),
             (None, Some(true))

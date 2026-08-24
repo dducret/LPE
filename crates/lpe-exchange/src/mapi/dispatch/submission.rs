@@ -1,5 +1,7 @@
 use super::*;
-use lpe_storage::CancelSubmissionResult;
+use lpe_storage::{
+    CancelSubmissionResult, SubmissionMessageCustomPropertyInput, SubmissionSourcePatch,
+};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -11,60 +13,90 @@ use crate::mapi::{
     properties::{MapiValue, PID_TAG_TARGET_ENTRY_ID},
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct OptimizedSendTarget {
     message_id: u64,
+    global_counter: u64,
     source_key: Vec<u8>,
+}
+
+struct PersistedSubmissionSource {
+    message_id: Uuid,
+    source_folder_id: u64,
+    source_object_id: u64,
+    patch: Option<SubmissionSourcePatch>,
 }
 
 fn optimized_send_target(
     properties: &HashMap<u32, MapiValue>,
     account_id: Uuid,
-) -> Option<OptimizedSendTarget> {
-    let MapiValue::Binary(entry_id) = properties.get(&PID_TAG_TARGET_ENTRY_ID)? else {
-        return None;
+) -> std::result::Result<Option<OptimizedSendTarget>, &'static str> {
+    let Some(value) = properties.get(&PID_TAG_TARGET_ENTRY_ID) else {
+        return Ok(None);
     };
-    let (folder_id, message_id) = object_ids_from_message_entry_id(account_id, entry_id)?;
-    let global_counter = global_counter_from_store_id(message_id)?;
-    if folder_id != OUTBOX_FOLDER_ID || global_counter < FIRST_DYNAMIC_GLOBAL_COUNTER {
-        return None;
+    let MapiValue::Binary(entry_id) = value else {
+        return Err("optimized_send_target_not_binary");
+    };
+    let Some((folder_id, message_id)) = object_ids_from_message_entry_id(account_id, entry_id)
+    else {
+        return Err("optimized_send_target_entry_id_invalid");
+    };
+    if folder_id != OUTBOX_FOLDER_ID {
+        return Err("optimized_send_target_not_outbox");
     }
-    Some(OptimizedSendTarget {
+    let Some(global_counter) = global_counter_from_store_id(message_id) else {
+        return Err("optimized_send_target_message_id_invalid");
+    };
+    if global_counter < FIRST_DYNAMIC_GLOBAL_COUNTER {
+        return Err("optimized_send_target_message_id_not_dynamic");
+    }
+    Ok(Some(OptimizedSendTarget {
         message_id,
+        global_counter,
         source_key: source_key_for_object_id(message_id),
-    })
+    }))
 }
 
 async fn optimized_send_replay_email<S>(
     store: &S,
     account_id: Uuid,
-    outbox_mailbox_id: Uuid,
     target: &OptimizedSendTarget,
-) -> Result<Option<JmapEmail>>
+) -> Result<Option<(JmapEmail, u64)>>
 where
     S: ExchangeStore,
 {
     let identities = store
         .fetch_mapi_identities_by_object_ids(account_id, &[target.message_id])
         .await?;
-    let Some(identity) = identities.into_iter().find(|identity| {
+    let mut identity = identities.into_iter().find(|identity| {
         identity.object_kind == MapiIdentityObjectKind::Message
             && identity.object_id == target.message_id
             && identity.source_key == target.source_key
-    }) else {
+    });
+    if identity.is_none() {
+        identity = store
+            .fetch_mapi_identities_by_source_keys(
+                account_id,
+                std::slice::from_ref(&target.source_key),
+            )
+            .await?
+            .into_iter()
+            .find(|identity| {
+                identity.object_kind == MapiIdentityObjectKind::Message
+                    && identity.source_key == target.source_key
+            });
+    }
+    let Some(identity) = identity else {
         return Ok(None);
     };
+    let message_id = identity.object_id;
     let emails = store
         .fetch_jmap_emails(account_id, &[identity.canonical_id])
         .await?;
-    Ok(emails.into_iter().find(|email| {
-        email.id == identity.canonical_id
-            && email.mailbox_ids.contains(&outbox_mailbox_id)
-            && email
-                .mailbox_states
-                .iter()
-                .any(|state| state.role == "sent")
-    }))
+    Ok(emails
+        .into_iter()
+        .find(|email| email.id == identity.canonical_id && abort_submit_source_is_sent(email))
+        .map(|email| (email, message_id)))
 }
 
 pub(super) async fn mapi_submit_from_existing_email<S>(
@@ -80,9 +112,7 @@ where
         .await?;
     let protected_email = protected_emails.iter().find(|loaded| loaded.id == email.id);
     let source_email = protected_email.unwrap_or(email);
-    let attachments =
-        mapi_submit_attachments_from_email(store, principal.account_id, source_email).await?;
-    Ok(mapi_submit_from_email(principal, source_email, attachments))
+    Ok(mapi_submit_from_email(principal, source_email, Vec::new()))
 }
 
 pub(super) fn submit_success_response(request: &RopRequest) -> Vec<u8> {
@@ -431,31 +461,51 @@ pub(super) async fn append_submit_message_response<S>(
         MapiObject::Message {
             pending_properties, ..
         } => optimized_send_target(pending_properties, principal.account_id),
-        _ => None,
+        _ => Ok(None),
     };
-    if let (Some(target), Some(outbox_mailbox_id)) = (
-        optimized_send_target.as_ref(),
-        folder_row_for_id(OUTBOX_FOLDER_ID, mailboxes).map(|mailbox| mailbox.id),
-    ) {
-        match optimized_send_replay_email(store, principal.account_id, outbox_mailbox_id, target)
-            .await
-        {
-            Ok(Some(email)) => {
+    let optimized_send_target = match optimized_send_target {
+        Ok(target) => target,
+        Err(failure_reason) => {
+            session.record_post_hierarchy_submit_attempt_context(format!(
+                "request_id={mapi_request_id};rop={submit_rop_name};result=error;failure_reason={failure_reason};input_handle={handle};send_attempt=false"
+            ));
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                mailbox = %principal.email,
+                request_type = "Execute",
+                request_rop_id = %format!("{:#04x}", request.rop_id),
+                input_handle = handle,
+                failure_reason,
+                "rca debug mapi submit message"
+            );
+            responses.extend_from_slice(&rop_error_response(
+                request.rop_id,
+                request.response_handle_index(),
+                0x8007_0057,
+            ));
+            return;
+        }
+    };
+    let direct_pending_source = matches!(&object, MapiObject::PendingMessage { .. });
+    if let Some(target) = optimized_send_target.as_ref() {
+        match optimized_send_replay_email(store, principal.account_id, target).await {
+            Ok(Some((email, message_id))) => {
                 let folder_id = mailboxes
                     .iter()
                     .find(|mailbox| mailbox.id == email.mailbox_id)
                     .map(mapi_folder_id)
                     .unwrap_or(SENT_FOLDER_ID);
                 session.record_post_hierarchy_submit_attempt_context(format!(
-                    "request_id={mapi_request_id};rop={submit_rop_name};result=optimized_send_replay_success;input_handle={handle};message_id=0x{:016x};canonical_message_id={};send_attempt=true",
-                    target.message_id,
+                    "request_id={mapi_request_id};rop={submit_rop_name};result=optimized_send_replay_success;input_handle={handle};message_id=0x{message_id:016x};canonical_message_id={};send_attempt=true",
                     email.id
                 ));
                 session.handles.insert(
                     handle,
                     MapiObject::Message {
                         folder_id,
-                        message_id: target.message_id,
+                        message_id,
                         saved_email: None,
                         pending_properties: HashMap::new(),
                     },
@@ -479,20 +529,79 @@ pub(super) async fn append_submit_message_response<S>(
             }
         }
     }
-    let input = match object {
+    let optimized_send_outbox_mailbox_id = if optimized_send_target.is_some() {
+        let Some(outbox_mailbox_id) =
+            folder_row_for_id(OUTBOX_FOLDER_ID, mailboxes).map(|mailbox| mailbox.id)
+        else {
+            session.record_post_hierarchy_submit_attempt_context(format!(
+                "request_id={mapi_request_id};rop={submit_rop_name};result=error;failure_reason=optimized_send_outbox_missing;input_handle={handle};send_attempt=false"
+            ));
+            responses.extend_from_slice(&rop_error_response(
+                request.rop_id,
+                request.response_handle_index(),
+                0x8004_010F,
+            ));
+            return;
+        };
+        Some(outbox_mailbox_id)
+    } else {
+        None
+    };
+    let (input, persisted_source) = match object {
         MapiObject::PendingMessage {
             properties,
             recipients,
             ..
-        } => mapi_submit_from_pending_message(principal, &properties, &recipients),
+        } => match mapi_submit_from_pending_message(principal, &properties, &recipients) {
+            Ok(mut input) => {
+                let mut staged_attachments = session
+                    .pending_message_attachments
+                    .get(&handle)
+                    .cloned()
+                    .unwrap_or_default();
+                staged_attachments.sort_by_key(|(attach_num, _)| *attach_num);
+                let mut attachments = staged_attachments
+                    .into_iter()
+                    .map(|(_, attachment)| attachment)
+                    .collect::<Vec<_>>();
+                attachments.append(&mut input.attachments);
+                input.attachments = attachments;
+                (input, None)
+            }
+            Err(error) => {
+                session.record_post_hierarchy_submit_attempt_context(format!(
+                    "request_id={mapi_request_id};rop={submit_rop_name};result=error;failure_reason=invalid_meeting_scheduling_fields;input_handle={handle};submit_input_error={error};send_attempt=false"
+                ));
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = %format!("{:#04x}", request.rop_id),
+                    input_handle = handle,
+                    failure_reason = "invalid_meeting_scheduling_fields",
+                    submit_input_error = %error,
+                    "rca debug mapi submit message"
+                );
+                responses.extend_from_slice(&rop_error_response(
+                    request.rop_id,
+                    request.response_handle_index(),
+                    0x8007_0057,
+                ));
+                return;
+            }
+        },
         MapiObject::Message {
             folder_id,
             message_id,
             saved_email,
-            ..
+            pending_properties,
         } => {
-            let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
-                .or(saved_email.as_ref().map(|saved| &saved.email))
+            let Some(email) = saved_email
+                .as_ref()
+                .map(|saved| &saved.email)
+                .or_else(|| message_for_id(folder_id, message_id, mailboxes, emails))
             else {
                 session.record_post_hierarchy_submit_attempt_context(format!(
                     "request_id={mapi_request_id};rop={submit_rop_name};result=error;failure_reason=message_identity_not_found;input_handle={handle};object_kind=message;folder=0x{folder_id:016x};role={};message_id=0x{message_id:016x};send_attempt=true",
@@ -547,8 +656,114 @@ pub(super) async fn append_submit_message_response<S>(
                 ));
                 return;
             }
-            match mapi_submit_from_existing_email(store, principal, email).await {
-                Ok(input) => input,
+            let recipient_replacement = session
+                .pending_message_recipient_replacements
+                .get(&handle)
+                .cloned();
+            let deleted_property_tags = session
+                .pending_message_property_deletions
+                .get(&handle)
+                .cloned()
+                .unwrap_or_default();
+            let mut staged_attachments = session
+                .pending_message_attachments
+                .get(&handle)
+                .cloned()
+                .unwrap_or_default();
+            staged_attachments.sort_by_key(|(attach_num, _)| *attach_num);
+            let added_attachments = staged_attachments
+                .into_iter()
+                .map(|(_, attachment)| attachment)
+                .collect::<Vec<_>>();
+            let has_pending_attachment_deletions = session.pending_attachment_deletions.keys().any(
+                |(pending_folder_id, pending_message_id, _)| {
+                    *pending_folder_id == folder_id && *pending_message_id == message_id
+                },
+            );
+            let mut delete_attachment_ids = session
+                .pending_attachment_deletions
+                .iter()
+                .filter_map(
+                    |((pending_folder_id, pending_message_id, _), attachment_id)| {
+                        (*pending_folder_id == folder_id && *pending_message_id == message_id)
+                            .then_some(*attachment_id)
+                    },
+                )
+                .collect::<Vec<_>>();
+            let selected_scheduling_attachment_id = email
+                .calendar_meeting_request
+                .as_ref()
+                .and_then(|request| request.transport_attachment_id)
+                .or_else(|| {
+                    email
+                        .calendar_meeting_response
+                        .as_ref()
+                        .and_then(|response| response.transport_attachment_id)
+                });
+            let selected_scheduling_attachment_deleted = selected_scheduling_attachment_id
+                .is_some_and(|attachment_id| delete_attachment_ids.contains(&attachment_id));
+            let has_overlay = !pending_properties.is_empty()
+                || recipient_replacement.is_some()
+                || !deleted_property_tags.is_empty()
+                || !added_attachments.is_empty()
+                || has_pending_attachment_deletions;
+
+            let result = if has_overlay {
+                saved_message_submission_overlay(
+                    store,
+                    principal,
+                    email,
+                    &pending_properties,
+                    &deleted_property_tags,
+                    recipient_replacement.as_deref(),
+                    added_attachments,
+                    selected_scheduling_attachment_deleted,
+                )
+                .await
+                .map(|overlay| {
+                    if let Some(attachment_id) = overlay.replaced_scheduling_attachment_id {
+                        delete_attachment_ids.push(attachment_id);
+                    }
+                    delete_attachment_ids.sort_unstable();
+                    delete_attachment_ids.dedup();
+                    let mut delete_custom_property_tags = deleted_property_tags
+                        .iter()
+                        .copied()
+                        .filter(|tag| is_custom_property_tag(*tag))
+                        .collect::<Vec<_>>();
+                    delete_custom_property_tags.sort_unstable();
+                    let patch = SubmissionSourcePatch {
+                        expected_source_modseq: Some(email.modseq),
+                        delete_attachment_ids,
+                        custom_property_upserts: overlay
+                            .custom_property_upserts
+                            .into_iter()
+                            .map(|value| SubmissionMessageCustomPropertyInput {
+                                property_tag: value.property_tag,
+                                property_type: value.property_type,
+                                property_value: value.property_value,
+                            })
+                            .collect(),
+                        delete_custom_property_tags,
+                        canonical_followup_update: overlay.followup_update,
+                    };
+                    (overlay.input, Some(patch))
+                })
+            } else {
+                mapi_submit_from_existing_email(store, principal, email)
+                    .await
+                    .map(|input| (input, None))
+            };
+            match result {
+                Ok((input, patch)) => (
+                    input,
+                    Some(PersistedSubmissionSource {
+                        message_id: email.id,
+                        source_folder_id: folder_id,
+                        source_object_id: message_id,
+                        patch,
+                    }),
+                ),
                 Err(error) => {
                     session.record_post_hierarchy_submit_attempt_context(format!(
                         "request_id={mapi_request_id};rop={submit_rop_name};result=error;failure_reason=existing_message_submit_input_failed;input_handle={handle};object_kind=message;folder=0x{folder_id:016x};role={};message_id=0x{message_id:016x};submit_input_error={};send_attempt=true",
@@ -635,109 +850,74 @@ pub(super) async fn append_submit_message_response<S>(
         source = %input.source,
         "rca debug mapi submit message"
     );
-    match store
-        .submit_message(input, submit_audit_entry(principal, handle))
-        .await
-    {
+    let saved_overlay_source = persisted_source
+        .as_ref()
+        .filter(|source| source.patch.is_some())
+        .map(|source| (source.source_folder_id, source.source_object_id));
+    let submit_result = if let Some(source) = persisted_source {
+        if let Some(patch) = source.patch {
+            store
+                .submit_message_with_source_patch(
+                    input,
+                    patch,
+                    submit_audit_entry(principal, handle),
+                )
+                .await
+        } else {
+            store
+                .submit_draft_message(
+                    principal.account_id,
+                    source.message_id,
+                    principal.account_id,
+                    "mapi-submit-message",
+                    submit_audit_entry(principal, handle),
+                )
+                .await
+        }
+    } else {
+        store
+            .submit_message(input, submit_audit_entry(principal, handle))
+            .await
+    };
+    match submit_result {
         Ok(submitted) => {
+            if direct_pending_source {
+                session.pending_message_attachments.remove(&handle);
+                session
+                    .pending_attachment_parent_messages
+                    .retain(|_, parent_handle| *parent_handle != handle);
+            }
+            if let Some((source_folder_id, source_object_id)) = saved_overlay_source {
+                session
+                    .pending_message_recipient_replacements
+                    .remove(&handle);
+                session.pending_message_property_deletions.remove(&handle);
+                session.pending_message_attachments.remove(&handle);
+                session
+                    .pending_attachment_parent_messages
+                    .retain(|_, parent_handle| *parent_handle != handle);
+                session
+                    .pending_attachment_deletions
+                    .retain(|(folder_id, message_id, _), _| {
+                        *folder_id != source_folder_id || *message_id != source_object_id
+                    });
+            }
             session.record_post_hierarchy_submit_attempt_context(format!(
                 "{submit_attempt_context};result=canonical_submit_success;submitted_message_id={}",
                 submitted.message_id
             ));
-            let message_id = if let Some(target) = optimized_send_target {
-                let Some(outbox_mailbox_id) =
-                    folder_row_for_id(OUTBOX_FOLDER_ID, mailboxes).map(|mailbox| mailbox.id)
-                else {
-                    session.record_post_hierarchy_submit_attempt_context(format!(
-                        "{submit_attempt_context};result=error;failure_reason=optimized_send_outbox_missing;submitted_message_id={}",
-                        submitted.message_id
-                    ));
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    return;
-                };
-                let Some(global_counter) = global_counter_from_store_id(target.message_id) else {
-                    session.record_post_hierarchy_submit_attempt_context(format!(
-                        "{submit_attempt_context};result=error;failure_reason=optimized_send_target_global_counter_invalid;submitted_message_id={}",
-                        submitted.message_id
-                    ));
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    return;
-                };
-                let message_id = match remember_created_mapi_identity(
+            let identity_result = if let Some(target) = optimized_send_target.as_ref() {
+                remember_created_mapi_identity(
                     store,
                     principal,
                     MapiIdentityObjectKind::Message,
                     submitted.message_id,
-                    Some(global_counter),
-                    Some(target.source_key),
+                    Some(target.global_counter),
+                    Some(target.source_key.clone()),
                 )
                 .await
-                {
-                    Ok(message_id) if message_id == target.message_id => message_id,
-                    Ok(message_id) => {
-                        session.record_post_hierarchy_submit_attempt_context(format!(
-                            "{submit_attempt_context};result=error;failure_reason=optimized_send_target_identity_mismatch;submitted_message_id={};expected_message_id=0x{:016x};actual_message_id=0x{message_id:016x}",
-                            submitted.message_id,
-                            target.message_id
-                        ));
-                        responses.extend_from_slice(&rop_error_response(
-                            request.rop_id,
-                            request.response_handle_index(),
-                            0x8004_010F,
-                        ));
-                        return;
-                    }
-                    Err(error) => {
-                        session.record_post_hierarchy_submit_attempt_context(format!(
-                            "{submit_attempt_context};result=error;failure_reason=optimized_send_target_identity_reservation_failed;submitted_message_id={};identity_error={error}",
-                            submitted.message_id
-                        ));
-                        responses.extend_from_slice(&rop_error_response(
-                            request.rop_id,
-                            request.response_handle_index(),
-                            0x8004_010F,
-                        ));
-                        return;
-                    }
-                };
-                if let Err(error) = store
-                    .mirror_jmap_email_into_mailbox(
-                        principal.account_id,
-                        submitted.message_id,
-                        outbox_mailbox_id,
-                        AuditEntryInput {
-                            actor: principal.email.clone(),
-                            action: "mapi-optimized-send-outbox-mirror".to_string(),
-                            subject: format!(
-                                "message:{};outbox_message_id:{message_id:#018x}",
-                                submitted.message_id
-                            ),
-                        },
-                    )
-                    .await
-                {
-                    session.record_post_hierarchy_submit_attempt_context(format!(
-                        "{submit_attempt_context};result=error;failure_reason=optimized_send_outbox_mirror_failed;submitted_message_id={};mirror_error={error}",
-                        submitted.message_id
-                    ));
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    return;
-                }
-                message_id
             } else {
-                match remember_created_mapi_identity(
+                remember_created_mapi_identity(
                     store,
                     principal,
                     MapiIdentityObjectKind::Message,
@@ -746,43 +926,133 @@ pub(super) async fn append_submit_message_response<S>(
                     None,
                 )
                 .await
-                {
-                    Ok(message_id) => message_id,
-                    Err(_) => {
-                        responses.extend_from_slice(&rop_error_response(
-                            request.rop_id,
-                            request.response_handle_index(),
-                            0x8004_010F,
-                        ));
-                        return;
+            };
+            let message_id = match identity_result {
+                Ok(message_id) => {
+                    if let Some(target) = optimized_send_target.as_ref() {
+                        if message_id == target.message_id {
+                            if let Some(outbox_mailbox_id) = optimized_send_outbox_mailbox_id {
+                                if let Err(error) = store
+                                    .mirror_jmap_email_into_mailbox(
+                                        principal.account_id,
+                                        submitted.message_id,
+                                        outbox_mailbox_id,
+                                        AuditEntryInput {
+                                            actor: principal.email.clone(),
+                                            action: "mapi-optimized-send-outbox-mirror".to_string(),
+                                            subject: format!(
+                                                "message:{};outbox_message_id:{message_id:#018x}",
+                                                submitted.message_id
+                                            ),
+                                        },
+                                    )
+                                    .await
+                                {
+                                    session.record_post_hierarchy_submit_attempt_context(format!(
+                                        "{submit_attempt_context};result=degraded_success;degradation_reason=optimized_send_outbox_mirror_failed;submitted_message_id={};mirror_error={error}",
+                                        submitted.message_id
+                                    ));
+                                    tracing::info!(
+                                        rca_debug = true,
+                                        adapter = "mapi",
+                                        endpoint = "emsmdb",
+                                        mailbox = %principal.email,
+                                        request_type = "Execute",
+                                        request_rop_id = %format!("{:#04x}", request.rop_id),
+                                        input_handle = handle,
+                                        submitted_message_id = %submitted.message_id,
+                                        mirror_error = %error,
+                                        failure_reason = "optimized_send_outbox_mirror_failed",
+                                        "rca debug mapi submit message"
+                                    );
+                                }
+                            }
+                        } else {
+                            session.record_post_hierarchy_submit_attempt_context(format!(
+                                "{submit_attempt_context};result=degraded_success;degradation_reason=optimized_send_target_identity_mismatch;submitted_message_id={};expected_message_id=0x{:016x};actual_message_id=0x{message_id:016x}",
+                                submitted.message_id,
+                                target.message_id
+                            ));
+                            tracing::info!(
+                                rca_debug = true,
+                                adapter = "mapi",
+                                endpoint = "emsmdb",
+                                mailbox = %principal.email,
+                                request_type = "Execute",
+                                request_rop_id = %format!("{:#04x}", request.rop_id),
+                                input_handle = handle,
+                                submitted_message_id = %submitted.message_id,
+                                expected_message_id = %format!("{:#018x}", target.message_id),
+                                actual_message_id = %format!("{message_id:#018x}"),
+                                failure_reason = "optimized_send_target_identity_mismatch",
+                                "rca debug mapi submit message"
+                            );
+                        }
                     }
+                    Some(message_id)
+                }
+                Err(error) => {
+                    let failure_reason = if optimized_send_target.is_some() {
+                        "optimized_send_target_identity_reservation_failed"
+                    } else {
+                        "submitted_message_identity_allocation_failed"
+                    };
+                    session.record_post_hierarchy_submit_attempt_context(format!(
+                        "{submit_attempt_context};result=degraded_success;degradation_reason={failure_reason};submitted_message_id={};identity_error={error}",
+                        submitted.message_id
+                    ));
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = %format!("{:#04x}", request.rop_id),
+                        input_handle = handle,
+                        submitted_message_id = %submitted.message_id,
+                        identity_error = %error,
+                        failure_reason,
+                        "rca debug mapi submit message"
+                    );
+                    session.forget_handle(handle);
+                    None
                 }
             };
-            session.handles.insert(
-                handle,
-                submitted_message_handle_object(&submitted, mailboxes, message_id),
-            );
-            match store
-                .fetch_jmap_emails(principal.account_id, &[submitted.message_id])
-                .await
-            {
-                Ok(mut emails) => created_emails.append(&mut emails),
-                Err(error) => tracing::info!(
-                    rca_debug = true,
-                    adapter = "mapi",
-                    endpoint = "emsmdb",
-                    mailbox = %principal.email,
-                    request_type = "Execute",
-                    request_rop_id = %format!("{:#04x}", request.rop_id),
-                    input_handle = handle,
-                    submitted_message_id = %submitted.message_id,
-                    load_error = %error,
-                    failure_reason = "submitted_message_same_execute_load_failed",
-                    "rca debug mapi submit message"
-                ),
+            if let Some(message_id) = message_id {
+                session.handles.insert(
+                    handle,
+                    submitted_message_handle_object(&submitted, mailboxes, message_id),
+                );
+                match store
+                    .fetch_jmap_emails(principal.account_id, &[submitted.message_id])
+                    .await
+                {
+                    Ok(mut emails) => created_emails.append(&mut emails),
+                    Err(error) => {
+                        session.record_post_hierarchy_submit_attempt_context(format!(
+                            "{submit_attempt_context};result=degraded_success;degradation_reason=submitted_message_same_execute_load_failed;submitted_message_id={};load_error={error}",
+                            submitted.message_id
+                        ));
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = %format!("{:#04x}", request.rop_id),
+                            input_handle = handle,
+                            submitted_message_id = %submitted.message_id,
+                            load_error = %error,
+                            failure_reason = "submitted_message_same_execute_load_failed",
+                            "rca debug mapi submit message"
+                        );
+                    }
+                }
             }
             responses.extend_from_slice(&submit_success_response(request));
         }
+        // Canonical submission failed before commit, so returning an error is
+        // retry-safe. The successful arm above must never return a ROP error.
         Err(error) => {
             session.record_post_hierarchy_submit_attempt_context(format!(
                 "{submit_attempt_context};result=error;failure_reason=canonical_submit_failed;submit_error={}",
@@ -891,5 +1161,45 @@ pub(super) fn abort_submit_audit_entry(
         actor: principal.email.clone(),
         action: "mapi-abort-submit".to_string(),
         subject: format!("message:{canonical_message_id}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optimized_send_target_is_validated_before_submission() {
+        let account_id = Uuid::from_u128(0x1234);
+        let mut properties = HashMap::new();
+        assert!(optimized_send_target(&properties, account_id)
+            .expect("an absent target is an ordinary submission")
+            .is_none());
+
+        properties.insert(PID_TAG_TARGET_ENTRY_ID, MapiValue::U32(1));
+        assert_eq!(
+            optimized_send_target(&properties, account_id),
+            Err("optimized_send_target_not_binary")
+        );
+
+        properties.insert(PID_TAG_TARGET_ENTRY_ID, MapiValue::Binary(vec![0xFF; 16]));
+        assert_eq!(
+            optimized_send_target(&properties, account_id),
+            Err("optimized_send_target_entry_id_invalid")
+        );
+
+        let message_id = crate::mapi::identity::mapi_store_id(FIRST_DYNAMIC_GLOBAL_COUNTER + 7);
+        let entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+            account_id,
+            OUTBOX_FOLDER_ID,
+            message_id,
+        )
+        .expect("valid optimized-send target EntryID");
+        properties.insert(PID_TAG_TARGET_ENTRY_ID, MapiValue::Binary(entry_id));
+        let target = optimized_send_target(&properties, account_id)
+            .expect("valid target")
+            .expect("optimized target");
+        assert_eq!(target.message_id, message_id);
+        assert_eq!(target.global_counter, FIRST_DYNAMIC_GLOBAL_COUNTER + 7);
     }
 }

@@ -9446,6 +9446,45 @@ fn normal_message_row_projects_outlook_inbox_view_columns() {
 }
 
 #[test]
+fn message_row_keeps_distinct_from_sender_identities_and_reconstructed_headers() {
+    let email_id = Uuid::from_u128(0x7174);
+    crate::mapi::identity::remember_mapi_identity(
+        email_id,
+        crate::mapi::identity::mapi_store_id(0x84),
+    );
+    let mut email = test_table_email(email_id, Uuid::from_u128(0x8184), "Delegated identity");
+    email.from_display = Some("Meeting Organizer".to_string());
+    email.from_address = "organizer@example.test".to_string();
+    email.sender_display = Some("Transport Agent".to_string());
+    email.sender_address = Some("agent@example.test".to_string());
+    let columns = [
+        PID_TAG_SENDER_NAME_W,
+        PID_TAG_SENT_REPRESENTING_NAME_W,
+        PID_TAG_TRANSPORT_MESSAGE_HEADERS_W,
+    ];
+
+    let row = serialize_message_row(&email, &columns);
+    let mut cursor = Cursor::new(&row);
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_SENDER_NAME_W).unwrap(),
+        MapiValue::String("Transport Agent".to_string())
+    );
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_SENT_REPRESENTING_NAME_W).unwrap(),
+        MapiValue::String("Meeting Organizer".to_string())
+    );
+    let headers = parse_mapi_property_value(&mut cursor, PID_TAG_TRANSPORT_MESSAGE_HEADERS_W)
+        .expect("transport headers parse");
+    assert!(matches!(
+        headers,
+        MapiValue::String(value)
+            if value.contains("From: Meeting Organizer <organizer@example.test>")
+                && value.contains("Sender: Transport Agent <agent@example.test>")
+    ));
+    assert_eq!(cursor.remaining(), 0);
+}
+
+#[test]
 fn normal_inbox_query_rows_projects_sender_and_delivery_time() {
     let mailbox_id = Uuid::from_u128(0x8184);
     let email_id = Uuid::from_u128(0x7174);

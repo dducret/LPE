@@ -1594,6 +1594,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 media_type,
                 disposition: attachment.disposition,
                 content_id: attachment.cid,
+                is_scheduling_body: false,
                 blob_bytes: upload.blob_bytes,
             });
         }

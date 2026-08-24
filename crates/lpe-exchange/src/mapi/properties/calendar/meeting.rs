@@ -21,6 +21,62 @@ pub(super) fn response_status(event: &AccessibleEvent) -> i32 {
     }
 }
 
+pub(in crate::mapi) fn materialize_owner_meeting_organizer(
+    input: &mut UpsertClientEventInput,
+    owner_email: &str,
+    owner_display_name: &str,
+) {
+    let mut participants = parse_calendar_participants_metadata(&input.attendees_json);
+    let is_meeting = serde_json::from_str::<serde_json::Value>(&input.organizer_json)
+        .ok()
+        .and_then(|value| {
+            value
+                .get(ORGANIZER_IS_MEETING_FIELD)
+                .and_then(serde_json::Value::as_bool)
+        })
+        .unwrap_or(false)
+        || !participants.attendees.is_empty();
+    if !is_meeting {
+        return;
+    }
+
+    let mut organizer = participants
+        .organizer
+        .take()
+        .or_else(|| serde_json::from_str::<CalendarOrganizerMetadata>(&input.organizer_json).ok())
+        .unwrap_or_default();
+    if organizer.email.trim().is_empty() {
+        organizer.email = normalize_calendar_email(owner_email);
+        if organizer.common_name.trim().is_empty() {
+            organizer.common_name = owner_display_name.trim().to_string();
+        }
+    }
+    if organizer.email.is_empty() && organizer.common_name.is_empty() {
+        return;
+    }
+
+    participants.organizer = Some(organizer.clone());
+    input.attendees_json = serialize_calendar_participants_metadata(&participants);
+
+    let mut organizer_object = serde_json::from_str::<serde_json::Value>(&input.organizer_json)
+        .ok()
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+    organizer_object.insert(
+        "email".to_string(),
+        serde_json::Value::String(organizer.email),
+    );
+    organizer_object.insert(
+        "common_name".to_string(),
+        serde_json::Value::String(organizer.common_name),
+    );
+    organizer_object.insert(
+        ORGANIZER_IS_MEETING_FIELD.to_string(),
+        serde_json::Value::Bool(true),
+    );
+    input.organizer_json = serde_json::Value::Object(organizer_object).to_string();
+}
+
 pub(super) fn organizer_json_from_mapi(
     existing: &AccessibleEvent,
     organizer: Option<&CalendarOrganizerMetadata>,

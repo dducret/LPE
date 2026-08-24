@@ -561,6 +561,18 @@ macro_rules! store_impl_messages {
         Box::pin(async move { self.submit_message(input, audit).await })
     }
 
+    fn submit_message_with_source_patch<'a>(
+        &'a self,
+        input: SubmitMessageInput,
+        patch: SubmissionSourcePatch,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, SubmittedMessage> {
+        Box::pin(async move {
+            self.submit_message_with_source_patch(input, patch, audit)
+                .await
+        })
+    }
+
     fn cancel_queued_submission<'a>(
         &'a self,
         account_id: Uuid,

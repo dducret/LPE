@@ -2,8 +2,8 @@ use anyhow::{anyhow, bail, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use lpe_domain::{civil_from_days, days_from_civil};
 use lpe_storage::{
-    parse_calendar_participants_metadata, ActiveSyncAttachment, CalendarParticipantMetadata,
-    ClientContact, ClientEvent, JmapEmail, JmapUploadBlob,
+    external_calendar_uid, parse_calendar_participants_metadata, ActiveSyncAttachment,
+    CalendarParticipantMetadata, ClientContact, ClientEvent, JmapEmail, JmapUploadBlob,
 };
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -411,7 +411,7 @@ fn contact_date_to_activesync(value: Option<&str>) -> Option<String> {
 
 pub(crate) fn calendar_application_data(event: &ClientEvent) -> Value {
     let mut children = Vec::new();
-    push_text(&mut children, 4, "UID", &event.uid);
+    push_text(&mut children, 4, "UID", &external_calendar_uid(&event.uid));
     push_text(&mut children, 4, "TimeZone", &event.time_zone);
     push_text(&mut children, 4, "Subject", &event.title);
     push_text(
