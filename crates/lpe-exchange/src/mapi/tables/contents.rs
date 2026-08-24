@@ -106,17 +106,6 @@ pub(in crate::mapi) fn serialize_message_row_with_durable_identity(
     serialize_message_row_with_table_instance(email, durable_identity, None, columns, 0, 0, None)
 }
 
-pub(in crate::mapi) fn serialize_mapi_message_row(
-    message: &MapiMessage,
-    columns: &[u32],
-) -> Vec<u8> {
-    serialize_message_row_with_durable_identity(
-        &message.email,
-        message.durable_identity.as_ref(),
-        columns,
-    )
-}
-
 pub(in crate::mapi) fn serialize_mapi_message_row_with_mailbox_guid(
     message: &MapiMessage,
     mailbox_guid: Uuid,
