@@ -357,6 +357,7 @@ macro_rules! store_impl_public_address_im {
                               AND counted_event.owner_account_id = calendar_event.owner_account_id
                               AND counted_event.calendar_id = calendar_event.calendar_id
                               AND counted_event.lifecycle_state = 'active'
+                              AND counted_event.projection_state = 'visible'
                         )
                     END AS calendar_total_messages,
                     calendar_collection.display_name AS calendar_collection_name,
@@ -472,6 +473,7 @@ macro_rules! store_impl_public_address_im {
                  AND calendar_event.owner_account_id = log.account_id
                  AND calendar_event.id = log.object_id
                  AND log.object_kind IN ('calendar_event', 'deleted_calendar_event')
+                 AND calendar_event.projection_state = 'visible'
                 LEFT JOIN calendars calendar_collection
                   ON calendar_collection.tenant_id = log.tenant_id
                  AND calendar_collection.owner_account_id = log.account_id

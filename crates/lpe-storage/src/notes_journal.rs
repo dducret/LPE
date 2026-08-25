@@ -741,6 +741,7 @@ impl Storage {
                                 AND exception_event.calendar_id = e.calendar_id
                                 AND exception_event.exception_for_event_id = e.id
                                 AND exception_event.lifecycle_state = 'active'
+                                AND exception_event.projection_state = 'visible'
                                 AND exception_event.exception_recurrence_id IN (
                                     to_char(generated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
                                     to_char(generated_at AT TIME ZONE 'UTC', 'YYYYMMDD"T"HH24MISS"Z"'),
@@ -758,6 +759,7 @@ impl Storage {
                     WHERE e.tenant_id = $1
                       AND e.owner_account_id = $2
                       AND e.lifecycle_state = 'active'
+                      AND e.projection_state = 'visible'
                       AND e.reminder_set
                       AND e.reminder_at IS NOT NULL
                       AND occurrence_start + (e.reminder_at - e.starts_at) <= NOW() + interval '90 days'

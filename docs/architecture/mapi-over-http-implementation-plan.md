@@ -2695,25 +2695,72 @@ participant metadata before commit. An explicitly supplied external organizer
 is preserved, and an ICS-imported object is never rewritten through this
 fallback. This ensures that a later response can pass the canonical organizer
 authorization check without turning an attendee copy into an organizer copy.
-The organizer's Meeting Event is committed before its separate Outbox Meeting
-Request is submitted. At the canonical source-claim boundary, after applying
-any save-on-submit overlay but before creating `Sent` or queue state, LPE
-requires exactly one active, non-cancelled, non-recurring Event across the
-submitting organizer's calendars whose normalized UID and complete UTC
-start/end interval match the request, whose organizer is that mailbox, and
-whose canonical attendees contain every nonempty, unique request attendee.
-Those request attendees must map exactly to unique visible `To`/`Cc` envelope
+`[MS-OXOCAL]` specifies the client-side sequence as creating and saving the
+organizer Meeting, sending the separate Request, and then updating and saving
+the Meeting. A dated Outlook cached-mode interoperability capture—not an
+Exchange product specification—showed that server visibility can be reversed:
+Outlook issued `RopTransportSend` for the pending Outbox Request before its
+separate Calendar ICS upload reached LPE.
+At the canonical source-claim boundary, after applying any save-on-submit
+overlay but before creating `Sent` or queue state, LPE therefore handles two
+bounded cases. When a canonical Event already exists, LPE requires exactly one
+active, non-cancelled, non-recurring Event across the submitting organizer's
+calendars whose normalized UID and complete UTC start/end interval match the
+request, whose organizer is that mailbox, and whose complete canonical attendee
+set is nonempty, unique, and contains every attendee in the request. The request
+attendees still exactly match the visible envelope. This subset rule preserves
+Meeting Updates sent only to newly added attendees as specified by
+`[MS-OXOCAL]` section 3.1.4.7.3.4.
+For an unsaved direct-MAPI submission only, an initial sequence-zero request
+with a nonempty subject and no owner Event having that UID atomically creates
+one canonical Event from the validated scheduling body in typed
+`mapi_submission_placeholder` state, then applies the same exact correlation
+check, including an exact canonical-placeholder attendee match, before the
+submission transaction continues. Creation is serialized by
+an owner-plus-normalized-UID transaction advisory lock, including the empty-set
+case that a row lock cannot protect.
+
+The placeholder is canonical only for scheduling correlation. It is excluded
+from REST, JMAP, DAV, EWS, MAPI, ActiveSync, free/busy, reminders, attachments,
+and dependency replay. Its creation allocates no Calendar category modseq,
+Calendar sync revision, change-log row, notification, MAPI identity, custom
+property, or attachment. An inbound attendee response may update its internal
+attendee and replay-watermark state under the Event row lock, but does not
+publish an Event version while it remains hidden.
+
+The later owner Calendar import uses the Global Object ID-derived UID and the
+same owner-UID lock. Exactly one hidden row must match the imported sequence,
+UTC interval, organizer, and unique attendee set; recurring, cancelled,
+delegated/shared, non-imported, ambiguous, pre-projected, or mismatched uploads
+fail without changing it. A valid import atomically keeps the placeholder UUID,
+moves it to Outlook's actual target Calendar, replaces its complete canonical
+content, reminder, custom-property, and attachment state, overlays any early
+attendee response, preserves its response watermark, and clears the hidden
+state. Only then does the normal create path install the imported MID/SourceKey,
+ChangeKey, predecessor list, and version LMT, allocate a distinct server CN,
+and publish exactly one visible Event create/version/notification. It does not
+route through ordinary ICS conflict resolution because a temporary server LMT
+and unrelated predecessor lineage could otherwise discard Outlook's import.
+Because the placeholder commits atomically with `Sent` and the outbound queue,
+it is retained without an age cutoff until that exact owner import arrives;
+expiry or automatic promotion would discard the correlation anchor for an
+already-delivered invitation and any early attendee response. A mismatched
+upload fails without mutating the placeholder so an exact retry remains valid.
+
+Request attendees must map exactly to unique visible `To`/`Cc` envelope
 recipients; a scheduling `Bcc` fails closed because it cannot be represented by
-the generated MAPI attendee rows. A request sequence
-lower than the Event sequence is stale; equality is valid, and a higher request
-sequence is valid for the partial-attendee update case in which Outlook does
-not advance the organizer Meeting's sequence. Missing, deleted, cancelled,
-ambiguous, recurring, or mismatched correlation rejects the entire submission
+the generated MAPI attendee rows. A request sequence lower than the Event
+sequence is stale; equality is valid, and a higher request sequence remains
+valid when Outlook has not yet advanced the organizer Meeting's sequence. A
+saved draft, non-MAPI submission, update,
+deleted/cancelled/recurring Event, existing same-UID mismatch, or ambiguous
+correlation cannot use the initial materialization path and rejects the entire
 transaction before `Sent`/queue creation or Drafts/Outbox source expunge. The
 post-submit `PidLidFInvited`, sequence-time, and critical-change save is not a
 prerequisite for the initial request. This ordering and sequence behavior
-follows `[MS-OXOCAL]` sections 3.1.4.7.1, 3.1.4.7.3, 3.1.5.4, and
-4.2.2.1 through 4.2.2.2.
+uses the Request/Meeting lifecycle from `[MS-OXOCAL]` sections 3.1.4.7.1,
+3.1.4.7.3, 3.1.5.4, and 4.2.2.1 through 4.2.2.2, together with the pending
+Message transport boundary in `[MS-OXOMSG]` sections 3.3.5.1 and 3.3.5.7.
 Pending scheduling submission rejects a Global Object
 ID with a nonzero occurrence
 date until correlated `RECURRENCE-ID` export is supported, rather than sending

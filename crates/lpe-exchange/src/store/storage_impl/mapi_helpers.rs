@@ -574,6 +574,7 @@ async fn repair_stale_mapi_object_identities(
               FROM calendar_events event
               WHERE event.tenant_id = identity.tenant_id
                 AND event.id = identity.canonical_id
+                AND event.projection_state = 'visible'
                 AND (
                     event.owner_account_id = identity.account_id
                     OR EXISTS (

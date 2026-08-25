@@ -7,12 +7,18 @@ use uuid::Uuid;
 use super::{mime::is_scheduling_calendar_part, SubmittedRecipientInput};
 use crate::mail::{parse_calendar_meeting_request, parse_calendar_meeting_response};
 use crate::{
+    calendar_attendee_labels,
+    mapi_events::{
+        lock_calendar_event_uid_in_tx, CALENDAR_EVENT_PROJECTION_MAPI_SUBMISSION_PLACEHOLDER,
+    },
     normalize_calendar_meeting_uid, normalize_email, parse_calendar_participants_metadata,
-    AttachmentUploadInput, CalendarMeetingRequest, CalendarMeetingResponse, Storage,
+    serialize_calendar_participants_metadata, AttachmentUploadInput, CalendarMeetingRequest,
+    CalendarMeetingResponse, CalendarOrganizerMetadata, CalendarParticipantMetadata,
+    CalendarParticipantsMetadata, Storage,
 };
 
 const LOCK_REQUEST_EVENT_CANDIDATES_SQL: &str = r#"
-    SELECT id, uid, sequence,
+    SELECT id, uid, sequence, projection_state,
            starts_at = $4::timestamptz AS start_matches,
            ends_at = $5::timestamptz AS end_matches,
            organizer_json::text AS organizer_json,
@@ -32,10 +38,21 @@ const LOCK_REQUEST_EVENT_CANDIDATES_SQL: &str = r#"
     FOR UPDATE
 "#;
 
+const LOCK_REQUEST_UID_EVENTS_SQL: &str = r#"
+    SELECT id
+    FROM calendar_events
+    WHERE tenant_id = $1
+      AND owner_account_id = $2
+      AND uid = $3
+    ORDER BY id
+    FOR UPDATE
+"#;
+
 #[derive(Debug)]
 struct MeetingEventCandidate {
     uid: String,
     sequence: i32,
+    projection_state: String,
     start_matches: bool,
     end_matches: bool,
     organizer_json: String,
@@ -54,6 +71,10 @@ pub(super) async fn validate_outbound_scheduling_body_in_tx(
     tenant_id: &Uuid,
     account_id: Uuid,
     authorized_from: &str,
+    allow_initial_mapi_event_placeholder: bool,
+    subject: &str,
+    body_text: &str,
+    body_html: Option<&str>,
     attachments: &[AttachmentUploadInput],
     visible_recipients: &[(&'static str, SubmittedRecipientInput)],
     bcc_recipients: &[SubmittedRecipientInput],
@@ -83,30 +104,199 @@ pub(super) async fn validate_outbound_scheduling_body_in_tx(
     storage
         .lock_account_sync_state_in_tx(tx, tenant_id, account_id, "mail")
         .await?;
-    let rows = sqlx::query(LOCK_REQUEST_EVENT_CANDIDATES_SQL)
+    lock_calendar_event_uid_in_tx(tx, tenant_id, account_id, &request.uid).await?;
+    let initial_placeholder_allowed = initial_mapi_event_placeholder_is_allowed(
+        allow_initial_mapi_event_placeholder,
+        &request,
+        subject,
+    );
+    let mut candidates =
+        lock_request_event_candidates_in_tx(tx, tenant_id, account_id, &request).await?;
+    if candidates.is_empty()
+        && initial_placeholder_allowed
+        && lock_request_uid_events_in_tx(tx, tenant_id, account_id, &request)
+            .await?
+            .is_empty()
+    {
+        create_initial_mapi_event_placeholder_in_tx(
+            tx,
+            tenant_id,
+            account_id,
+            &request,
+            &authorized_from,
+            subject,
+            body_text,
+            body_html,
+        )
+        .await?;
+        candidates =
+            lock_request_event_candidates_in_tx(tx, tenant_id, account_id, &request).await?;
+    }
+    if matching_candidate_count(
+        &request,
+        &request_attendees,
+        &authorized_from,
+        initial_placeholder_allowed,
+        &candidates,
+    ) != 1
+    {
+        bail!("outbound meeting request does not correlate to exactly one active canonical Event");
+    }
+    Ok(())
+}
+
+async fn lock_request_event_candidates_in_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    tenant_id: &Uuid,
+    account_id: Uuid,
+    request: &CalendarMeetingRequest,
+) -> Result<Vec<MeetingEventCandidate>> {
+    sqlx::query(LOCK_REQUEST_EVENT_CANDIDATES_SQL)
         .bind(tenant_id)
         .bind(account_id)
         .bind(normalize_calendar_meeting_uid(&request.uid))
         .bind(&request.meeting_start)
         .bind(&request.meeting_end)
         .fetch_all(&mut **tx)
-        .await?;
-    let candidates = rows
+        .await?
         .into_iter()
         .map(|row| -> Result<MeetingEventCandidate> {
             Ok(MeetingEventCandidate {
                 uid: row.try_get("uid")?,
                 sequence: row.try_get("sequence")?,
+                projection_state: row.try_get("projection_state")?,
                 start_matches: row.try_get("start_matches")?,
                 end_matches: row.try_get("end_matches")?,
                 organizer_json: row.try_get("organizer_json")?,
                 attendees_json: row.try_get("attendees_json")?,
             })
         })
-        .collect::<Result<Vec<_>>>()?;
-    if matching_candidate_count(&request, &request_attendees, &authorized_from, &candidates) != 1 {
-        bail!("outbound meeting request does not correlate to exactly one active canonical Event");
-    }
+        .collect()
+}
+
+async fn lock_request_uid_events_in_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    tenant_id: &Uuid,
+    account_id: Uuid,
+    request: &CalendarMeetingRequest,
+) -> Result<Vec<Uuid>> {
+    Ok(sqlx::query_scalar(LOCK_REQUEST_UID_EVENTS_SQL)
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(normalize_calendar_meeting_uid(&request.uid))
+        .fetch_all(&mut **tx)
+        .await?)
+}
+
+fn initial_mapi_event_placeholder_is_allowed(
+    allow_initial_mapi_event_placeholder: bool,
+    request: &CalendarMeetingRequest,
+    subject: &str,
+) -> bool {
+    allow_initial_mapi_event_placeholder
+        && request.meeting_sequence == 0
+        && !subject.trim().is_empty()
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn create_initial_mapi_event_placeholder_in_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    tenant_id: &Uuid,
+    account_id: Uuid,
+    request: &CalendarMeetingRequest,
+    authorized_from: &str,
+    subject: &str,
+    body_text: &str,
+    body_html: Option<&str>,
+) -> Result<()> {
+    let calendar_id = Storage::ensure_default_calendar_in_tx(tx, tenant_id, account_id).await?;
+    let event_id = Uuid::new_v4();
+    let uid = normalize_calendar_meeting_uid(&request.uid);
+    let organizer_name = request
+        .organizer
+        .as_ref()
+        .map(|organizer| organizer.display_name.trim())
+        .unwrap_or_default();
+    let participants = CalendarParticipantsMetadata {
+        organizer: Some(CalendarOrganizerMetadata {
+            email: authorized_from.to_string(),
+            common_name: organizer_name.to_string(),
+        }),
+        attendees: request
+            .attendees
+            .iter()
+            .map(|attendee| CalendarParticipantMetadata {
+                email: attendee.email.clone(),
+                common_name: attendee.display_name.clone(),
+                role: attendee.role.clone(),
+                partstat: attendee.partstat.clone(),
+                rsvp: attendee.rsvp,
+                proposed_start: None,
+                proposed_end: None,
+                counter_proposal: false,
+            })
+            .collect(),
+    };
+    let organizer_json = serde_json::json!({
+        "email": authorized_from,
+        "common_name": organizer_name,
+        "is_meeting": true,
+    })
+    .to_string();
+    let attendees_json = serialize_calendar_participants_metadata(&participants);
+    let source_payload_json = serde_json::json!({
+        "attendees": calendar_attendee_labels(&participants),
+        "outboundMeetingRequestPlaceholder": true,
+    })
+    .to_string();
+    let status = if request.intended_busy_status == 1 {
+        "tentative"
+    } else {
+        "confirmed"
+    };
+    let _inserted_event_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        INSERT INTO calendar_events (
+            id, tenant_id, owner_account_id, calendar_id, uid,
+            starts_at, ends_at, time_zone, all_day, status, sequence,
+            title, location, organizer_json, attendees_json, body_text, body_html,
+            import_source, source_payload_json, projection_state
+        )
+        SELECT
+            $1, $2, $3, $4, $5,
+            $6::timestamptz, $7::timestamptz, 'UTC', FALSE, $8, $9,
+            $10, $11, $12::jsonb, $13::jsonb, $14, NULLIF($15::text, ''),
+            'mapi', $16::jsonb, $17
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM calendar_events
+            WHERE tenant_id = $2
+              AND owner_account_id = $3
+              AND uid = $5
+        )
+        ON CONFLICT (tenant_id, owner_account_id, calendar_id, uid) DO NOTHING
+        RETURNING id
+        "#,
+    )
+    .bind(event_id)
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(calendar_id)
+    .bind(&uid)
+    .bind(&request.meeting_start)
+    .bind(&request.meeting_end)
+    .bind(status)
+    .bind(request.meeting_sequence)
+    .bind(subject.trim())
+    .bind(request.meeting_location.as_deref().unwrap_or_default())
+    .bind(&organizer_json)
+    .bind(&attendees_json)
+    .bind(body_text)
+    .bind(body_html)
+    .bind(&source_payload_json)
+    .bind(CALENDAR_EVENT_PROJECTION_MAPI_SUBMISSION_PLACEHOLDER)
+    .fetch_optional(&mut **tx)
+    .await?;
     Ok(())
 }
 
@@ -218,6 +408,7 @@ fn matching_candidate_count(
     request: &CalendarMeetingRequest,
     request_attendees: &BTreeSet<String>,
     authorized_from: &str,
+    initial_placeholder_allowed: bool,
     candidates: &[MeetingEventCandidate],
 ) -> usize {
     candidates
@@ -228,22 +419,63 @@ fn matching_candidate_count(
                 && candidate.end_matches
                 && normalize_calendar_meeting_uid(&candidate.uid)
                     == normalize_calendar_meeting_uid(&request.uid)
-                && request.meeting_sequence >= candidate.sequence
+                && candidate_is_eligible_for_request(
+                    candidate,
+                    request.meeting_sequence,
+                    initial_placeholder_allowed,
+                )
                 && canonical_organizer_matches(
                     &participants,
                     &candidate.organizer_json,
                     authorized_from,
                 )
-                && request_attendees.iter().all(|request_attendee| {
-                    participants
-                        .attendees
-                        .iter()
-                        .filter(|attendee| normalize_email(&attendee.email) == *request_attendee)
-                        .count()
-                        == 1
-                })
+                && candidate_attendees_match(candidate, &participants, request_attendees)
         })
         .count()
+}
+
+fn candidate_attendees_match(
+    candidate: &MeetingEventCandidate,
+    participants: &crate::CalendarParticipantsMetadata,
+    request_attendees: &BTreeSet<String>,
+) -> bool {
+    let Some(canonical_attendees) = unique_canonical_attendees(participants) else {
+        return false;
+    };
+    match candidate.projection_state.as_str() {
+        "visible" => request_attendees.is_subset(&canonical_attendees),
+        CALENDAR_EVENT_PROJECTION_MAPI_SUBMISSION_PLACEHOLDER => {
+            canonical_attendees == *request_attendees
+        }
+        _ => false,
+    }
+}
+
+fn candidate_is_eligible_for_request(
+    candidate: &MeetingEventCandidate,
+    request_sequence: i32,
+    initial_placeholder_allowed: bool,
+) -> bool {
+    match candidate.projection_state.as_str() {
+        "visible" => request_sequence >= candidate.sequence,
+        CALENDAR_EVENT_PROJECTION_MAPI_SUBMISSION_PLACEHOLDER => {
+            initial_placeholder_allowed && request_sequence == 0 && candidate.sequence == 0
+        }
+        _ => false,
+    }
+}
+
+fn unique_canonical_attendees(
+    participants: &crate::CalendarParticipantsMetadata,
+) -> Option<BTreeSet<String>> {
+    let mut attendees = BTreeSet::new();
+    for attendee in &participants.attendees {
+        let email = normalize_email(&attendee.email);
+        if email.is_empty() || !attendees.insert(email) {
+            return None;
+        }
+    }
+    (!attendees.is_empty()).then_some(attendees)
 }
 
 fn canonical_organizer_matches(
@@ -343,6 +575,7 @@ mod tests {
         MeetingEventCandidate {
             uid: "request-correlation@example.test".to_string(),
             sequence,
+            projection_state: "visible".to_string(),
             start_matches: true,
             end_matches: true,
             organizer_json:
@@ -350,8 +583,7 @@ mod tests {
             attendees_json: r#"{
                 "organizer":{"email":"organizer@example.test","common_name":"Organizer"},
                 "attendees":[
-                    {"email":"first@example.test","common_name":"First","role":"REQ-PARTICIPANT","partstat":"needs-action","rsvp":true},
-                    {"email":"second@example.test","common_name":"Second","role":"REQ-PARTICIPANT","partstat":"needs-action","rsvp":true}
+                    {"email":"first@example.test","common_name":"First","role":"REQ-PARTICIPANT","partstat":"needs-action","rsvp":true}
                 ]
             }"#
             .to_string(),
@@ -374,27 +606,34 @@ mod tests {
     }
 
     #[test]
-    fn canonical_request_matches_one_event_and_allows_partial_attendees() {
+    fn canonical_request_matches_one_visible_event_with_partial_attendees() {
         let request = request(3);
+        let mut event = candidate(3);
+        event.attendees_json = event.attendees_json.replace(
+            "]",
+            r#",{"email":"second@example.test","common_name":"Second","role":"REQ-PARTICIPANT","partstat":"needs-action","rsvp":true}]"#,
+        );
         assert_eq!(
             matching_candidate_count(
                 &request,
                 &attendees(&request),
                 "organizer@example.test",
-                &[candidate(3)],
+                false,
+                &[event],
             ),
             1
         );
     }
 
     #[test]
-    fn request_before_event_save_and_ambiguous_events_fail_correlation() {
+    fn missing_and_ambiguous_events_are_not_exact_correlations() {
         let request = request(3);
         assert_eq!(
             matching_candidate_count(
                 &request,
                 &attendees(&request),
                 "organizer@example.test",
+                false,
                 &[],
             ),
             0
@@ -404,9 +643,86 @@ mod tests {
                 &request,
                 &attendees(&request),
                 "organizer@example.test",
+                false,
                 &[candidate(3), candidate(3)],
             ),
             2
+        );
+    }
+
+    #[test]
+    fn only_an_initial_direct_mapi_request_can_precede_its_event() {
+        let initial = request(0);
+        assert!(initial_mapi_event_placeholder_is_allowed(
+            true, &initial, "Probe"
+        ));
+        assert!(!initial_mapi_event_placeholder_is_allowed(
+            false, &initial, "Probe"
+        ));
+        assert!(!initial_mapi_event_placeholder_is_allowed(
+            true,
+            &request(1),
+            "Probe"
+        ));
+        assert!(!initial_mapi_event_placeholder_is_allowed(
+            true, &initial, " "
+        ));
+    }
+
+    #[test]
+    fn hidden_placeholder_only_correlates_to_the_initial_direct_mapi_request() {
+        let initial = request(0);
+        let mut placeholder = candidate(0);
+        placeholder.projection_state =
+            CALENDAR_EVENT_PROJECTION_MAPI_SUBMISSION_PLACEHOLDER.to_string();
+        assert_eq!(
+            matching_candidate_count(
+                &initial,
+                &attendees(&initial),
+                "organizer@example.test",
+                true,
+                std::slice::from_ref(&placeholder),
+            ),
+            1
+        );
+        assert_eq!(
+            matching_candidate_count(
+                &initial,
+                &attendees(&initial),
+                "organizer@example.test",
+                false,
+                std::slice::from_ref(&placeholder),
+            ),
+            0
+        );
+        let update = request(1);
+        assert_eq!(
+            matching_candidate_count(
+                &update,
+                &attendees(&update),
+                "organizer@example.test",
+                true,
+                &[placeholder],
+            ),
+            0
+        );
+
+        let mut extra_attendee = candidate(0);
+        extra_attendee.projection_state =
+            CALENDAR_EVENT_PROJECTION_MAPI_SUBMISSION_PLACEHOLDER.to_string();
+        extra_attendee.attendees_json = extra_attendee.attendees_json.replace(
+            "]",
+            r#",{"email":"extra@example.test","common_name":"Extra","role":"REQ-PARTICIPANT","partstat":"needs-action","rsvp":true}]"#,
+        );
+        assert_eq!(
+            matching_candidate_count(
+                &initial,
+                &attendees(&initial),
+                "organizer@example.test",
+                true,
+                &[extra_attendee],
+            ),
+            0
         );
     }
 
@@ -436,13 +752,13 @@ mod tests {
             .attendees_json
             .replace("first@example.test", "other@example.test");
         mismatches.push(attendee);
-
         for mismatch in mismatches {
             assert_eq!(
                 matching_candidate_count(
                     &request,
                     &attendees(&request),
                     "organizer@example.test",
+                    false,
                     &[mismatch],
                 ),
                 0
@@ -459,6 +775,7 @@ mod tests {
                     &request,
                     &attendees(&request),
                     "organizer@example.test",
+                    false,
                     &[candidate(3)],
                 ),
                 expected
@@ -653,6 +970,16 @@ mod tests {
             "FOR UPDATE",
         ] {
             assert!(LOCK_REQUEST_EVENT_CANDIDATES_SQL.contains(required));
+        }
+
+        for required in [
+            "FROM calendar_events",
+            "owner_account_id = $2",
+            "uid = $3",
+            "ORDER BY id",
+            "FOR UPDATE",
+        ] {
+            assert!(LOCK_REQUEST_UID_EVENTS_SQL.contains(required));
         }
     }
 

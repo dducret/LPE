@@ -802,6 +802,10 @@ For later updates:
 current `0.5.2-sql` baseline and validates its canonical physical shape. Every
 other label and an incomplete same-label database are rejected without stopping
 LPE or changing the database. There is no in-place upgrade path to this release.
+That physical-shape check includes the constrained Calendar Event
+`projection_state` used to keep a pending Outlook meeting upload invisible until
+its imported Event is atomically adopted; an older same-label database without
+that column is incomplete.
 Point `DATABASE_URL` at a new empty database and run `init-schema.sh`.
 For a disposable or intentionally rebuilt node, set `LPE_RESET_SCHEMA=true`,
 stop `lpe.service`, then run `init-schema.sh`. The initializer refuses to run

@@ -1019,7 +1019,7 @@ impl Storage {
         })?;
         if !calendar_request_correlation_index_is_current {
             bail!(
-                "required Calendar meeting-request correlation index is missing or incompatible in {schema_name}; LPE 0.5.3 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+                "required Calendar meeting-request correlation or placeholder-projection shape is missing or incompatible in {schema_name}; LPE 0.5.2 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
             );
         }
 

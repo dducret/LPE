@@ -5,7 +5,8 @@ use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use crate::{
-    calendar_attendee_labels, normalize_calendar_meeting_uid, parse_calendar_participants_metadata,
+    calendar_attendee_labels, mapi_events::CALENDAR_EVENT_PROJECTION_MAPI_SUBMISSION_PLACEHOLDER,
+    normalize_calendar_meeting_uid, parse_calendar_participants_metadata,
     serialize_calendar_participants_metadata, AuditEntryInput, CalendarMeetingResponse,
     CanonicalChangeCategory, Storage,
 };
@@ -81,7 +82,8 @@ impl Storage {
             SELECT id, calendar_id, uid, sequence,
                    organizer_json::text AS organizer_json,
                    attendees_json::text AS attendees_json,
-                   meeting_response_state_json::text AS meeting_response_state_json
+                   meeting_response_state_json::text AS meeting_response_state_json,
+                   projection_state
             FROM calendar_events
             WHERE tenant_id = $1
               AND owner_account_id = $2
@@ -215,6 +217,11 @@ impl Storage {
         .bind(response_state_json)
         .execute(&mut **tx)
         .await?;
+        if event.get::<String, _>("projection_state")
+            == CALENDAR_EVENT_PROJECTION_MAPI_SUBMISSION_PLACEHOLDER
+        {
+            return Ok(MeetingResponseOutcome::Applied);
+        }
         let modseq = self
             .allocate_account_modseq_in_tx(
                 tx,

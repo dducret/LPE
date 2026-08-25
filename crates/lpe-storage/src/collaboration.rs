@@ -704,6 +704,7 @@ impl Storage {
               AND owner_account_id = $2
               AND id = $3
               AND lifecycle_state = 'active'
+              AND projection_state = 'visible'
               AND (
                   reminder_set IS DISTINCT FROM COALESCE($4::bool, reminder_set)
                   OR reminder_at IS DISTINCT FROM CASE
@@ -758,6 +759,7 @@ impl Storage {
               AND owner_account_id = $2
               AND id = $3
               AND lifecycle_state = 'active'
+              AND projection_state = 'visible'
             "#,
         )
         .bind(&tenant_id)
@@ -1312,6 +1314,7 @@ impl Storage {
               AND ($5::text IS NULL OR c.role = $5)
               AND ($6::uuid[] IS NULL OR e.id = ANY($6))
               AND e.lifecycle_state = $7
+              AND e.projection_state = 'visible'
             ORDER BY e.starts_at ASC, e.id ASC
             "#,
         )

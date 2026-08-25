@@ -1,5 +1,7 @@
+mod core_update;
 mod custom_properties;
 mod imported_identity;
+mod submission_placeholder;
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -17,6 +19,10 @@ use crate::{
     CanonicalChangeCategory, CollaborationRights, MapiEventAttachmentChanges, Storage,
     UpsertClientEventInput,
 };
+use core_update::{
+    ensure_mapi_event_uid_is_not_hidden_in_tx, lock_incoming_mapi_event_uid_in_tx,
+    update_mapi_event_core_in_tx,
+};
 use custom_properties::{
     apply_mapi_event_custom_properties_in_tx, fetch_mapi_event_search_key_in_tx,
     mapi_event_search_key, PID_TAG_SEARCH_KEY,
@@ -24,6 +30,11 @@ use custom_properties::{
 use imported_identity::{
     allocate_mapi_event_identity_in_tx, current_mapi_event_filetime_in_tx,
     normalize_mapi_event_filetime, validate_imported_identity,
+};
+use submission_placeholder::insert_mapi_event_in_tx;
+use submission_placeholder::try_adopt_mapi_submission_placeholder_in_tx;
+pub(crate) use submission_placeholder::{
+    lock_calendar_event_uid_in_tx, CALENDAR_EVENT_PROJECTION_MAPI_SUBMISSION_PLACEHOLDER,
 };
 
 pub(crate) const MAX_MAPI_GLOBAL_COUNTER: u64 = MAPI_MAX_GLOBAL_COUNTER;
@@ -153,6 +164,7 @@ impl Storage {
               AND owner_account_id = $2
               AND calendar_id = $3
               AND lifecycle_state = 'active'
+              AND projection_state = 'visible'
             ORDER BY id
             FOR UPDATE
             "#,
@@ -255,13 +267,14 @@ impl Storage {
         }
 
         let owner_account_id = collection.owner_account_id;
-        let event_id = input.event.id.unwrap_or_else(Uuid::new_v4);
+        let requested_event_id = input.event.id.unwrap_or_else(Uuid::new_v4);
         let event_uid = if input.event.uid.trim().is_empty() {
-            event_id.to_string()
+            requested_event_id.to_string()
         } else {
             normalize_calendar_meeting_uid(&input.event.uid)
         };
         let mut tx = self.pool.begin().await?;
+        lock_calendar_event_uid_in_tx(&mut tx, &tenant_id, owner_account_id, &event_uid).await?;
         let calendar_id = match Uuid::parse_str(&collection.id) {
             Ok(calendar_id) => calendar_id,
             Err(_) => {
@@ -297,70 +310,28 @@ impl Storage {
             bail!("write access is not granted on this calendar");
         }
 
-        sqlx::query(
-            r#"
-            INSERT INTO calendar_events (
-                id, tenant_id, owner_account_id, calendar_id, uid,
-                starts_at, ends_at, time_zone, all_day, status, sequence,
-                recurrence_rule, recurrence_json, recurrence_exceptions_json,
-                title, location, organizer_json, attendees_json, body_text, body_html,
-                import_source, source_payload_json
-            )
-            VALUES (
-                $1, $2, $3, $4, $5,
-                (($6::date + $7::time) AT TIME ZONE COALESCE(NULLIF($8, ''), 'UTC')),
-                ((($6::date + $7::time) AT TIME ZONE COALESCE(NULLIF($8, ''), 'UTC'))
-                    + make_interval(mins => GREATEST($9, 0))),
-                $8,
-                $10,
-                COALESCE(NULLIF($11, ''), 'confirmed'),
-                GREATEST($12, 0),
-                NULLIF($13, ''),
-                CASE WHEN NULLIF($14, '') IS NULL THEN '{}'::jsonb ELSE $14::jsonb END,
-                CASE WHEN NULLIF($15, '') IS NULL THEN '[]'::jsonb ELSE $15::jsonb END,
-                $16,
-                $17,
-                CASE WHEN NULLIF($18, '') IS NULL THEN '{}'::jsonb ELSE $18::jsonb END,
-                CASE
-                    WHEN NULLIF($20, '') IS NOT NULL THEN $20::jsonb
-                    WHEN NULLIF($19, '') IS NOT NULL THEN
-                        jsonb_build_object(
-                            'attendees',
-                            jsonb_build_array(jsonb_build_object('email', $19::text))
-                        )
-                    ELSE '{}'::jsonb
-                END,
-                $21,
-                NULLIF($22, ''),
-                'mapi',
-                jsonb_build_object('attendees', $19::text)
-            )
-            "#,
+        let adopted_event_id = try_adopt_mapi_submission_placeholder_in_tx(
+            &mut tx,
+            &tenant_id,
+            owner_account_id,
+            calendar_id,
+            &event_uid,
+            &input,
         )
-        .bind(event_id)
-        .bind(tenant_id)
-        .bind(owner_account_id)
-        .bind(calendar_id)
-        .bind(&event_uid)
-        .bind(input.event.date.trim())
-        .bind(input.event.time.trim())
-        .bind(input.event.time_zone.trim())
-        .bind(input.event.duration_minutes.max(0))
-        .bind(input.event.all_day)
-        .bind(input.event.status.trim())
-        .bind(input.event.sequence)
-        .bind(input.event.recurrence_rule.trim())
-        .bind(input.event.recurrence_json.trim())
-        .bind(input.event.recurrence_exceptions_json.trim())
-        .bind(input.event.title.trim())
-        .bind(input.event.location.trim())
-        .bind(input.event.organizer_json.trim())
-        .bind(input.event.attendees.trim())
-        .bind(input.event.attendees_json.trim())
-        .bind(input.event.notes.trim())
-        .bind(input.event.body_html.trim())
-        .execute(&mut *tx)
         .await?;
+        let event_id = adopted_event_id.unwrap_or(requested_event_id);
+        if adopted_event_id.is_none() {
+            insert_mapi_event_in_tx(
+                &mut tx,
+                &tenant_id,
+                owner_account_id,
+                calendar_id,
+                event_id,
+                &event_uid,
+                &input,
+            )
+            .await?;
+        }
         update_mapi_event_reminder_in_tx(
             &mut tx,
             &tenant_id,
@@ -441,6 +412,7 @@ impl Storage {
                 "customPropertiesChanged": !input.custom_property_upserts.is_empty(),
                 "attachmentChanged": !input.attachment_changes.upserts.is_empty(),
                 "mapiChangeNumber": identity_version.change_number,
+                "adoptedSubmissionPlaceholder": adopted_event_id.is_some(),
             }),
         )
         .await?;
@@ -543,6 +515,7 @@ impl Storage {
              AND search_key.property_type = 258
             WHERE event.tenant_id = $1
               AND event.id = ANY($3)
+              AND event.projection_state = 'visible'
               AND (
                     event.owner_account_id = $2
                     OR EXISTS (
@@ -576,6 +549,13 @@ impl Storage {
             .tenant_id_for_account_id(input.principal_account_id)
             .await?;
         let mut tx = self.pool.begin().await?;
+        let incoming_event_uid = lock_incoming_mapi_event_uid_in_tx(
+            &mut tx,
+            &tenant_id,
+            input.event_id,
+            input.event.as_ref(),
+        )
+        .await?;
         let event = sqlx::query(
             r#"
             SELECT
@@ -600,6 +580,7 @@ impl Storage {
             WHERE event.tenant_id = $1
               AND event.id = $2
               AND event.lifecycle_state IN ('active', 'deleted')
+              AND event.projection_state = 'visible'
             FOR UPDATE OF event
             "#,
         )
@@ -631,8 +612,19 @@ impl Storage {
             {
                 bail!("MAPI Event update target does not match the canonical Event owner");
             }
+            let incoming_event_uid = incoming_event_uid
+                .as_deref()
+                .expect("an Event update has a normalized incoming UID");
+            ensure_mapi_event_uid_is_not_hidden_in_tx(
+                &mut tx,
+                &tenant_id,
+                owner_account_id,
+                incoming_event_uid,
+            )
+            .await?;
             update_mapi_event_core_in_tx(&mut tx, &tenant_id, event_input).await?;
         }
+        let committed_event_uid = incoming_event_uid.as_deref().unwrap_or(&event_uid);
         update_mapi_event_reminder_in_tx(
             &mut tx,
             &tenant_id,
@@ -706,7 +698,7 @@ impl Storage {
             &affected_principals,
             serde_json::json!({
                 "collectionId": calendar_id,
-                "objectUid": event_uid,
+                "objectUid": committed_event_uid,
                 "coreChanged": input.event.is_some(),
                 "reminderChanged": reminder_patch_has_changes(&input.reminder),
                 "customPropertiesChanged": !input.custom_property_upserts.is_empty()
@@ -927,93 +919,6 @@ fn validate_mapi_event_custom_properties(
     Ok(())
 }
 
-async fn update_mapi_event_core_in_tx(
-    tx: &mut sqlx::Transaction<'_, Postgres>,
-    tenant_id: &Uuid,
-    input: &UpsertClientEventInput,
-) -> Result<()> {
-    let event_id = input
-        .id
-        .ok_or_else(|| anyhow!("MAPI Event update requires a canonical Event id"))?;
-    let event_uid = if input.uid.trim().is_empty() {
-        String::new()
-    } else {
-        normalize_calendar_meeting_uid(&input.uid)
-    };
-    let updated = sqlx::query(
-        r#"
-        UPDATE calendar_events
-        SET uid = COALESCE(NULLIF($4, ''), id::text),
-            starts_at = (($5::date + $6::time) AT TIME ZONE COALESCE(NULLIF($7, ''), 'UTC')),
-            ends_at = ((($5::date + $6::time) AT TIME ZONE COALESCE(NULLIF($7, ''), 'UTC'))
-                + make_interval(mins => GREATEST($8, 0))),
-            time_zone = $7,
-            all_day = $9,
-            status = COALESCE(NULLIF($10, ''), 'confirmed'),
-            sequence = GREATEST($11, 0),
-            recurrence_rule = NULLIF($12, ''),
-            recurrence_json = CASE
-                WHEN NULLIF($13, '') IS NOT NULL THEN $13::jsonb
-                ELSE '{}'::jsonb
-            END,
-            recurrence_exceptions_json = CASE
-                WHEN NULLIF($14, '') IS NOT NULL THEN $14::jsonb
-                ELSE '[]'::jsonb
-            END,
-            title = $15,
-            location = $16,
-            organizer_json = CASE
-                WHEN NULLIF($17, '') IS NOT NULL THEN $17::jsonb
-                ELSE '{}'::jsonb
-            END,
-            attendees_json = CASE
-                WHEN NULLIF($19, '') IS NOT NULL THEN $19::jsonb
-                WHEN NULLIF($18, '') IS NOT NULL THEN
-                    jsonb_build_object(
-                        'attendees',
-                        jsonb_build_array(jsonb_build_object('email', $18::text))
-                    )
-                ELSE '{}'::jsonb
-            END,
-            body_text = $20,
-            body_html = NULLIF($21, ''),
-            source_payload_json = jsonb_build_object('attendees', $18::text),
-            updated_at = NOW()
-        WHERE tenant_id = $1
-          AND owner_account_id = $2
-          AND id = $3
-          AND lifecycle_state IN ('active', 'deleted')
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(input.account_id)
-    .bind(event_id)
-    .bind(event_uid)
-    .bind(input.date.trim())
-    .bind(input.time.trim())
-    .bind(input.time_zone.trim())
-    .bind(input.duration_minutes.max(0))
-    .bind(input.all_day)
-    .bind(input.status.trim())
-    .bind(input.sequence)
-    .bind(input.recurrence_rule.trim())
-    .bind(input.recurrence_json.trim())
-    .bind(input.recurrence_exceptions_json.trim())
-    .bind(input.title.trim())
-    .bind(input.location.trim())
-    .bind(input.organizer_json.trim())
-    .bind(input.attendees.trim())
-    .bind(input.attendees_json.trim())
-    .bind(input.notes.trim())
-    .bind(input.body_html.trim())
-    .execute(&mut **tx)
-    .await?;
-    if updated.rows_affected() != 1 {
-        bail!("canonical MAPI calendar Event was not updated");
-    }
-    Ok(())
-}
-
 async fn update_mapi_event_reminder_in_tx(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     tenant_id: &Uuid,
@@ -1084,6 +989,7 @@ async fn set_created_mapi_event_modseq_in_tx(
           AND calendar_id = $3
           AND id = $4
           AND lifecycle_state = 'active'
+          AND projection_state = 'visible'
         "#,
     )
     .bind(tenant_id)
@@ -1158,6 +1064,7 @@ async fn fetch_created_accessible_event_in_tx(
         WHERE tenant_id = $1
           AND id = $2
           AND lifecycle_state = 'active'
+          AND projection_state = 'visible'
         "#,
     )
     .bind(tenant_id)
@@ -1219,6 +1126,7 @@ async fn fetch_mapi_event_reminder_state_in_tx(
         WHERE tenant_id = $1
           AND id = $2
           AND lifecycle_state IN ('active', 'deleted')
+          AND projection_state = 'visible'
         "#,
     )
     .bind(tenant_id)
@@ -1372,6 +1280,7 @@ impl Storage {
               AND event.owner_account_id = $2
               AND event.id = $3
               AND event.lifecycle_state IN ('active', 'deleted')
+              AND event.projection_state = 'visible'
             "#,
         )
         .bind(tenant_id)
@@ -1406,6 +1315,7 @@ async fn fetch_event_timestamps_in_tx(
         WHERE tenant_id = $1
           AND id = $2
           AND lifecycle_state IN ('active', 'deleted')
+          AND projection_state = 'visible'
         "#,
     )
     .bind(tenant_id)

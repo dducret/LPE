@@ -1097,6 +1097,656 @@ async fn mapi_over_http_transport_send_uses_canonical_submission() {
     assert!(visible[0].bcc.is_empty());
 }
 
+#[tokio::test]
+async fn mapi_transport_send_accepts_initial_request_before_cached_calendar_upload(
+) -> anyhow::Result<()> {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let account_id = fixture.account_id;
+    let target_calendar = storage
+        .create_accessible_calendar_collection(account_id, "Probe 4 target")
+        .await?;
+    let uid_guard_event = storage
+        .create_accessible_event(
+            account_id,
+            Some(&target_calendar.id),
+            UpsertClientEventInput {
+                id: None,
+                account_id,
+                uid: "probe-4-visible-uid-guard".to_string(),
+                date: "2026-08-27".to_string(),
+                time: "10:00".to_string(),
+                time_zone: "UTC".to_string(),
+                duration_minutes: 30,
+                all_day: false,
+                status: "confirmed".to_string(),
+                sequence: 0,
+                recurrence_rule: String::new(),
+                recurrence_json: "{}".to_string(),
+                recurrence_exceptions_json: "[]".to_string(),
+                title: "UID guard".to_string(),
+                location: String::new(),
+                organizer_json: "{}".to_string(),
+                attendees: String::new(),
+                attendees_json: "{}".to_string(),
+                notes: String::new(),
+                body_html: String::new(),
+            },
+        )
+        .await?;
+    let target_calendar_folder_id = storage
+        .load_mapi_mail_store(account_id, 500)
+        .await?
+        .collaboration_folders()
+        .iter()
+        .find(|folder| folder.collection.id == target_calendar.id)
+        .expect("Probe 4 target Calendar is projected to MAPI")
+        .id;
+    let calendar_modseq_before = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COALESCE((
+            SELECT current_modseq
+            FROM account_sync_state
+            WHERE account_id = $1 AND category = 'calendar'
+        ), 0)
+        "#,
+    )
+    .bind(account_id)
+    .fetch_one(storage.pool())
+    .await?;
+    let event_log_count_before = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM mail_change_log WHERE account_id = $1 AND object_kind = 'calendar_event'",
+    )
+    .bind(account_id)
+    .fetch_one(storage.pool())
+    .await?;
+    let outbox_folder_id = durable_special_folder_id_for_test(
+        &storage,
+        account_id,
+        crate::mapi::identity::OUTBOX_FOLDER_ID,
+    )
+    .await;
+    let service = ExchangeService::new(storage.clone());
+    let (mut execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
+    let global_object_id = [
+        0x04, 0x00, 0x00, 0x00, 0x82, 0x00, 0xE0, 0x00, 0x74, 0xC5, 0xB7, 0x10, 0x1A, 0x82, 0xE0,
+        0x08, 0x00, 0x00, 0x00, 0x00, 0x30, 0xD9, 0xF1, 0xC4, 0x13, 0x34, 0xDD, 0x01, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x5D, 0x74, 0x43, 0xF7, 0xC1,
+        0x02, 0x9F, 0x4D, 0x95, 0xDA, 0x59, 0x28, 0x2B, 0xB8, 0x59, 0x3D,
+    ];
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut property_values,
+        0x001A_001F,
+        "IPM.Schedule.Meeting.Request",
+    );
+    append_mapi_utf16_property(&mut property_values, 0x0037_001F, "Probe 4 ordering");
+    append_mapi_utf16_property(&mut property_values, 0x1000_001F, "Meeting body");
+    append_mapi_utf16_property(&mut property_values, 0x0042_001F, "Alice Calendar");
+    append_mapi_utf16_property(&mut property_values, 0x0065_001F, "alice@example.test");
+    append_mapi_i32_property(&mut property_values, 0x8217_0003, 0x0000_0001);
+    append_mapi_i64_property(
+        &mut property_values,
+        0x820D_0040,
+        test_filetime("2026-08-26", "09:00"),
+    );
+    append_mapi_i64_property(
+        &mut property_values,
+        0x820E_0040,
+        test_filetime("2026-08-26", "09:30"),
+    );
+    append_mapi_binary_property(&mut property_values, 0x8001_0102, &global_object_id);
+    append_mapi_binary_property(&mut property_values, 0x8002_0102, &global_object_id);
+    append_mapi_i32_property(&mut property_values, 0x8201_0003, 0);
+    append_mapi_utf16_property(&mut property_values, 0x8208_001F, "Planches 2");
+    append_mapi_i64_property(
+        &mut property_values,
+        0x0039_0040,
+        test_filetime("2026-08-24", "19:59"),
+    );
+    let mut create_rops = Vec::new();
+    append_rop_create_message(&mut create_rops, 0, 1, outbox_folder_id);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&create_rops, &[logon_handle, u32::MAX])),
+        )
+        .await?;
+    let body = response_bytes(response).await;
+    let (create_response, create_handles) = response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(&create_response, &[0x06, 0x01, 0, 0, 0, 0]));
+    let pending_request_handle = create_handles[1];
+    assert_ne!(pending_request_handle, u32::MAX);
+
+    let mut organizer = Vec::new();
+    organizer.extend_from_slice(&utf16z("Alice Calendar"));
+    organizer.extend_from_slice(&utf16z("alice@example.test"));
+    organizer.extend_from_slice(&1i32.to_le_bytes());
+    organizer.extend_from_slice(&3u32.to_le_bytes());
+    let mut attendee = Vec::new();
+    attendee.extend_from_slice(&utf16z("Denis"));
+    attendee.extend_from_slice(&utf16z("denis.ducret@sdic.ch"));
+    attendee.extend_from_slice(&1i32.to_le_bytes());
+    attendee.extend_from_slice(&1u32.to_le_bytes());
+    let mut repeated_location = Vec::new();
+    append_mapi_utf16_property(&mut repeated_location, 0x8208_001F, "Planches 2");
+    let mut repeated_sequence = Vec::new();
+    append_mapi_i32_property(&mut repeated_sequence, 0x8201_0003, 0);
+    let mut send_rops = Vec::new();
+    append_rop_set_properties(&mut send_rops, 0, 13, &property_values);
+    append_rop_set_properties(&mut send_rops, 0, 1, &repeated_location);
+    append_rop_modify_recipients_with_columns(
+        &mut send_rops,
+        0,
+        &[0x3001_001F, 0x3003_001F, 0x0C15_0003, 0x5FFD_0003],
+        &[(0, 0x01, &organizer), (1, 0x01, &attendee)],
+    );
+    append_rop_set_properties(&mut send_rops, 0, 1, &repeated_sequence);
+    append_rop_transport_send(&mut send_rops, 0);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&send_rops, &[pending_request_handle])),
+        )
+        .await?;
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(
+        contains_bytes(&response_rops, &[0x4A, 0x00, 0, 0, 0, 0, 1]),
+        "TransportSend did not succeed: {response_rops:02x?}"
+    );
+
+    let placeholder = sqlx::query(
+        r#"
+        SELECT id, projection_state, attendees_json::text AS attendees_json
+        FROM calendar_events
+        WHERE owner_account_id = $1
+          AND projection_state = 'mapi_submission_placeholder'
+        "#,
+    )
+    .bind(account_id)
+    .fetch_one(storage.pool())
+    .await?;
+    let placeholder_id = placeholder.get::<Uuid, _>("id");
+    assert_eq!(
+        placeholder.get::<String, _>("projection_state"),
+        "mapi_submission_placeholder"
+    );
+    assert!(placeholder
+        .get::<String, _>("attendees_json")
+        .contains("denis.ducret@sdic.ch"));
+    let visible_events = storage.fetch_accessible_events(account_id).await?;
+    assert_eq!(visible_events.len(), 1);
+    assert_eq!(visible_events[0].id, uid_guard_event.id);
+    let identity_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM mapi_object_identities WHERE canonical_id = $1",
+    )
+    .bind(placeholder_id)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(identity_count, 0);
+    let calendar_modseq_after_send = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COALESCE((
+            SELECT current_modseq
+            FROM account_sync_state
+            WHERE account_id = $1 AND category = 'calendar'
+        ), 0)
+        "#,
+    )
+    .bind(account_id)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(calendar_modseq_after_send, calendar_modseq_before);
+    let event_log_count_after_send = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM mail_change_log WHERE account_id = $1 AND object_kind = 'calendar_event'",
+    )
+    .bind(account_id)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(event_log_count_after_send, event_log_count_before);
+
+    let guard_version = storage
+        .fetch_mapi_event_versions(account_id, &[uid_guard_event.id])
+        .await?
+        .into_iter()
+        .next()
+        .expect("the visible UID-guard Event has a MAPI version");
+    let uid_collision = storage
+        .commit_mapi_event_update(MapiEventCommitInput {
+            principal_account_id: account_id,
+            event_id: uid_guard_event.id,
+            expected_modseq: guard_version.canonical_modseq,
+            force_save: false,
+            imported_identity: None,
+            event: Some(UpsertClientEventInput {
+                id: Some(uid_guard_event.id),
+                account_id,
+                uid: format!(
+                    "mapi-goid:{}",
+                    lpe_domain::crypto::hex_lower(global_object_id)
+                ),
+                date: uid_guard_event.date.clone(),
+                time: uid_guard_event.time.clone(),
+                time_zone: uid_guard_event.time_zone.clone(),
+                duration_minutes: uid_guard_event.duration_minutes,
+                all_day: uid_guard_event.all_day,
+                status: uid_guard_event.status.clone(),
+                sequence: uid_guard_event.sequence,
+                recurrence_rule: uid_guard_event.recurrence_rule.clone(),
+                recurrence_json: uid_guard_event.recurrence_json.clone(),
+                recurrence_exceptions_json: uid_guard_event.recurrence_exceptions_json.clone(),
+                title: uid_guard_event.title.clone(),
+                location: uid_guard_event.location.clone(),
+                organizer_json: uid_guard_event.organizer_json.clone(),
+                attendees: uid_guard_event.attendees.clone(),
+                attendees_json: uid_guard_event.attendees_json.clone(),
+                notes: uid_guard_event.notes.clone(),
+                body_html: uid_guard_event.body_html.clone(),
+            }),
+            reminder: MapiEventReminderPatch::default(),
+            custom_property_upserts: Vec::new(),
+            custom_property_deletes: Vec::new(),
+            attachment_changes: MapiEventAttachmentChanges::default(),
+        })
+        .await
+        .expect_err("a visible MAPI Event cannot take a hidden placeholder UID");
+    assert!(uid_collision
+        .to_string()
+        .contains("reserved by a pending MAPI meeting upload"));
+
+    let queued = sqlx::query(
+        r#"
+        SELECT queue.status,
+               classification.classification,
+               classification.metadata_json
+        FROM submission_queue queue
+        JOIN mailbox_messages mailbox_message
+          ON mailbox_message.tenant_id = queue.tenant_id
+         AND mailbox_message.account_id = queue.account_id
+         AND mailbox_message.id = queue.sent_mailbox_message_id
+        JOIN messages message
+          ON message.tenant_id = mailbox_message.tenant_id
+         AND message.id = mailbox_message.message_id
+        JOIN calendar_mail_classifications classification
+          ON classification.tenant_id = message.tenant_id
+         AND classification.message_id = message.id
+        WHERE queue.account_id = $1
+          AND message.normalized_subject = 'Probe 4 ordering'
+        "#,
+    )
+    .bind(account_id)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(queued.get::<String, _>("status"), "queued");
+    assert_eq!(queued.get::<String, _>("classification"), "request");
+    let metadata = queued.get::<serde_json::Value, _>("metadata_json");
+    let request = &metadata["request"];
+    assert_eq!(
+        request["uid"],
+        serde_json::Value::String(format!(
+            "mapi-goid:{}",
+            lpe_domain::crypto::hex_lower(global_object_id)
+        ))
+    );
+    assert_eq!(request["meeting_sequence"], 0);
+    assert_eq!(request["meeting_start"], "2026-08-26T09:00:00Z");
+    assert_eq!(request["meeting_end"], "2026-08-26T09:30:00Z");
+    assert_eq!(request["organizer"]["email"], "alice@example.test");
+    assert_eq!(request["attendees"][0]["email"], "denis.ducret@sdic.ch");
+
+    let response_uid = request["uid"]
+        .as_str()
+        .expect("queued request classification contains a UID");
+    let inbound_response = format!(
+        concat!(
+            "From: Denis <denis.ducret@sdic.ch>\r\n",
+            "To: Alice Calendar <alice@example.test>\r\n",
+            "Subject: Accepted: Probe 4 ordering\r\n",
+            "MIME-Version: 1.0\r\n",
+            "Content-Type: text/calendar; method=REPLY; charset=UTF-8\r\n",
+            "\r\n",
+            "BEGIN:VCALENDAR\r\n",
+            "VERSION:2.0\r\n",
+            "METHOD:REPLY\r\n",
+            "BEGIN:VEVENT\r\n",
+            "UID:{}\r\n",
+            "DTSTAMP:20260824T200000Z\r\n",
+            "DTSTART:20260826T090000Z\r\n",
+            "DTEND:20260826T093000Z\r\n",
+            "SEQUENCE:0\r\n",
+            "ORGANIZER;CN=Alice Calendar:mailto:alice@example.test\r\n",
+            "ATTENDEE;CN=Denis;PARTSTAT=ACCEPTED:mailto:denis.ducret@sdic.ch\r\n",
+            "END:VEVENT\r\n",
+            "END:VCALENDAR\r\n"
+        ),
+        response_uid
+    )
+    .into_bytes();
+    let delivery = storage
+        .deliver_inbound_message(lpe_domain::InboundDeliveryRequest {
+            trace_id: format!("probe-4-early-response-{}", Uuid::new_v4()),
+            peer: "192.0.2.10:25".to_string(),
+            helo: "mx.sdic.ch".to_string(),
+            mail_from: "denis.ducret@sdic.ch".to_string(),
+            rcpt_to: vec!["alice@example.test".to_string()],
+            subject: "Accepted: Probe 4 ordering".to_string(),
+            body_text: String::new(),
+            internet_message_id: None,
+            raw_message: inbound_response,
+        })
+        .await?;
+    assert!(delivery.accepted);
+    let early_response = sqlx::query(
+        r#"
+        SELECT attendees_json #>> '{attendees,0,partstat}' AS partstat,
+               meeting_response_state_json ? 'denis.ducret@sdic.ch' AS has_watermark
+        FROM calendar_events
+        WHERE id = $1
+          AND projection_state = 'mapi_submission_placeholder'
+        "#,
+    )
+    .bind(placeholder_id)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(early_response.get::<String, _>("partstat"), "accepted");
+    assert!(early_response.get::<bool, _>("has_watermark"));
+    let calendar_modseq_after_response = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COALESCE((
+            SELECT current_modseq
+            FROM account_sync_state
+            WHERE account_id = $1 AND category = 'calendar'
+        ), 0)
+        "#,
+    )
+    .bind(account_id)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(calendar_modseq_after_response, calendar_modseq_before);
+    let event_log_count_after_response = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM mail_change_log WHERE account_id = $1 AND object_kind = 'calendar_event'",
+    )
+    .bind(account_id)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(event_log_count_after_response, event_log_count_before);
+
+    let imported_counter = storage
+        .reserve_mapi_local_replica_ids(account_id, 1)
+        .await?;
+    let imported_message_id = crate::mapi::identity::mapi_store_id(imported_counter);
+    let source_key = crate::mapi::identity::source_key_for_object_id(imported_message_id);
+    let change_key = vec![
+        0x2e, 0xbb, 0x24, 0x39, 0x44, 0x3e, 0x0a, 0x43, 0x8d, 0x4a, 0x69, 0x81, 0x3f, 0x51, 0xf4,
+        0xe0, 0x00, 0x00, 0x04, 0x71,
+    ];
+    let mut predecessor_change_list = vec![change_key.len() as u8];
+    predecessor_change_list.extend_from_slice(&change_key);
+    let imported_last_modification_time = test_filetime("2026-08-24", "19:59");
+
+    // Outlook uploads the separate Calendar item in a fresh MAPI context.
+    // Keep ImportMessageChange and SaveChangesMessage in separate Execute
+    // requests so the imported pending Event handle must survive the boundary.
+    let (mut upload_headers, upload_logon_handle) = mapi_connect_with_private_logon(&service).await;
+    let mut collector_rops = Vec::new();
+    append_rop_open_folder(&mut collector_rops, 0, 1, target_calendar_folder_id);
+    collector_rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
+    ]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &upload_headers,
+            &execute_body(&rop_buffer(
+                &collector_rops,
+                &[upload_logon_handle, u32::MAX, u32::MAX],
+            )),
+        )
+        .await?;
+    let body = response_bytes(response).await;
+    let (collector_response, collector_handles) =
+        response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(
+        &collector_response,
+        &[0x7E, 0x02, 0, 0, 0, 0]
+    ));
+    let collector_handle = collector_handles[2];
+    assert_ne!(collector_handle, u32::MAX);
+
+    let mut identity_values = Vec::new();
+    append_mapi_binary_property(&mut identity_values, PID_TAG_SOURCE_KEY, &source_key);
+    append_mapi_i64_property(
+        &mut identity_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        imported_last_modification_time,
+    );
+    append_mapi_binary_property(&mut identity_values, PID_TAG_CHANGE_KEY, &change_key);
+    append_mapi_binary_property(
+        &mut identity_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &predecessor_change_list,
+    );
+    let mut import_rops = vec![
+        0x72, 0x00, 0x00, 0x01, 0x01, // RopSynchronizationImportMessageChange.
+    ];
+    import_rops.extend_from_slice(&4u16.to_le_bytes());
+    import_rops.extend_from_slice(&identity_values);
+    renew_mapi_request_id(&mut upload_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &upload_headers,
+            &execute_body(&rop_buffer(&import_rops, &[collector_handle, u32::MAX])),
+        )
+        .await?;
+    let body = response_bytes(response).await;
+    let (import_response, import_handles) = response_rops_and_handles_from_execute_body(&body);
+    assert!(
+        contains_bytes(&import_response, &[0x72, 0x01, 0, 0, 0, 0]),
+        "ImportMessageChange failed: {import_response:02x?}"
+    );
+    let pending_event_handle = import_handles[1];
+    assert_ne!(pending_event_handle, u32::MAX);
+
+    let mut appointment_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut appointment_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Appointment",
+    );
+    append_mapi_utf16_property(
+        &mut appointment_values,
+        PID_TAG_SUBJECT_W,
+        "Probe 4 ordering",
+    );
+    append_mapi_utf16_property(
+        &mut appointment_values,
+        0x1000_001F,
+        "Imported rich meeting body",
+    );
+    append_mapi_utf16_property(
+        &mut appointment_values,
+        0x1013_001F,
+        "<p>Imported rich meeting body</p>",
+    );
+    append_mapi_i64_property(
+        &mut appointment_values,
+        0x820D_0040,
+        test_filetime("2026-08-26", "09:00"),
+    );
+    append_mapi_i64_property(
+        &mut appointment_values,
+        0x820E_0040,
+        test_filetime("2026-08-26", "09:30"),
+    );
+    append_mapi_i32_property(&mut appointment_values, 0x8217_0003, 0x0000_0001);
+    append_mapi_binary_property(&mut appointment_values, 0x8001_0102, &global_object_id);
+    append_mapi_binary_property(&mut appointment_values, 0x8002_0102, &global_object_id);
+    append_mapi_i32_property(&mut appointment_values, 0x8201_0003, 0);
+    append_mapi_utf16_property(&mut appointment_values, 0x8208_001F, "Planches 2");
+    append_mapi_binary_property(
+        &mut appointment_values,
+        0x825E_0102,
+        &test_calendar_time_zone_definition("W. Europe Standard Time"),
+    );
+    append_mapi_bool_property(&mut appointment_values, 0x8503_000B, true);
+    append_mapi_i64_property(
+        &mut appointment_values,
+        0x8560_0040,
+        test_filetime("2026-08-26", "08:45"),
+    );
+    append_mapi_i32_property(&mut appointment_values, PID_TAG_IMPORTANCE, 2);
+    append_mapi_i64_property(
+        &mut appointment_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        imported_last_modification_time,
+    );
+    let mut final_sequence = Vec::new();
+    append_mapi_i32_property(&mut final_sequence, 0x8201_0003, 0);
+    let mut save_rops = Vec::new();
+    append_rop_set_properties(&mut save_rops, 0, 16, &appointment_values);
+    append_rop_modify_recipients_with_columns(
+        &mut save_rops,
+        0,
+        &[0x3001_001F, 0x3003_001F, 0x0C15_0003, 0x5FFD_0003],
+        &[(0, 0x01, &organizer), (1, 0x01, &attendee)],
+    );
+    append_rop_set_properties(&mut save_rops, 0, 1, &final_sequence);
+    append_rop_save_changes_message_with_flags(&mut save_rops, 0, 0, 0x08);
+    append_rop_get_properties_specific(
+        &mut save_rops,
+        0,
+        &[
+            PID_TAG_SOURCE_KEY,
+            PID_TAG_CHANGE_KEY,
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+            PID_TAG_LAST_MODIFICATION_TIME,
+        ],
+    );
+    renew_mapi_request_id(&mut upload_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &upload_headers,
+            &execute_body(&rop_buffer(&save_rops, &[pending_event_handle])),
+        )
+        .await?;
+    let body = response_bytes(response).await;
+    let (save_response, save_handles) = response_rops_and_handles_from_execute_body(&body);
+    assert!(
+        contains_bytes(&save_response, &[0x0C, 0x00, 0, 0, 0, 0]),
+        "SaveChangesMessage failed: {save_response:02x?}"
+    );
+    let mut expected_save = vec![0x0C, 0x00, 0, 0, 0, 0, 0x01];
+    expected_save.extend_from_slice(&mapi_wire_id_bytes(imported_message_id));
+    assert!(
+        contains_bytes(&save_response, &expected_save),
+        "SaveChangesMessage did not retain the imported MID: {save_response:02x?}"
+    );
+    assert!(
+        contains_bytes(&save_response, &[0x07, 0x00, 0, 0, 0, 0, 0]),
+        "GetPropertiesSpecific failed after the imported Event Save: {save_response:02x?}"
+    );
+    assert!(
+        contains_bytes(&save_response, &change_key),
+        "post-Save GetPropertiesSpecific omitted the imported ChangeKey"
+    );
+    assert_eq!(save_handles[0], collector_handles[1]);
+
+    let imported = storage
+        .fetch_accessible_events_in_collection(account_id, &target_calendar.id)
+        .await?
+        .into_iter()
+        .find(|event| event.id == placeholder_id)
+        .expect("the imported Calendar item adopted the hidden placeholder");
+    assert_eq!(imported.time_zone, "Europe/Berlin");
+    assert_eq!(imported.time, "11:00");
+    assert_eq!(imported.notes, "Imported rich meeting body");
+    assert_eq!(imported.body_html, "<p>Imported rich meeting body</p>");
+    assert!(imported.attendees_json.contains("accepted"));
+
+    let adopted = sqlx::query(
+        r#"
+        SELECT event.projection_state,
+               event.calendar_id,
+               event.reminder_set,
+               identity.source_key,
+               identity.mapi_change_number,
+               identity.change_key,
+               identity.predecessor_change_list,
+               (EXTRACT(EPOCH FROM (
+                    identity.updated_at - TIMESTAMPTZ '1601-01-01 00:00:00+00'
+                )) * 10000000)::bigint AS last_modification_time,
+               property_value.property_value
+        FROM calendar_events event
+        JOIN mapi_object_identities identity
+          ON identity.tenant_id = event.tenant_id
+         AND identity.account_id = event.owner_account_id
+         AND identity.object_kind = 'calendar_event'
+         AND identity.canonical_id = event.id
+         AND identity.deleted_at IS NULL
+        JOIN mapi_custom_property_values property_value
+          ON property_value.tenant_id = event.tenant_id
+         AND property_value.account_id = event.owner_account_id
+         AND property_value.object_kind = 'calendar_event'
+         AND property_value.canonical_id = event.id
+         AND property_value.property_tag = $2
+        WHERE event.id = $1
+        "#,
+    )
+    .bind(placeholder_id)
+    .bind(PID_TAG_IMPORTANCE as i64)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(adopted.get::<String, _>("projection_state"), "visible");
+    assert_eq!(
+        adopted.get::<Uuid, _>("calendar_id").to_string(),
+        target_calendar.id
+    );
+    assert!(adopted.get::<bool, _>("reminder_set"));
+    assert_eq!(adopted.get::<Vec<u8>, _>("source_key"), source_key);
+    assert_eq!(adopted.get::<Vec<u8>, _>("change_key"), change_key);
+    assert_eq!(
+        adopted.get::<Vec<u8>, _>("predecessor_change_list"),
+        predecessor_change_list
+    );
+    assert_eq!(
+        adopted.get::<i64, _>("last_modification_time"),
+        imported_last_modification_time
+    );
+    assert_ne!(
+        adopted.get::<i64, _>("mapi_change_number") as u64,
+        imported_counter
+    );
+    assert_eq!(
+        adopted.get::<Vec<u8>, _>("property_value"),
+        2i32.to_le_bytes()
+    );
+    let owner_uid_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM calendar_events WHERE owner_account_id = $1 AND uid = $2",
+    )
+    .bind(account_id)
+    .bind(request["uid"].as_str().unwrap())
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(owner_uid_count, 1);
+    let event_log_count_after_adoption = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM mail_change_log WHERE account_id = $1 AND object_kind = 'calendar_event'",
+    )
+    .bind(account_id)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(event_log_count_after_adoption, event_log_count_before + 1);
+
+    fixture.cleanup().await?;
+    Ok(())
+}
+
 struct OptimizedPostCommitFixture {
     store: FakeStore,
     service: ExchangeService<FakeStore>,

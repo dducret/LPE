@@ -15,6 +15,7 @@ use crate::{
 
 mod calendar_classification;
 mod calendar_mail;
+mod dependency_replay;
 mod email_types;
 
 pub(crate) use calendar_classification::CALENDAR_MAIL_PARSER_REVISION;
@@ -354,15 +355,15 @@ impl Storage {
                 continue;
             }
 
-            let Some(replay_object_ids) = self
-                .expand_jmap_dependency_change(
-                    &tenant_id,
-                    data_type,
-                    &object_kind,
-                    row.try_get("object_id")?,
-                    &summary_json,
-                )
-                .await?
+            let Some(replay_object_ids) = dependency_replay::expand_jmap_dependency_change(
+                self,
+                &tenant_id,
+                data_type,
+                &object_kind,
+                row.try_get("object_id")?,
+                &summary_json,
+            )
+            .await?
             else {
                 return Ok(None);
             };
@@ -460,81 +461,6 @@ impl Storage {
         }
 
         Ok(Some(changes))
-    }
-
-    async fn expand_jmap_dependency_change(
-        &self,
-        tenant_id: &Uuid,
-        data_type: &str,
-        object_kind: &str,
-        object_id: Uuid,
-        summary_json: &Value,
-    ) -> Result<Option<Vec<Uuid>>> {
-        let collection_id = match object_kind {
-            "contact_book" | "calendar" | "task_list" => object_id,
-            "contact_book_grant" | "calendar_grant" | "task_list_grant" => {
-                let Some(collection_id) = summary_json
-                    .get("collectionId")
-                    .and_then(Value::as_str)
-                    .and_then(|value| Uuid::parse_str(value).ok())
-                else {
-                    return Ok(None);
-                };
-                collection_id
-            }
-            _ => return Ok(None),
-        };
-
-        let rows = match (data_type, object_kind) {
-            ("ContactCard", "contact_book" | "contact_book_grant") => {
-                sqlx::query_scalar::<_, Uuid>(
-                    r#"
-                    SELECT id
-                    FROM contacts
-                    WHERE tenant_id = $1
-                      AND contact_book_id = $2
-                    ORDER BY id ASC
-                    "#,
-                )
-                .bind(tenant_id)
-                .bind(collection_id)
-                .fetch_all(&self.pool)
-                .await?
-            }
-            ("CalendarEvent", "calendar" | "calendar_grant") => {
-                sqlx::query_scalar::<_, Uuid>(
-                    r#"
-                    SELECT id
-                    FROM calendar_events
-                    WHERE tenant_id = $1
-                      AND calendar_id = $2
-                      AND lifecycle_state = 'active'
-                    ORDER BY id ASC
-                    "#,
-                )
-                .bind(tenant_id)
-                .bind(collection_id)
-                .fetch_all(&self.pool)
-                .await?
-            }
-            ("Task", "task_list" | "task_list_grant") => {
-                sqlx::query_scalar::<_, Uuid>(
-                    r#"
-                    SELECT id
-                    FROM tasks
-                    WHERE tenant_id = $1
-                      AND task_list_id = $2
-                    ORDER BY id ASC
-                    "#,
-                )
-                .bind(tenant_id)
-                .bind(collection_id)
-                .fetch_all(&self.pool)
-                .await?
-            }
-            _ => return Ok(None),
-        };
-        Ok(Some(rows))
     }
 
     async fn jmap_string_replay_object_id(

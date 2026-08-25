@@ -30,6 +30,7 @@ macro_rules! store_impl_mapi_calendar_properties {
                      AND value.canonical_id = event.id
                     WHERE event.tenant_id = $1
                       AND event.id = ANY($2)
+                      AND event.projection_state = 'visible'
                       AND (
                             value.property_tag >= 2147483648
                             OR value.property_tag = ANY($4)

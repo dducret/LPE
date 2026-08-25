@@ -455,6 +455,7 @@ impl Storage {
             WHERE tenant_id = $1
               AND owner_account_id = $2
               AND lifecycle_state = 'active'
+              AND projection_state = 'visible'
             ORDER BY starts_at ASC, id ASC
             "#,
         )
@@ -493,6 +494,7 @@ impl Storage {
               AND owner_account_id = $2
               AND id = ANY($3)
               AND lifecycle_state = 'active'
+              AND projection_state = 'visible'
             "#,
         )
         .bind(&tenant_id)

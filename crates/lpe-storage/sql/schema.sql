@@ -2979,6 +2979,7 @@ CREATE TABLE calendar_events (
     source_uid TEXT,
     source_etag TEXT,
     source_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    projection_state TEXT NOT NULL DEFAULT 'visible',
     lifecycle_state TEXT NOT NULL DEFAULT 'active' CHECK (lifecycle_state IN ('active', 'deleted')),
     deleted_at TIMESTAMPTZ,
     modseq BIGINT NOT NULL DEFAULT 1 CHECK (modseq > 0),
@@ -2996,6 +2997,8 @@ CREATE TABLE calendar_events (
     CHECK (jsonb_typeof(recurrence_json) = 'object'),
     CHECK (jsonb_typeof(recurrence_exceptions_json) = 'array'),
     CHECK (jsonb_typeof(source_payload_json) = 'object'),
+    CONSTRAINT calendar_events_projection_state_check
+        CHECK (projection_state IN ('visible', 'mapi_submission_placeholder')),
     CHECK (
         (lifecycle_state = 'active' AND deleted_at IS NULL)
         OR (lifecycle_state = 'deleted' AND deleted_at IS NOT NULL)
@@ -3010,7 +3013,7 @@ CREATE TABLE calendar_events (
 
 CREATE INDEX calendar_events_owner_time_idx
     ON calendar_events (tenant_id, owner_account_id, starts_at, ends_at)
-    WHERE lifecycle_state = 'active';
+    WHERE lifecycle_state = 'active' AND projection_state = 'visible';
 
 CREATE INDEX calendar_events_active_uid_correlation_idx
     ON calendar_events (tenant_id, owner_account_id, uid, id)
@@ -3018,7 +3021,7 @@ CREATE INDEX calendar_events_active_uid_correlation_idx
 
 CREATE INDEX calendar_events_owner_reminder_idx
     ON calendar_events (tenant_id, owner_account_id, reminder_set, reminder_at)
-    WHERE lifecycle_state = 'active' AND reminder_set;
+    WHERE lifecycle_state = 'active' AND projection_state = 'visible' AND reminder_set;
 
 CREATE INDEX calendar_events_owner_deleted_idx
     ON calendar_events (tenant_id, owner_account_id, deleted_at DESC, id)

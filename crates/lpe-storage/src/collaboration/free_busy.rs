@@ -68,6 +68,7 @@ impl Storage {
             WHERE e.tenant_id = $1
               AND e.owner_account_id = $2
               AND e.lifecycle_state = 'active'
+              AND e.projection_state = 'visible'
               AND e.status <> 'cancelled'
               AND e.starts_at < $3::timestamptz
               AND e.ends_at > $4::timestamptz

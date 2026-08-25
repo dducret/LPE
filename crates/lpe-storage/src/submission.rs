@@ -10,6 +10,7 @@ use crate::{
 
 mod delegate_preferences;
 mod delegation;
+mod helpers;
 mod meeting_request;
 mod mime;
 mod source;
@@ -17,6 +18,7 @@ mod source_mutation;
 mod source_patch;
 mod types;
 
+use helpers::{exact_editor_submission_input, insert_visible_recipient, SubmissionSourceBehavior};
 use types::{
     canonical_submission_phases, source_protocol_sql, submission_authorization_kind_sql,
     CanonicalSubmissionPhase, ResolvedSubmissionAuthorization,
@@ -34,57 +36,6 @@ pub use types::{
     SubmissionMessageCustomPropertyInput, SubmissionSourcePatch, SubmitMessageInput,
     SubmittedMessage, SubmittedRecipientInput,
 };
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SubmissionSourceBehavior {
-    ReplaceWithInput,
-    UsePersisted,
-}
-
-fn exact_editor_submission_input(
-    mut input: SubmitMessageInput,
-    mut persisted: SubmitMessageInput,
-    authorization: &ResolvedSubmissionAuthorization,
-) -> SubmitMessageInput {
-    if !input.replace_attachments {
-        persisted.attachments.append(&mut input.attachments);
-        input.attachments = persisted.attachments;
-    }
-    input.from_address = authorization.from_address.clone();
-    input.from_display = authorization.from_display.clone();
-    input.sender_address = authorization.sender_address.clone();
-    input.sender_display = authorization.sender_display.clone();
-    input.replace_attachments = false;
-    input
-}
-
-async fn insert_visible_recipient(
-    tx: &mut sqlx::Transaction<'_, Postgres>,
-    tenant_id: &Uuid,
-    message_id: Uuid,
-    role: &str,
-    ordinal: usize,
-    recipient: &SubmittedRecipientInput,
-) -> Result<()> {
-    sqlx::query(
-        r#"
-        INSERT INTO message_recipients (
-            id, tenant_id, message_id, role, address, display_name, ordinal
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        "#,
-    )
-    .bind(Uuid::new_v4())
-    .bind(tenant_id)
-    .bind(message_id)
-    .bind(role)
-    .bind(&recipient.address)
-    .bind(recipient.display_name.as_deref())
-    .bind(ordinal as i32)
-    .execute(&mut **tx)
-    .await?;
-    Ok(())
-}
 
 impl Storage {
     pub async fn save_draft_message(
@@ -745,6 +696,11 @@ impl Storage {
             &tenant_id,
             input.account_id,
             &authorization.from_address,
+            input.source.eq_ignore_ascii_case("mapi-submit-message")
+                && input.draft_message_id.is_none(),
+            &subject,
+            &body_text,
+            input.body_html_sanitized.as_deref(),
             &input.attachments,
             &visible_recipients,
             &bcc_recipients,

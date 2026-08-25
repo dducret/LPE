@@ -20,11 +20,16 @@ const JMAP_QUERIES_STORAGE: &str = include_str!("jmap_queries.rs");
 const MAIL_ITEMS_STORAGE: &str = include_str!("mail_items.rs");
 const MAILBOXES_STORAGE: &str = include_str!("mailboxes.rs");
 const MAPI_EVENTS_STORAGE: &str = include_str!("mapi_events.rs");
+const MAPI_EVENTS_CORE_UPDATE_STORAGE: &str = include_str!("mapi_events/core_update.rs");
+const MAPI_EVENTS_SUBMISSION_PLACEHOLDER_STORAGE: &str =
+    include_str!("mapi_events/submission_placeholder.rs");
 const MESSAGE_OPS_STORAGE: &str = include_str!("message_ops.rs");
 const NOTES_JOURNAL_STORAGE: &str = include_str!("notes_journal.rs");
 const OUTBOUND_STORAGE: &str = include_str!("outbound.rs");
 const PROTOCOLS_STORAGE: &str = concat!(
     include_str!("protocols.rs"),
+    "\n",
+    include_str!("protocols/dependency_replay.rs"),
     "\n",
     include_str!("protocols/email_types.rs")
 );
@@ -55,7 +60,9 @@ const TASKS_STORAGE: &str = include_str!("tasks.rs");
 const WORKSPACE_STORAGE: &str = concat!(
     include_str!("workspace.rs"),
     "\n",
-    include_str!("workspace/client_workspace.rs")
+    include_str!("workspace/client_workspace.rs"),
+    "\n",
+    include_str!("workspace/events.rs")
 );
 const ADMIN_STORAGE: &str = include_str!("admin.rs");
 const ADMIN_PROVISIONING_STORAGE: &str = include_str!("admin/provisioning.rs");
@@ -228,6 +235,9 @@ fn collaboration_objects_have_canonical_projection_fields() {
         "meeting_response_state_json JSONB NOT NULL DEFAULT '{}'::jsonb",
         "CONSTRAINT calendar_events_meeting_response_state_json_object_check",
         "CHECK (jsonb_typeof(meeting_response_state_json) = 'object')",
+        "projection_state TEXT NOT NULL DEFAULT 'visible'",
+        "CONSTRAINT calendar_events_projection_state_check",
+        "CHECK (projection_state IN ('visible', 'mapi_submission_placeholder'))",
         "recurrence_rule TEXT",
         "recurrence_exceptions_json JSONB NOT NULL DEFAULT '[]'::jsonb",
         "time_zone TEXT NOT NULL DEFAULT ''",
@@ -1020,10 +1030,97 @@ fn deleted_calendar_events_remain_canonical_and_are_hidden_from_active_reads() {
 }
 
 #[test]
+fn mapi_submission_placeholders_are_hidden_until_atomic_import_adoption() {
+    let events = table_definition("calendar_events");
+    for required in [
+        "projection_state TEXT NOT NULL DEFAULT 'visible'",
+        "calendar_events_projection_state_check",
+        "mapi_submission_placeholder",
+    ] {
+        assert!(
+            events.contains(required),
+            "Calendar Event placeholder state must be typed and constrained: {required}"
+        );
+    }
+    for (name, source) in [
+        ("accessible events", COLLABORATION_STORAGE),
+        ("ActiveSync state", ACTIVESYNC_STORAGE),
+        ("workspace events", WORKSPACE_STORAGE),
+        ("free/busy", COLLABORATION_FREE_BUSY_STORAGE),
+        ("reminders", NOTES_JOURNAL_STORAGE),
+        ("JMAP dependency replay", PROTOCOLS_STORAGE),
+        ("attachments", ATTACHMENTS_STORAGE),
+        ("MAPI Event versions", MAPI_EVENTS_STORAGE),
+    ] {
+        assert!(
+            source.contains("projection_state = 'visible'"),
+            "{name} must exclude hidden MAPI submission placeholders"
+        );
+    }
+    let placeholder_create = function_body(
+        SUBMISSION_MEETING_REQUEST_STORAGE,
+        "async fn create_initial_mapi_event_placeholder_in_tx",
+    );
+    assert!(placeholder_create.contains("CALENDAR_EVENT_PROJECTION_MAPI_SUBMISSION_PLACEHOLDER"));
+    for forbidden in [
+        "allocate_account_modseq_in_tx",
+        "insert_mail_change_log_in_tx",
+        "emit_collaboration_change",
+        "mapi_object_identities",
+    ] {
+        assert!(
+            !placeholder_create.contains(forbidden),
+            "hidden placeholder creation must not publish visible version state: {forbidden}"
+        );
+    }
+    assert_sources_contain_all(
+        "atomic MAPI submission placeholder adoption",
+        &[MAPI_EVENTS_SUBMISSION_PLACEHOLDER_STORAGE],
+        &[
+            "pg_advisory_xact_lock",
+            "try_adopt_mapi_submission_placeholder_in_tx",
+            "meeting_response_state_json",
+            "projection_state = $23",
+            "CALENDAR_EVENT_PROJECTION_VISIBLE",
+        ],
+    );
+    assert_contains_before(
+        function_body(MAPI_EVENTS_STORAGE, "pub async fn create_mapi_event"),
+        "try_adopt_mapi_submission_placeholder_in_tx",
+        "allocate_mapi_event_identity_in_tx",
+        "placeholder adoption must finish before the imported MAPI identity is allocated",
+    );
+    assert_contains_before(
+        function_body(MAPI_EVENTS_STORAGE, "pub async fn create_mapi_event"),
+        "lock_calendar_event_uid_in_tx",
+        "ensure_default_calendar_in_tx",
+        "MAPI Event creation must take the owner/UID lock before the default Calendar lock",
+    );
+    assert_contains_before(
+        function_body(
+            WORKSPACE_STORAGE,
+            "pub(crate) async fn upsert_client_event_in_calendar",
+        ),
+        "lock_calendar_event_uid_in_tx",
+        "ensure_default_calendar_in_tx",
+        "client Event upsert must take the owner/UID lock before the default Calendar lock",
+    );
+    assert_contains_before(
+        function_body(
+            INBOUND_MEETING_RESPONSE_STORAGE,
+            "pub(super) async fn apply_calendar_meeting_response_in_tx",
+        ),
+        "CALENDAR_EVENT_PROJECTION_MAPI_SUBMISSION_PLACEHOLDER",
+        "allocate_account_modseq_in_tx",
+        "an early response to a hidden placeholder must return before Calendar version allocation",
+    );
+}
+
+#[test]
 fn calendar_event_mutations_advance_canonical_and_mapi_versions() {
     assert_sources_contain_all(
         "atomic MAPI Event commit helper",
-        &[MAPI_EVENTS_STORAGE],
+        &[MAPI_EVENTS_STORAGE, MAPI_EVENTS_CORE_UPDATE_STORAGE],
         &[
             "pub async fn fetch_mapi_event_versions",
             "pub async fn commit_mapi_event_update",
@@ -1578,6 +1675,9 @@ fn updater_rejects_an_incomplete_current_schema_before_stopping_lpe() {
             "pg_get_expr(default_row.adbin, default_row.adrelid) = '''{}''::jsonb'",
             "constraint_row.convalidated",
             "pg_get_expr(constraint_row.conbin, constraint_row.conrelid)",
+            "calendar_event_projection_state_shape_ok()",
+            "calendar_events_projection_state_check",
+            "mapi_submission_placeholder",
             "delegation_projection_shape_ok()",
             "mapi_auxiliary_shape_ok()",
             "mapi_low_dynamic_property_shape_ok()",
@@ -3904,7 +4004,8 @@ fn meeting_request_submission_is_correlated_before_canonical_writes() {
                 .contains("responses do not support Bcc")
             && SUBMISSION_MEETING_REQUEST_STORAGE
                 .contains("requires exactly one visible organizer recipient")
-            && SUBMISSION_MEETING_REQUEST_STORAGE.contains("request.meeting_sequence >= candidate.sequence")
+            && SUBMISSION_MEETING_REQUEST_STORAGE
+                .contains("request_sequence >= candidate.sequence")
             && SUBMISSION_MEETING_REQUEST_STORAGE.contains("matching_candidate_count")
             && SUBMISSION_MEETING_REQUEST_STORAGE.contains("!= 1")
             && CORE_STORAGE.contains("calendar_meeting_request_correlation_schema.sql")
@@ -3914,7 +4015,15 @@ fn meeting_request_submission_is_correlated_before_canonical_writes() {
             && CALENDAR_REQUEST_CORRELATION_SCHEMA_CHECK
                 .contains("ARRAY['tenant_id', 'owner_account_id', 'uid', 'id']")
             && CALENDAR_REQUEST_CORRELATION_SCHEMA_CHECK
-                .contains("(lifecycle_state = ''active''::text)"),
+                .contains("(lifecycle_state = ''active''::text)")
+            && CALENDAR_REQUEST_CORRELATION_SCHEMA_CHECK
+                .contains("attribute_row.attname = 'projection_state'")
+            && CALENDAR_REQUEST_CORRELATION_SCHEMA_CHECK
+                .contains("attribute_row.attnotnull")
+            && CALENDAR_REQUEST_CORRELATION_SCHEMA_CHECK
+                .contains("calendar_events_projection_state_check")
+            && CALENDAR_REQUEST_CORRELATION_SCHEMA_CHECK
+                .contains("mapi_submission_placeholder"),
         "an outbound REQUEST must lock and uniquely correlate its canonical Event before Sent/queue/source-expunge writes"
     );
     assert_contains_before(

@@ -155,6 +155,7 @@ macro_rules! store_impl_collaboration {
                     modseq::text AS version
                 FROM calendar_events
                 WHERE id = ANY($1)
+                  AND projection_state = 'visible'
                 "#,
             )
             .bind(&ids)

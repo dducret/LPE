@@ -28,6 +28,9 @@ pub(in crate::mapi) fn meeting_scheduling_input_property_tag(property_tag: u32) 
             | PID_LID_LOCATION_W_TAG
             | PID_LID_APPOINTMENT_SEQUENCE_TAG
             | PID_LID_APPOINTMENT_STATE_FLAGS_TAG
+            | PID_LID_RECURRING_TAG
+            | PID_LID_IS_RECURRING_TAG
+            | PID_LID_APPOINTMENT_RECUR_TAG
             | PID_LID_GLOBAL_OBJECT_ID_TAG
             | PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG
             | PID_LID_ATTENDEE_CRITICAL_CHANGE_TAG
@@ -63,6 +66,9 @@ pub(in crate::mapi) fn meeting_scheduling_attachments(
     } else {
         return Ok(Vec::new());
     };
+    if scheduling_kind == "request" && has_recurring_meeting_properties(properties) {
+        bail!("recurring MAPI meeting request submission is unsupported");
+    }
     let attachments = if scheduling_kind == "response" {
         meeting_response_attachment(properties, recipients, from_address, from_name)
     } else {
@@ -72,6 +78,15 @@ pub(in crate::mapi) fn meeting_scheduling_attachments(
         bail!("MAPI meeting {scheduling_kind} is missing required scheduling fields");
     }
     Ok(attachments)
+}
+
+fn has_recurring_meeting_properties(properties: &HashMap<u32, MapiValue>) -> bool {
+    [PID_LID_RECURRING_TAG, PID_LID_IS_RECURRING_TAG]
+        .into_iter()
+        .any(|tag| properties.get(&tag).and_then(MapiValue::as_bool) == Some(true))
+        || properties
+            .get(&PID_LID_APPOINTMENT_RECUR_TAG)
+            .is_some_and(|value| matches!(value, MapiValue::Binary(blob) if !blob.is_empty()))
 }
 
 fn meeting_response_attachment(
@@ -905,6 +920,43 @@ mod tests {
             )
             .is_err());
         }
+    }
+
+    #[test]
+    fn recurring_request_signals_fail_closed_before_one_off_icalendar_generation() {
+        let mut base = response_properties("IPM.Schedule.Meeting.Request");
+        let attendee = PendingRecipient {
+            row_id: 1,
+            address: "attendee@example.test".to_string(),
+            display_name: Some("Attendee".to_string()),
+            recipient_type: 0x01,
+            recipient_flags: 0x0000_0001,
+        };
+
+        for (tag, value) in [
+            (PID_LID_RECURRING_TAG, MapiValue::Bool(true)),
+            (PID_LID_IS_RECURRING_TAG, MapiValue::Bool(true)),
+            (PID_LID_APPOINTMENT_RECUR_TAG, MapiValue::Binary(vec![0x01])),
+        ] {
+            let mut properties = base.clone();
+            properties.insert(tag, value);
+            let error = meeting_scheduling_attachments(
+                &properties,
+                std::slice::from_ref(&attendee),
+                "organizer@example.test",
+                Some("Organizer"),
+            )
+            .unwrap_err();
+            assert!(error
+                .to_string()
+                .contains("recurring MAPI meeting request submission is unsupported"));
+            assert!(meeting_scheduling_input_property_tag(tag));
+        }
+
+        base.insert(PID_LID_RECURRING_TAG, MapiValue::Bool(false));
+        base.insert(PID_LID_IS_RECURRING_TAG, MapiValue::Bool(false));
+        base.insert(PID_LID_APPOINTMENT_RECUR_TAG, MapiValue::Binary(Vec::new()));
+        assert!(!has_recurring_meeting_properties(&base));
     }
 
     #[test]

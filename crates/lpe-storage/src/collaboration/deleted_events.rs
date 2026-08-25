@@ -63,6 +63,7 @@ impl Storage {
             WHERE event.tenant_id = $1
               AND event.id = $2
               AND event.lifecycle_state = 'active'
+              AND event.projection_state = 'visible'
             FOR UPDATE OF event
             "#,
         )
@@ -117,6 +118,7 @@ impl Storage {
               AND owner_account_id = $2
               AND id = $3
               AND lifecycle_state = 'active'
+              AND projection_state = 'visible'
             RETURNING to_char(
                 deleted_at AT TIME ZONE 'UTC',
                 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'

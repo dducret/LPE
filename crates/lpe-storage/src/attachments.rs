@@ -183,6 +183,7 @@ impl Storage {
              AND event.owner_account_id = attachment.owner_account_id
              AND event.id = attachment.event_id
              AND event.lifecycle_state IN ('active', 'deleted')
+             AND event.projection_state = 'visible'
             WHERE attachment.tenant_id = $1
               AND attachment.owner_account_id = $2
               AND attachment.event_id = $3
@@ -418,6 +419,7 @@ impl Storage {
              AND event.owner_account_id = attachment.owner_account_id
              AND event.id = attachment.event_id
              AND event.lifecycle_state = 'active'
+             AND event.projection_state = 'visible'
             WHERE attachment.tenant_id = $1
               AND attachment.owner_account_id = $2
               AND attachment.event_id = $3
@@ -458,6 +460,7 @@ impl Storage {
              AND event.owner_account_id = attachment.owner_account_id
              AND event.id = attachment.event_id
              AND event.lifecycle_state IN ('active', 'deleted')
+             AND event.projection_state = 'visible'
             WHERE attachment.tenant_id = $1
               AND attachment.owner_account_id = $2
               AND attachment.event_id = ANY($3)
@@ -514,6 +517,7 @@ impl Storage {
               AND owner_account_id = $2
               AND id = $3
               AND lifecycle_state = 'active'
+              AND projection_state = 'visible'
             LIMIT 1
             FOR UPDATE
             "#,
@@ -655,6 +659,7 @@ impl Storage {
              AND event.owner_account_id = a.owner_account_id
              AND event.id = a.event_id
              AND event.lifecycle_state = 'active'
+             AND event.projection_state = 'visible'
             WHERE a.tenant_id = $1
               AND a.owner_account_id = $2
               AND a.event_id = $3
@@ -712,6 +717,7 @@ impl Storage {
              AND event.owner_account_id = a.owner_account_id
              AND event.id = a.event_id
              AND event.lifecycle_state = 'active'
+             AND event.projection_state = 'visible'
             WHERE a.tenant_id = $1
               AND a.owner_account_id = $2
               AND a.event_id = $3
@@ -765,6 +771,7 @@ impl Storage {
               AND owner_account_id = $2
               AND id = $3
               AND lifecycle_state = 'active'
+              AND projection_state = 'visible'
             FOR UPDATE
             "#,
         )
