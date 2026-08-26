@@ -581,8 +581,7 @@ where
 pub(super) async fn apply_staged_message_recipient_replacement<S>(
     store: &S,
     principal: &AccountPrincipal,
-    folder_id: u64,
-    message_id: u64,
+    target: (u64, u64, &mut Option<MapiSavedEmail>),
     recipients: &[PendingRecipient],
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
@@ -590,9 +589,17 @@ pub(super) async fn apply_staged_message_recipient_replacement<S>(
 where
     S: ExchangeStore,
 {
-    let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails) else {
+    let (folder_id, message_id, saved_email) = target;
+    let Some(mut email) = saved_email
+        .as_ref()
+        .map(|saved| saved.email.clone())
+        .or_else(|| message_for_id(folder_id, message_id, mailboxes, emails).cloned())
+    else {
         return Err(anyhow::anyhow!("canonical message not found"));
     };
+    let durable_identity = saved_email
+        .as_ref()
+        .and_then(|saved| saved.durable_identity.clone());
     let (to, cc, bcc) = submitted_recipients_from_pending(recipients);
     store
         .replace_message_recipients(
@@ -608,6 +615,22 @@ where
             },
         )
         .await?;
+    let recipient_addresses = |recipients: &[SubmittedRecipientInput]| {
+        recipients
+            .iter()
+            .map(|recipient| lpe_storage::JmapEmailAddress {
+                address: recipient.address.clone(),
+                display_name: recipient.display_name.clone(),
+            })
+            .collect::<Vec<_>>()
+    };
+    email.to = recipient_addresses(&to);
+    email.cc = recipient_addresses(&cc);
+    email.bcc = recipient_addresses(&bcc);
+    *saved_email = Some(MapiSavedEmail {
+        email,
+        durable_identity,
+    });
     Ok(())
 }
 
@@ -812,6 +835,7 @@ where
 }
 
 pub(super) fn append_reload_cached_information_response(
+    principal: &AccountPrincipal,
     session: &MapiSession,
     handle_slots: &[u32],
     request: &RopRequest,
@@ -828,12 +852,13 @@ pub(super) fn append_reload_cached_information_response(
         ));
         return;
     }
-    responses.extend_from_slice(&rop_reload_cached_information_response(
+    responses.extend_from_slice(&rop_reload_cached_information_response_for_principal(
         request,
         input_object(session, handle_slots, request),
         mailboxes,
         emails,
         snapshot,
+        principal,
     ));
 }
 

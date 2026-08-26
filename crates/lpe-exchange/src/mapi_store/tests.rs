@@ -166,7 +166,65 @@ fn test_mapi_event(canonical_id: Uuid, account_id: Uuid, object_id: u64, title: 
         event,
         attachments: Vec::new(),
         stored_properties: Vec::new(),
+        recipient_response_times: HashMap::new(),
     }
+}
+
+#[test]
+fn calendar_recipient_response_time_hydration_fails_closed() {
+    let account_id = Uuid::from_u128(0x1010);
+    let event_id = Uuid::from_u128(0x2020);
+    let object_id = crate::mapi::identity::mapi_store_id(0x3030);
+    let mut snapshot = MapiMailStoreSnapshot::empty();
+    snapshot.events.push(test_mapi_event(
+        event_id,
+        account_id,
+        object_id,
+        "Response timestamps",
+    ));
+    let snapshot = snapshot.with_calendar_recipient_response_times(vec![
+        crate::store::MapiCalendarRecipientResponseTime {
+            event_id,
+            attendee_email: "valid@example.test".to_string(),
+            response_sent_at: "2026-08-26T07:15:00Z".to_string(),
+        },
+        crate::store::MapiCalendarRecipientResponseTime {
+            event_id,
+            attendee_email: "invalid@example.test".to_string(),
+            response_sent_at: "not-a-time".to_string(),
+        },
+        crate::store::MapiCalendarRecipientResponseTime {
+            event_id,
+            attendee_email: "zero@example.test".to_string(),
+            response_sent_at: "1601-01-01T00:00:00Z".to_string(),
+        },
+        crate::store::MapiCalendarRecipientResponseTime {
+            event_id,
+            attendee_email: "duplicate@example.test".to_string(),
+            response_sent_at: "2026-08-26T07:16:00Z".to_string(),
+        },
+        crate::store::MapiCalendarRecipientResponseTime {
+            event_id,
+            attendee_email: "DUPLICATE@EXAMPLE.TEST".to_string(),
+            response_sent_at: "2026-08-26T07:17:00Z".to_string(),
+        },
+    ]);
+    let event = snapshot
+        .event_for_id(crate::mapi::identity::CALENDAR_FOLDER_ID, object_id)
+        .unwrap();
+
+    assert_eq!(
+        event.recipient_response_time("VALID@EXAMPLE.TEST"),
+        Some(crate::mapi_mailstore::filetime_from_rfc3339_utc(
+            "2026-08-26T07:15:00Z"
+        ))
+    );
+    assert_eq!(event.recipient_response_time("invalid@example.test"), None);
+    assert_eq!(event.recipient_response_time("zero@example.test"), None);
+    assert_eq!(
+        event.recipient_response_time("duplicate@example.test"),
+        None
+    );
 }
 
 #[test]

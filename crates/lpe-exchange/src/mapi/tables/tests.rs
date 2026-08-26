@@ -2598,6 +2598,7 @@ fn calendar_sort_uses_only_backed_calendar_values() {
             event: zero_duration,
             attachments: Vec::new(),
             stored_properties: Vec::new(),
+            recipient_response_times: HashMap::new(),
         },
         crate::mapi_store::MapiEvent {
             id: mapi_item_id(&one_minute.id),
@@ -2620,6 +2621,7 @@ fn calendar_sort_uses_only_backed_calendar_values() {
             event: one_minute,
             attachments: Vec::new(),
             stored_properties: Vec::new(),
+            recipient_response_times: HashMap::new(),
         },
     ];
     let mut row_refs = rows.iter().collect::<Vec<_>>();

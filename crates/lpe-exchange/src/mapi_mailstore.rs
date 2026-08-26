@@ -122,6 +122,10 @@ const PID_TAG_RECIPIENT_ENTRY_ID: u32 = 0x5FF7_0102;
 const PID_TAG_RECIPIENT_FLAGS: u32 = 0x5FFD_0003;
 const PID_TAG_RECIPIENT_ORDER: u32 = 0x5FDF_0003;
 const PID_TAG_RECIPIENT_TRACK_STATUS: u32 = 0x5FFF_0003;
+const PID_TAG_RECIPIENT_TRACK_STATUS_TIME: u32 = 0x5FFB_0040;
+const PID_TAG_RECIPIENT_PROPOSED: u32 = 0x5FE1_000B;
+const PID_TAG_RECIPIENT_PROPOSED_START_TIME: u32 = 0x5FE3_0040;
+const PID_TAG_RECIPIENT_PROPOSED_END_TIME: u32 = 0x5FE4_0040;
 const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
 const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
 const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
@@ -919,6 +923,22 @@ fn write_fast_transfer_special_recipients(
             PID_TAG_RECIPIENT_TRACK_STATUS,
             recipient.track_status as i32,
         );
+        if let Some(track_status_time) = recipient.track_status_time {
+            // [MS-OXOCAL] sections 2.2.4.10.3 and 3.1.4.8.5.2.
+            write_u32(buffer, PID_TAG_RECIPIENT_TRACK_STATUS_TIME);
+            write_i64(buffer, track_status_time as i64);
+        }
+        if let Some(proposed) = recipient.proposed {
+            write_bool_property(buffer, PID_TAG_RECIPIENT_PROPOSED, proposed);
+        }
+        if let Some(proposed_start) = recipient.proposed_start {
+            write_u32(buffer, PID_TAG_RECIPIENT_PROPOSED_START_TIME);
+            write_i64(buffer, proposed_start as i64);
+        }
+        if let Some(proposed_end) = recipient.proposed_end {
+            write_u32(buffer, PID_TAG_RECIPIENT_PROPOSED_END_TIME);
+            write_i64(buffer, proposed_end as i64);
+        }
         write_i32_property(buffer, PID_TAG_OBJECT_TYPE, 6);
         write_i32_property(buffer, PID_TAG_DISPLAY_TYPE, 0);
         write_i32_property(
@@ -935,6 +955,9 @@ fn write_fast_transfer_special_recipients(
             PID_TAG_RECIPIENT_DISPLAY_NAME_W,
             &recipient.display_name,
         );
+        // [MS-OXOCAL] section 4.2.2.5 identifies the attendee row by
+        // PidTagSearchKey before applying the response state.
+        write_binary_property(buffer, PID_TAG_SEARCH_KEY, &recipient.search_key);
         write_binary_property(buffer, PID_TAG_ENTRY_ID, &recipient.entry_id);
         write_binary_property(buffer, PID_TAG_RECIPIENT_ENTRY_ID, &recipient.entry_id);
         write_u32(buffer, END_TO_RECIP);

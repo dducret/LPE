@@ -3189,8 +3189,12 @@ fn meeting_response_enumeration_omits_absent_times() {
         PID_LID_COMMON_END_TAG,
         PID_LID_APPOINTMENT_START_WHOLE_TAG,
         PID_LID_APPOINTMENT_END_WHOLE_TAG,
+        PID_LID_APPOINTMENT_DURATION_TAG,
         PID_LID_APPOINTMENT_PROPOSED_START_WHOLE_TAG,
         PID_LID_APPOINTMENT_PROPOSED_END_WHOLE_TAG,
+        PID_LID_APPOINTMENT_PROPOSED_DURATION_TAG,
+        PID_LID_SERVER_PROCESSED_TAG,
+        PID_LID_SERVER_PROCESSING_ACTIONS_TAG,
     ];
     for absent in absent_tags {
         assert!(!tags.contains(&absent), "invented absent {absent:#010x}");
@@ -3395,6 +3399,109 @@ fn meeting_mail_getprops_all_list_and_specific_share_supported_properties() {
         }
         assert_eq!(cursor.remaining(), 0);
     }
+}
+
+#[test]
+fn counter_meeting_response_exposes_fixed_outlook_action_contract() {
+    let mut email = counter_meeting_response_test_email();
+    email.body_text.clear();
+    email
+        .calendar_meeting_response
+        .as_mut()
+        .expect("response metadata exists")
+        .server_processed = true;
+    let expected = [
+        (
+            PID_TAG_MESSAGE_CLASS_W,
+            MapiValue::String("IPM.Schedule.Meeting.Resp.Tent".to_string()),
+        ),
+        (
+            PID_LID_APPOINTMENT_COUNTER_PROPOSAL_TAG,
+            MapiValue::Bool(true),
+        ),
+        (
+            PID_LID_APPOINTMENT_PROPOSED_START_WHOLE_TAG,
+            MapiValue::I64(
+                mapi_mailstore::filetime_from_rfc3339_utc("2026-08-24T07:30:00Z") as i64,
+            ),
+        ),
+        (
+            PID_LID_APPOINTMENT_PROPOSED_END_WHOLE_TAG,
+            MapiValue::I64(
+                mapi_mailstore::filetime_from_rfc3339_utc("2026-08-24T08:00:00Z") as i64,
+            ),
+        ),
+        (
+            PID_LID_APPOINTMENT_PROPOSED_DURATION_TAG,
+            MapiValue::I32(30),
+        ),
+        (
+            PID_LID_APPOINTMENT_START_WHOLE_TAG,
+            MapiValue::I64(
+                mapi_mailstore::filetime_from_rfc3339_utc("2026-08-24T06:30:00Z") as i64,
+            ),
+        ),
+        (
+            PID_LID_APPOINTMENT_END_WHOLE_TAG,
+            MapiValue::I64(
+                mapi_mailstore::filetime_from_rfc3339_utc("2026-08-24T07:00:00Z") as i64,
+            ),
+        ),
+        (PID_LID_APPOINTMENT_DURATION_TAG, MapiValue::I32(30)),
+        (PID_LID_APPOINTMENT_STATE_FLAGS_TAG, MapiValue::I32(3)),
+        (PID_LID_RESPONSE_STATUS_TAG, MapiValue::I32(0)),
+        (PID_LID_IS_EXCEPTION_TAG, MapiValue::Bool(false)),
+        (PID_LID_IS_SILENT_TAG, MapiValue::Bool(false)),
+        (PID_LID_SERVER_PROCESSED_TAG, MapiValue::Bool(true)),
+        (
+            PID_LID_SERVER_PROCESSING_ACTIONS_TAG,
+            MapiValue::I32(0x0000_0080),
+        ),
+    ];
+    let listed = email_meeting_property_tags(&email);
+    assert!(!listed.contains(&PID_TAG_PROCESSED));
+    for (property_tag, _) in &expected {
+        if *property_tag == PID_TAG_MESSAGE_CLASS_W {
+            continue;
+        }
+        assert!(
+            listed.contains(property_tag),
+            "missing fixed response property {property_tag:#010x}"
+        );
+    }
+
+    let object = MapiObject::Message {
+        folder_id: INBOX_FOLDER_ID,
+        message_id: crate::mapi::identity::mapi_store_id(0x2020),
+        saved_email: Some(MapiSavedEmail {
+            email,
+            durable_identity: None,
+        }),
+        pending_properties: HashMap::new(),
+    };
+    let tags = expected
+        .iter()
+        .map(|(property_tag, _)| *property_tag)
+        .collect::<Vec<_>>();
+    let request = get_properties_specific_test_request(2, &tags);
+    let response = rop_get_properties_specific_response(
+        &request,
+        Some(&object),
+        &meeting_mail_test_principal(),
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+    );
+    assert_eq!(&response[..7], &[0x07, 0x02, 0, 0, 0, 0, 0]);
+    let mut cursor = Cursor::new(&response[7..]);
+    for (property_tag, expected_value) in expected {
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, property_tag).unwrap(),
+            expected_value,
+            "wrong fixed response property {property_tag:#010x}"
+        );
+    }
+    assert_eq!(cursor.remaining(), 0);
 }
 
 #[test]

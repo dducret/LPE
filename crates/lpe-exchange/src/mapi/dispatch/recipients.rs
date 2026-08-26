@@ -151,17 +151,12 @@ pub(super) async fn append_read_recipients_response<S>(
                 };
                 Some(&pending_recipient_object)
             }
-            Some(MapiObject::Event {
+            event_object @ Some(MapiObject::Event {
                 folder_id,
-                event_id,
                 transaction,
+                ..
             }) => {
-                let recipients = transaction.pending_recipients.clone().or_else(|| {
-                    snapshot
-                        .event_for_id(*folder_id, *event_id)
-                        .map(|event| calendar_pending_recipients(&event.event))
-                });
-                if let Some(recipients) = recipients {
+                if let Some(recipients) = transaction.pending_recipients.clone() {
                     pending_recipient_object = MapiObject::PendingMessage {
                         folder_id: *folder_id,
                         properties: HashMap::new(),
@@ -169,7 +164,7 @@ pub(super) async fn append_read_recipients_response<S>(
                     };
                     Some(&pending_recipient_object)
                 } else {
-                    None
+                    event_object
                 }
             }
             object => object,
@@ -197,9 +192,34 @@ pub(super) async fn append_read_recipients_response<S>(
     } else {
         &protected_emails
     };
+    let protected_recipient_object = match (object, protected_emails.first()) {
+        (
+            Some(MapiObject::Message {
+                folder_id,
+                message_id,
+                saved_email,
+                pending_properties,
+            }),
+            Some(protected_email),
+        ) => Some(MapiObject::Message {
+            folder_id: *folder_id,
+            message_id: *message_id,
+            saved_email: Some(MapiSavedEmail {
+                email: protected_email.clone(),
+                durable_identity: saved_email
+                    .as_ref()
+                    .and_then(|saved| saved.durable_identity.clone()),
+            }),
+            pending_properties: pending_properties.clone(),
+        }),
+        _ => None,
+    };
+    // The owner-only Sent fetch is fresh canonical data with protected Bcc;
+    // unlike the request snapshot, it is safe to supersede the saved clone.
+    let recipient_object = protected_recipient_object.as_ref().or(object);
     responses.extend_from_slice(&rop_read_recipients_response(
         request,
-        object,
+        recipient_object,
         mailboxes,
         recipient_emails,
         snapshot,
@@ -469,8 +489,10 @@ pub(super) async fn append_modify_recipients_response<S>(
                 ));
                 return;
             };
-            let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
-                .or(saved_email.as_ref().map(|saved| &saved.email))
+            let Some(email) = saved_email
+                .as_ref()
+                .map(|saved| &saved.email)
+                .or_else(|| message_for_id(folder_id, message_id, mailboxes, emails))
             else {
                 responses.extend_from_slice(&rop_error_response(
                     0x0E,

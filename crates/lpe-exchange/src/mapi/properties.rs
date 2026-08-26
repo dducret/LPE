@@ -106,12 +106,14 @@ pub(in crate::mapi) fn rop_read_recipients_response(
             saved_email,
             ..
         }) => {
-            let Some(email) = message_for_id(*folder_id, *message_id, mailboxes, emails)
+            let Some(email) = saved_email
+                .as_ref()
+                .map(|saved| &saved.email)
+                .or_else(|| message_for_id(*folder_id, *message_id, mailboxes, emails))
                 .or_else(|| {
                     search_folder_message_for_id(snapshot, *folder_id, *message_id)
                         .map(|message| &message.email)
                 })
-                .or(saved_email.as_ref().map(|saved| &saved.email))
             else {
                 return rop_error_response(0x0F, input_handle_index, 0x8004_010F);
             };
@@ -123,6 +125,27 @@ pub(in crate::mapi) fn rop_read_recipients_response(
                         offset as u32,
                         recipient.recipient_type,
                         serialize_recipient_row(&recipient, &MESSAGE_RECIPIENT_COLUMNS),
+                    )
+                })
+                .collect::<Vec<_>>()
+        }
+        Some(MapiObject::Event {
+            folder_id,
+            event_id,
+            ..
+        }) => {
+            let Some(event) = snapshot.event_for_id(*folder_id, *event_id) else {
+                return rop_error_response(0x0F, input_handle_index, 0x8004_010F);
+            };
+            let recipients = calendar_event_recipients_for_principal(event, principal);
+            let columns = calendar_event_recipient_columns();
+            recipients
+                .into_iter()
+                .map(|recipient| {
+                    (
+                        recipient.order,
+                        recipient.recipient_type,
+                        serialize_calendar_event_recipient_row(&recipient, columns),
                     )
                 })
                 .collect::<Vec<_>>()

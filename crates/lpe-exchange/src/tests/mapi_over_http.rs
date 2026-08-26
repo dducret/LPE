@@ -2,6 +2,7 @@ use super::*;
 
 mod calendar;
 mod calendar_identity_scope;
+mod calendar_recipient_proposals;
 mod connect;
 mod contacts;
 mod custom_calendar_versions;

@@ -82,12 +82,33 @@ pub(crate) fn email_property_value(email: &JmapEmail, property_tag: u32) -> Opti
             .filter(|response| response.method == "COUNTER")
             .and_then(|response| response.proposed_end.as_deref())
             .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
+        PID_LID_APPOINTMENT_PROPOSED_DURATION_TAG => email
+            .calendar_meeting_response
+            .as_ref()
+            .filter(|response| response.method == "COUNTER")
+            .and_then(|response| {
+                meeting_interval_duration_minutes(
+                    response.proposed_start.as_deref(),
+                    response.proposed_end.as_deref(),
+                )
+            })
+            .map(MapiValue::I32),
         PID_TAG_START_DATE | PID_LID_COMMON_START_TAG | PID_LID_APPOINTMENT_START_WHOLE_TAG => {
             calendar_meeting_time(email, true).or(Some(MapiValue::U64(0)))
         }
         PID_TAG_END_DATE | PID_LID_COMMON_END_TAG | PID_LID_APPOINTMENT_END_WHOLE_TAG => {
             calendar_meeting_time(email, false).or(Some(MapiValue::U64(0)))
         }
+        PID_LID_APPOINTMENT_DURATION_TAG => email
+            .calendar_meeting_response
+            .as_ref()
+            .and_then(|response| {
+                meeting_interval_duration_minutes(
+                    response.meeting_start.as_deref(),
+                    response.meeting_end.as_deref(),
+                )
+            })
+            .map(MapiValue::I32),
         PID_LID_LOCATION_W_TAG => email
             .calendar_meeting_request
             .as_ref()
@@ -113,11 +134,23 @@ pub(crate) fn email_property_value(email: &JmapEmail, property_tag: u32) -> Opti
         PID_LID_APPOINTMENT_STATE_FLAGS_TAG => email
             .calendar_meeting_request
             .as_ref()
-            .map(|_| MapiValue::I32(3)),
+            .map(|_| MapiValue::I32(3))
+            .or_else(|| {
+                email
+                    .calendar_meeting_response
+                    .as_ref()
+                    .map(|_| MapiValue::I32(3))
+            }),
         PID_LID_RESPONSE_STATUS_TAG => email
             .calendar_meeting_request
             .as_ref()
-            .map(|_| MapiValue::I32(5)),
+            .map(|_| MapiValue::I32(5))
+            .or_else(|| {
+                email
+                    .calendar_meeting_response
+                    .as_ref()
+                    .map(|_| MapiValue::I32(0))
+            }),
         PID_LID_F_INVITED_TAG => email
             .calendar_meeting_request
             .as_ref()
@@ -141,7 +174,13 @@ pub(crate) fn email_property_value(email: &JmapEmail, property_tag: u32) -> Opti
         PID_LID_IS_EXCEPTION_TAG => email
             .calendar_meeting_request
             .as_ref()
-            .map(|_| MapiValue::Bool(false)),
+            .map(|_| MapiValue::Bool(false))
+            .or_else(|| {
+                email
+                    .calendar_meeting_response
+                    .as_ref()
+                    .map(|_| MapiValue::Bool(false))
+            }),
         PID_LID_OWNER_CRITICAL_CHANGE_TAG => {
             email.calendar_meeting_request.as_ref().map(|request| {
                 MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
@@ -178,10 +217,21 @@ pub(crate) fn email_property_value(email: &JmapEmail, property_tag: u32) -> Opti
             })
             .cloned()
             .map(MapiValue::String),
-        PID_LID_IS_SILENT_TAG => email
+        PID_LID_IS_SILENT_TAG => email.calendar_meeting_response.as_ref().map(|response| {
+            // [MS-OXOCAL] section 3.1.4.8.4.1 forbids marking a
+            // counter proposal silent even when the attendee added no body.
+            MapiValue::Bool(response.method != "COUNTER" && email.body_text.trim().is_empty())
+        }),
+        PID_LID_SERVER_PROCESSED_TAG => email
             .calendar_meeting_response
             .as_ref()
-            .map(|_| MapiValue::Bool(email.body_text.trim().is_empty())),
+            .filter(|response| response.server_processed)
+            .map(|_| MapiValue::Bool(true)),
+        PID_LID_SERVER_PROCESSING_ACTIONS_TAG => email
+            .calendar_meeting_response
+            .as_ref()
+            .filter(|response| response.server_processed)
+            .map(|_| MapiValue::I32(0x0000_0080)),
         PID_LID_APPOINTMENT_SEQUENCE_TAG => email
             .calendar_meeting_request
             .as_ref()
@@ -244,18 +294,14 @@ pub(crate) fn email_property_value(email: &JmapEmail, property_tag: u32) -> Opti
                 .as_ref()
                 .is_some_and(|request| request.response_requested),
         )),
-        // [MS-OXOCAL] section 3.1.4.8.5.1: Outlook must not record a Meeting
-        // Response again after the server has correlated and processed it.
+        // [MS-OXOCAL] section 2.2.5.7 reserves this marker for completed
+        // client processing. Server-applied responses use the Calendar
+        // Assistant named properties above and leave this property absent.
+        PID_TAG_PROCESSED if email.calendar_meeting_response.is_some() => None,
         PID_TAG_PROCESSED => email
-            .calendar_meeting_response
+            .calendar_meeting_request
             .as_ref()
-            .map(|response| MapiValue::Bool(response.server_processed))
-            .or_else(|| {
-                email
-                    .calendar_meeting_request
-                    .as_ref()
-                    .and_then(|request| request.client_processed.then_some(MapiValue::Bool(true)))
-            })
+            .and_then(|request| request.client_processed.then_some(MapiValue::Bool(true)))
             .or_else(|| {
                 email
                     .calendar_meeting_request
@@ -617,6 +663,13 @@ fn calendar_meeting_time(email: &JmapEmail, start: bool) -> Option<MapiValue> {
     Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
         value,
     )))
+}
+
+fn meeting_interval_duration_minutes(start: Option<&str>, end: Option<&str>) -> Option<i32> {
+    let start = mapi_mailstore::filetime_from_rfc3339_utc(start?);
+    let end = mapi_mailstore::filetime_from_rfc3339_utc(end?);
+    let duration = (start != 0 && end > start).then_some(end - start)?;
+    Some((duration / 600_000_000).min(i32::MAX as u64) as i32)
 }
 
 pub(in crate::mapi) fn native_body_format(email: &JmapEmail) -> u32 {

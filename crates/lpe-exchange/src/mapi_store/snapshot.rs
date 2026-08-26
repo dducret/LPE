@@ -513,6 +513,7 @@ impl MapiMailStoreSnapshot {
             version,
             attachments: calendar_mapi_attachments(&attachments),
             stored_properties: Vec::new(),
+            recipient_response_times: HashMap::new(),
         });
         if let Some(folder) = self
             .collaboration_folders

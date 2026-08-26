@@ -144,6 +144,16 @@ pub(super) fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
         ),
         (PID_LID_WHERE_NAMED_ID, PID_LID_WHERE, PSETID_MEETING_GUID),
         (0x81E6, PID_LID_IS_SILENT, PSETID_MEETING_GUID),
+        (
+            PID_LID_SERVER_PROCESSED_NAMED_ID,
+            PID_LID_SERVER_PROCESSED,
+            PSETID_CALENDAR_ASSISTANT_GUID,
+        ),
+        (
+            PID_LID_SERVER_PROCESSING_ACTIONS_NAMED_ID,
+            PID_LID_SERVER_PROCESSING_ACTIONS,
+            PSETID_CALENDAR_ASSISTANT_GUID,
+        ),
         (0x8128, PID_LID_OWNER_CRITICAL_CHANGE, PSETID_MEETING_GUID),
         (0x81E4, PID_LID_IS_EXCEPTION, PSETID_MEETING_GUID),
         (
@@ -201,6 +211,10 @@ pub(super) fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
             ),
             (
                 PID_LID_APPOINTMENT_PROPOSED_END_WHOLE,
+                PSETID_APPOINTMENT_GUID,
+            ),
+            (
+                PID_LID_APPOINTMENT_PROPOSED_DURATION,
                 PSETID_APPOINTMENT_GUID,
             ),
             (

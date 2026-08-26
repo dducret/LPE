@@ -736,12 +736,12 @@ async fn mapi_over_http_microsoft_remove_all_recipients_stages_on_open_message_u
 
 #[tokio::test]
 async fn mapi_over_http_microsoft_modify_recipients_stages_on_open_message_until_save() {
-    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let sent_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
     let message_id = Uuid::parse_str("45454545-4545-4545-4545-454545454545").unwrap();
     let mut email = FakeStore::email(
         &message_id.to_string(),
-        &inbox_id.to_string(),
-        "inbox",
+        &sent_id.to_string(),
+        "sent",
         "Existing recipients",
     );
     email.to = vec![JmapEmailAddress {
@@ -752,9 +752,9 @@ async fn mapi_over_http_microsoft_modify_recipients_stages_on_open_message_until
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
-            &inbox_id.to_string(),
-            "inbox",
-            "Inbox",
+            &sent_id.to_string(),
+            "sent",
+            "Sent",
         )])),
         emails: emails.clone(),
         ..Default::default()
@@ -762,14 +762,17 @@ async fn mapi_over_http_microsoft_modify_recipients_stages_on_open_message_until
     let service = ExchangeService::new(store);
     let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
-    let replacement_row = mapi_recipient_row("Alice", "alice@example.test", 0x01);
+    let replacement_to_row = mapi_recipient_row("Alice", "alice@example.test", 0x01);
+    let replacement_cc_row = mapi_recipient_row("Carol", "carol@example.test", 0x02);
+    let replacement_bcc_row = mapi_recipient_row("Hidden", "hidden@example.test", 0x03);
+    let second_cc_row = mapi_recipient_row("Dave", "dave@example.test", 0x02);
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(7));
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(7));
     rops.push(0);
     append_mapi_wire_id(&mut rops, test_mapi_message_id(&message_id.to_string()));
     rops.extend_from_slice(&[
@@ -779,11 +782,17 @@ async fn mapi_over_http_microsoft_modify_recipients_stages_on_open_message_until
     rops.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
     rops.extend_from_slice(&0x3003_001Fu32.to_le_bytes());
     rops.extend_from_slice(&0x0C15_0003u32.to_le_bytes());
-    rops.extend_from_slice(&1u16.to_le_bytes());
-    rops.extend_from_slice(&0u32.to_le_bytes());
-    rops.push(0x01);
-    rops.extend_from_slice(&(replacement_row.len() as u16).to_le_bytes());
-    rops.extend_from_slice(&replacement_row);
+    rops.extend_from_slice(&3u16.to_le_bytes());
+    for (row_id, recipient_type, row) in [
+        (0u32, 0x01u8, replacement_to_row.as_slice()),
+        (1u32, 0x02u8, replacement_cc_row.as_slice()),
+        (2u32, 0x03u8, replacement_bcc_row.as_slice()),
+    ] {
+        rops.extend_from_slice(&row_id.to_le_bytes());
+        rops.push(recipient_type);
+        rops.extend_from_slice(&(row.len() as u16).to_le_bytes());
+        rops.extend_from_slice(row);
+    }
     rops.extend_from_slice(&[
         0x0F, 0x00, 0x02, // RopReadRecipients on same handle sees staged Alice.
     ]);
@@ -793,7 +802,7 @@ async fn mapi_over_http_microsoft_modify_recipients_stages_on_open_message_until
         0x03, 0x00, 0x01, 0x03, // RopOpenMessage on a separate handle.
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(7));
     rops.push(0);
     append_mapi_wire_id(&mut rops, test_mapi_message_id(&message_id.to_string()));
     rops.extend_from_slice(&[
@@ -801,9 +810,21 @@ async fn mapi_over_http_microsoft_modify_recipients_stages_on_open_message_until
     ]);
     rops.extend_from_slice(&0u32.to_le_bytes());
     rops.extend_from_slice(&0u16.to_le_bytes());
+    append_rop_save_changes_message_with_flags(&mut rops, 1, 2, 0x02);
     rops.extend_from_slice(&[
-        0x0C, 0x00, 0x02, 0x02, 0x00, // RopSaveChangesMessage on first message handle.
+        0x0F, 0x00, 0x02, // RopReadRecipients on the kept-open saved handle.
     ]);
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x10, 0x00, 0x02, 0x00, 0x00, // RopReloadCachedInformation on the same handle.
+    ]);
+    append_rop_modify_recipients(&mut rops, 2, &[(1, 0x02, second_cc_row.as_slice())]);
+    rops.extend_from_slice(&[
+        0x0F, 0x00, 0x02, // Partial second modification retains the saved To and Bcc rows.
+    ]);
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&0u16.to_le_bytes());
 
     let response = service
         .handle_mapi(
@@ -825,13 +846,80 @@ async fn mapi_over_http_microsoft_modify_recipients_stages_on_open_message_until
         &utf16z("alice@example.test")
     ));
     assert!(contains_bytes(&response_rops, &utf16z("bob@example.test")));
-    assert!(contains_bytes(&response_rops, &[0x0C, 0x02, 0, 0, 0, 0]));
+    let save_offset = response_rops
+        .windows(6)
+        .position(|window| window == [0x0C, 0x01, 0, 0, 0, 0])
+        .expect("KeepOpenReadWrite save must succeed");
+    let reload_offset = response_rops
+        .windows(6)
+        .position(|window| window == [0x10, 0x02, 0, 0, 0, 0])
+        .expect("saved handle ReloadCachedInformation must succeed");
+    let read_offset = response_rops[save_offset + 6..reload_offset]
+        .windows(6)
+        .rposition(|window| window == [0x0F, 0x02, 0, 0, 0, 0])
+        .map(|offset| offset + save_offset + 6)
+        .expect("saved handle ReadRecipients must succeed");
+    let second_modify_offset = response_rops[reload_offset + 6..]
+        .windows(6)
+        .position(|window| window == [0x0E, 0x02, 0, 0, 0, 0])
+        .map(|offset| offset + reload_offset + 6)
+        .expect("second ModifyRecipients must succeed");
+    let second_read_offset = response_rops
+        .windows(6)
+        .rposition(|window| window == [0x0F, 0x02, 0, 0, 0, 0])
+        .expect("second ReadRecipients must succeed");
+    assert!(
+        save_offset < read_offset
+            && read_offset < reload_offset
+            && reload_offset < second_modify_offset
+            && second_modify_offset < second_read_offset
+    );
+    for saved_projection in [
+        &response_rops[read_offset..reload_offset],
+        &response_rops[reload_offset..second_modify_offset],
+    ] {
+        for address in [
+            "alice@example.test",
+            "carol@example.test",
+            "hidden@example.test",
+        ] {
+            assert!(
+                contains_bytes(saved_projection, &utf16z(address)),
+                "saved recipient projection omitted {address}: {saved_projection:02x?}"
+            );
+        }
+        assert!(
+            !contains_bytes(saved_projection, &utf16z("bob@example.test")),
+            "saved recipient projection reused the stale pre-save snapshot"
+        );
+    }
+    let second_read = &response_rops[second_read_offset..];
+    for address in [
+        "alice@example.test",
+        "dave@example.test",
+        "hidden@example.test",
+    ] {
+        assert!(
+            contains_bytes(second_read, &utf16z(address)),
+            "second modification lost saved recipient {address}: {second_read:02x?}"
+        );
+    }
+    for stale_address in ["bob@example.test", "carol@example.test"] {
+        assert!(
+            !contains_bytes(second_read, &utf16z(stale_address)),
+            "second modification reused stale recipient {stale_address}"
+        );
+    }
     let canonical = emails.lock().unwrap();
     assert_eq!(canonical[0].to.len(), 1);
     assert_eq!(canonical[0].to[0].address, "alice@example.test");
     assert_eq!(canonical[0].to[0].display_name.as_deref(), Some("Alice"));
-    assert!(canonical[0].cc.is_empty());
-    assert!(canonical[0].bcc.is_empty());
+    assert_eq!(canonical[0].cc.len(), 1);
+    assert_eq!(canonical[0].cc[0].address, "carol@example.test");
+    assert_eq!(canonical[0].cc[0].display_name.as_deref(), Some("Carol"));
+    assert_eq!(canonical[0].bcc.len(), 1);
+    assert_eq!(canonical[0].bcc[0].address, "hidden@example.test");
+    assert_eq!(canonical[0].bcc[0].display_name.as_deref(), Some("Hidden"));
 }
 
 #[tokio::test]

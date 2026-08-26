@@ -3007,18 +3007,37 @@ meeting's start/end alongside its Global Object ID, rather than exposing zero
 time values that prevent Outlook from locating the organizer's Calendar item.
 It also projects the iCalendar location and appointment sequence carried by
 the response, plus the Meeting-set `PidLidWhere`,
-`PidLidAttendeeCriticalChange`, and `PidLidIsSilent` properties and its Outlook
-Meeting Response subject prefix.
+`PidLidAttendeeCriticalChange`, response-state properties, and its Outlook
+Meeting Response subject prefix. A `COUNTER` additionally carries the exact
+proposed duration in minutes and always exposes `PidLidIsSilent=FALSE`, even
+when its transport body is empty, as required by `[MS-OXOCAL]` section
+3.1.4.8.4.1.
 Response authorization is durable ingress evidence, separate from reparable
 parser metadata: LPE stores the exact selected-part SHA-256 only after the
 attendee, SMTP envelope sender, unambiguous RFC `From`, and optional organizer
 match the recipient account. Parser upgrades and dirty-classification repair
 may restore a response only when the current selected part retains that exact
 hash. When exactly one canonical Event is correlated, including an idempotent
-or superseded replay, LPE records the response as server processed and projects
-`PidTagProcessed=TRUE` per [MS-OXOCAL] section 3.1.4.8.5.1. An unresolved or
-ambiguous response remains unprocessed, so LPE does not claim that the Calendar
-item was found.
+or superseded replay, LPE records the response as server processed. Because
+`PidTagProcessed` is the client-completion marker defined by `[MS-OXOCAL]`
+section 2.2.5.7, an inbound response leaves it absent. Instead LPE projects
+`PidLidServerProcessed=TRUE` and the `cpsUpdatedCalItem` bit in
+`PidLidServerProcessingActions`, as described by sections 2.2.5.4, 2.2.5.5,
+and 3.1.4.8.5.1. The organizer Meeting's direct `OpenMessage`,
+`ReadRecipients`, and `ReloadCachedInformation` recipient rows and its
+cached-mode FastTransfer row carry the same persisted
+`PidTagRecipientProposed`, `PidTagRecipientProposedStartTime`, and
+`PidTagRecipientProposedEndTime` values required by section 3.1.4.8.5.3. The
+direct Event recipient-column array is invariant across open, reload, and
+later reads, including Events without attendees or proposals, so a concurrent
+response cannot change the row contract that Outlook already cached. Direct
+and cached attendee rows also carry the same EX/SMTP `PidTagSearchKey` used to
+match the response sender and, when a durable response time exists, its
+`PidTagRecipientTrackStatusTime`, following sections 2.2.4.10.3,
+3.1.4.8.5.2, 3.1.5.2, and 4.2.2.5. Missing optional proposal or response-time
+values remain flagged `ecNotFound`; LPE does not fabricate them. An
+unresolved or ambiguous response exposes neither client- nor server-processing
+markers, so LPE does not claim that the Calendar item was found.
 `RECURRENCE-ID` responses, and responses whose decoded Global Object ID carries
 a nonzero occurrence date, remain non-actionable until the canonical response
 path can correlate an occurrence or exception; they are rejected rather than
@@ -3415,6 +3434,17 @@ because both retain read/write access. `ForceSave` performs the explicit
 stale-version overwrite described above when a version conflict exists. The
 retained-handle, conflict, and forced-save server behavior follows [MS-OXCMSG]
 section 3.2.5.3 and is illustrated by sections 4.8.1 and 4.8.2.
+For an existing Message retained after Save, LPE refreshes the handle's
+canonical recipient snapshot before removing the staged replacement. A later
+`ReloadCachedInformation`, `ReadRecipients`, or second recipient edit in the
+same Execute buffer therefore observes the committed To/Cc/Bcc set rather
+than the stale request snapshot.
+
+`mapi/dispatch/message_save.rs` remains near the production-file size limit.
+Its property-save stage already lives in `message_property_save.rs`; before
+adding further save behavior, move the existing attachment/deletion
+finalization stage into a focused sibling module and leave `message_save.rs`
+as the SaveChanges orchestration path.
 `PidTagReplyRecipientEntries` is defined by
 [MS-OXPROPS] section 2.917 and [MS-OXOMSG] section 2.2.1.43 as property ID
 `0x004F`, `PtypBinary (0x0102)`, containing the [MS-OXCDATA] section 2.3.3

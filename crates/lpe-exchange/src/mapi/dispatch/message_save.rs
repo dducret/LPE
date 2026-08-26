@@ -589,8 +589,9 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 return;
             };
             if let Some(recipients) = staged_recipient_replacement.as_deref() {
+                let target = (folder_id, message_id, &mut saved_email);
                 if apply_staged_message_recipient_replacement(
-                    store, principal, folder_id, message_id, recipients, mailboxes, emails,
+                    store, principal, target, recipients, mailboxes, emails,
                 )
                 .await
                 .is_err()

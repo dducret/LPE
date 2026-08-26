@@ -215,6 +215,12 @@ pub trait ExchangeStore: AccountAuthStore {
         event_ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<MapiCalendarPropertyValue>>;
 
+    fn fetch_mapi_calendar_recipient_response_times<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        event_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<MapiCalendarRecipientResponseTime>>;
+
     #[allow(dead_code)]
     fn delete_mapi_custom_property_values<'a>(
         &'a self,

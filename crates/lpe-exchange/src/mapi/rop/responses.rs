@@ -8,11 +8,12 @@ use crate::mapi::identity::OUTBOX_FOLDER_ID;
 use crate::mapi::properties::*;
 use crate::mapi::session::MapiObject;
 use crate::mapi::tables::{
-    message_recipients, message_recipients_for_principal, serialize_recipient_row,
-    write_standard_property_row, MESSAGE_RECIPIENT_COLUMNS,
+    calendar_event_recipient_columns, calendar_event_recipients_for_principal, message_recipients,
+    message_recipients_for_principal, serialize_calendar_event_recipient_row,
+    serialize_recipient_row, write_standard_property_row, MESSAGE_RECIPIENT_COLUMNS,
 };
 use crate::mapi::wire::RopId;
-use crate::mapi_store::MapiMailStoreSnapshot;
+use crate::mapi_store::{MapiEvent, MapiMailStoreSnapshot};
 use lpe_storage::{JmapEmail, JmapMailbox};
 
 pub(in crate::mapi) fn rop_open_folder_response(request: &RopRequest, is_ghosted: bool) -> Vec<u8> {
@@ -60,14 +61,28 @@ pub(in crate::mapi) fn rop_open_message_response_with_recipients(
     email: &JmapEmail,
     principal: &AccountPrincipal,
 ) -> Vec<u8> {
+    debug_assert_eq!(subject, email.subject);
+    message_information_response_with_recipients(
+        0x03,
+        request.output_handle_index.unwrap_or(0),
+        email,
+        principal,
+    )
+}
+
+fn message_information_response_with_recipients(
+    rop_id: u8,
+    handle_index: u8,
+    email: &JmapEmail,
+    principal: &AccountPrincipal,
+) -> Vec<u8> {
     let recipients = message_recipients_for_principal(email, principal);
-    let mut response = vec![0x03, request.output_handle_index.unwrap_or(0)];
+    let mut response = vec![rop_id, handle_index];
     write_u32(&mut response, 0);
     // [MS-OXCMSG] section 2.2.3.1.2 requires this byte to advertise named
     // properties that RopGetPropertiesAll can enumerate on the opened message.
     response.push(u8::from(email_has_named_properties(email)));
     let subject_prefix = email_subject_prefix(email);
-    debug_assert_eq!(subject, email.subject);
     write_typed_string(&mut response, subject_prefix);
     write_typed_string(&mut response, email_normalized_subject(email));
     response.extend_from_slice(&(recipients.len().min(u16::MAX as usize) as u16).to_le_bytes());
@@ -80,6 +95,49 @@ pub(in crate::mapi) fn rop_open_message_response_with_recipients(
     response.push(recipients.len().min(u8::MAX as usize) as u8);
     for recipient in recipients.into_iter().take(u8::MAX as usize) {
         let row = serialize_recipient_row(&recipient, &MESSAGE_RECIPIENT_COLUMNS);
+        response.push(recipient.recipient_type);
+        response.extend_from_slice(&0x0FFFu16.to_le_bytes());
+        response.extend_from_slice(&0u16.to_le_bytes());
+        response.extend_from_slice(&(row.len().min(u16::MAX as usize) as u16).to_le_bytes());
+        response.extend_from_slice(&row[..row.len().min(u16::MAX as usize)]);
+    }
+    response
+}
+
+pub(in crate::mapi) fn rop_open_calendar_event_response_with_recipients(
+    request: &RopRequest,
+    event: &MapiEvent,
+    principal: &AccountPrincipal,
+) -> Vec<u8> {
+    calendar_event_information_response_with_recipients(
+        0x03,
+        request.output_handle_index.unwrap_or(0),
+        event,
+        principal,
+    )
+}
+
+fn calendar_event_information_response_with_recipients(
+    rop_id: u8,
+    handle_index: u8,
+    event: &MapiEvent,
+    principal: &AccountPrincipal,
+) -> Vec<u8> {
+    let recipients = calendar_event_recipients_for_principal(event, principal);
+    let columns = calendar_event_recipient_columns();
+    let mut response = vec![rop_id, handle_index];
+    write_u32(&mut response, 0);
+    response.push(1); // Calendar objects expose named Appointment and Meeting properties.
+    write_typed_string(&mut response, "");
+    write_typed_string(&mut response, &event.event.title);
+    response.extend_from_slice(&(recipients.len().min(u16::MAX as usize) as u16).to_le_bytes());
+    response.extend_from_slice(&(columns.len() as u16).to_le_bytes());
+    for property_tag in columns {
+        write_u32(&mut response, *property_tag);
+    }
+    response.push(recipients.len().min(u8::MAX as usize) as u8);
+    for recipient in recipients.into_iter().take(u8::MAX as usize) {
+        let row = serialize_calendar_event_recipient_row(&recipient, columns);
         response.push(recipient.recipient_type);
         response.extend_from_slice(&0x0FFFu16.to_le_bytes());
         response.extend_from_slice(&0u16.to_le_bytes());
@@ -721,13 +779,14 @@ pub(in crate::mapi) fn rop_reload_cached_information_response(
             message_id,
             saved_email,
             ..
-        }) => match message_for_id(*folder_id, *message_id, mailboxes, emails)
+        }) => match saved_email
+            .as_ref()
+            .map(|saved| &saved.email)
+            .or_else(|| message_for_id(*folder_id, *message_id, mailboxes, emails))
             .or_else(|| {
                 search_folder_message_for_id(snapshot, *folder_id, *message_id)
                     .map(|message| &message.email)
-            })
-            .or(saved_email.as_ref().map(|saved| &saved.email))
-        {
+            }) {
             Some(email) => (email.subject.clone(), message_recipients(email).len()),
             None => {
                 return rop_error_response(0x10, request.response_handle_index(), 0x8004_010F);
@@ -811,4 +870,56 @@ pub(in crate::mapi) fn rop_reload_cached_information_response(
     response.extend_from_slice(&0u16.to_le_bytes());
     response.push(0);
     response
+}
+
+pub(in crate::mapi) fn rop_reload_cached_information_response_for_principal(
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    principal: &AccountPrincipal,
+) -> Vec<u8> {
+    match object {
+        Some(MapiObject::Message {
+            folder_id,
+            message_id,
+            saved_email,
+            ..
+        }) => {
+            let Some(email) = saved_email
+                .as_ref()
+                .map(|saved| &saved.email)
+                .or_else(|| message_for_id(*folder_id, *message_id, mailboxes, emails))
+                .or_else(|| {
+                    search_folder_message_for_id(snapshot, *folder_id, *message_id)
+                        .map(|message| &message.email)
+                })
+            else {
+                return rop_error_response(0x10, request.response_handle_index(), 0x8004_010F);
+            };
+            message_information_response_with_recipients(
+                0x10,
+                request.response_handle_index(),
+                email,
+                principal,
+            )
+        }
+        Some(MapiObject::Event {
+            folder_id,
+            event_id,
+            ..
+        }) => {
+            let Some(event) = snapshot.event_for_id(*folder_id, *event_id) else {
+                return rop_error_response(0x10, request.response_handle_index(), 0x8004_010F);
+            };
+            calendar_event_information_response_with_recipients(
+                0x10,
+                request.response_handle_index(),
+                event,
+                principal,
+            )
+        }
+        _ => rop_reload_cached_information_response(request, object, mailboxes, emails, snapshot),
+    }
 }

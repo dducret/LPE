@@ -806,17 +806,20 @@ where
         "fetch durable MAPI event versions",
         loaded_event_ids.len(),
     );
-    let event_versions =
-        if snapshot_backed_contents || calendar_event_versions_required(plan, &identities) {
-            Some(
-                store
-                    .fetch_mapi_event_versions(account_id, &loaded_event_ids)
-                    .await
-                    .context("fetch durable MAPI Event versions")?,
-            )
-        } else {
-            None
-        };
+    // Root and IPM hierarchy plans load collaboration objects for folder
+    // counts, but they do not project Event rows or their version tuples.
+    let calendar_event_projection_required =
+        calendar_event_versions_required(plan, &identities, &calendar_collections);
+    let event_versions = if calendar_event_projection_required {
+        Some(
+            store
+                .fetch_mapi_event_versions(account_id, &loaded_event_ids)
+                .await
+                .context("fetch durable MAPI Event versions")?,
+        )
+    } else {
+        None
+    };
     log_mapi_store_load_step(
         account_id,
         plan,
@@ -827,6 +830,14 @@ where
         .fetch_mapi_calendar_property_values(account_id, &loaded_event_ids)
         .await
         .context("fetch durable MAPI Calendar property values")?;
+    let calendar_recipient_response_times = if calendar_event_projection_required {
+        store
+            .fetch_mapi_calendar_recipient_response_times(account_id, &loaded_event_ids)
+            .await
+            .context("fetch durable MAPI Calendar recipient response times")?
+    } else {
+        Vec::new()
+    };
     let mailbox_ids = mailboxes
         .iter()
         .map(|mailbox| mailbox.id)
@@ -898,7 +909,9 @@ where
             .with_event_versions(event_versions)
             .context("apply durable MAPI Event versions to selective snapshot")?;
     }
-    snapshot = snapshot.with_calendar_property_values(calendar_property_values);
+    snapshot = snapshot
+        .with_calendar_property_values(calendar_property_values)
+        .with_calendar_recipient_response_times(calendar_recipient_response_times);
     let snapshot = snapshot
         .with_notes_and_journal(notes, journal_entries)
         .with_search_folder_definitions(search_folder_definitions)
@@ -941,23 +954,31 @@ fn finalize_mapi_store_snapshot(
 fn calendar_event_versions_required(
     plan: &MapiAccessPlan,
     identities: &[MapiIdentityLookupRecord],
+    calendar_collections: &[lpe_storage::CollaborationCollection],
 ) -> bool {
-    plan.object_ids.iter().any(|object_id| {
+    let is_calendar_folder = |folder_id| {
         matches!(
-            *object_id,
+            folder_id,
             CALENDAR_FOLDER_ID | REMINDERS_FOLDER_ID | TRASH_FOLDER_ID
-        )
-    }) || plan.content_queries.iter().any(|query| {
-        matches!(
-            query.folder_id,
-            CALENDAR_FOLDER_ID | REMINDERS_FOLDER_ID | TRASH_FOLDER_ID
-        )
-    }) || identities.iter().any(|identity| {
-        matches!(
-            identity.object_kind,
-            MapiIdentityObjectKind::CalendarEvent | MapiIdentityObjectKind::DeletedCalendarEvent
-        )
-    })
+        ) || calendar_collections.iter().any(|collection| {
+            mapi_store::mapi_collaboration_folder_id_for_collection(
+                mapi_store::MapiCollaborationFolderKind::Calendar,
+                &collection.id,
+            ) == Some(folder_id)
+        })
+    };
+    plan.object_ids.iter().copied().any(&is_calendar_folder)
+        || plan
+            .content_queries
+            .iter()
+            .any(|query| is_calendar_folder(query.folder_id))
+        || identities.iter().any(|identity| {
+            matches!(
+                identity.object_kind,
+                MapiIdentityObjectKind::CalendarEvent
+                    | MapiIdentityObjectKind::DeletedCalendarEvent
+            )
+        })
 }
 
 fn requested_identity_has_backing_row(

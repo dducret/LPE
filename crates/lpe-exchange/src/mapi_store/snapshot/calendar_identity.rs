@@ -427,6 +427,7 @@ impl MapiMailStoreSnapshot {
                         version,
                         attachments: Vec::new(),
                         stored_properties: Vec::new(),
+                        recipient_response_times: HashMap::new(),
                     }
                 }))
             })
@@ -453,6 +454,7 @@ impl MapiMailStoreSnapshot {
                         version,
                         attachments: Vec::new(),
                         stored_properties: Vec::new(),
+                        recipient_response_times: HashMap::new(),
                     })
                 })
                 .collect::<Result<Vec<_>>>()?,

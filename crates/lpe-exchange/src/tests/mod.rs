@@ -74,15 +74,15 @@ use crate::{
         EwsTransferEntry, EwsTransferJob, EwsUnifiedMessagingCall, EwsUserConfiguration,
         EwsUserConfigurationKey, ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry,
         ExchangeAddressBookEntryDetails, ExchangeAddressBookEntryKind, ExchangeStore,
-        MapiCalendarPropertyValue, MapiCheckpointKind, MapiContactCreateOutcome,
-        MapiContentTableQuery, MapiContentTableQueryResult, MapiContentTableSortField,
-        MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiEventCreateOutcome,
-        MapiFolderHierarchyCommitOutcome, MapiFolderHierarchyProfileSnapshot,
-        MapiFolderProfilePropertyValue, MapiFolderVersion, MapiIdentityLookupRecord,
-        MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest, MapiLocalFreebusyCommit,
-        MapiLocalFreebusyProjection, MapiMailboxContentCommitTime, MapiNamedPropertyMapping,
-        MapiNotificationPoll, MapiSpecialFolderAlias, MapiSyncChangeSet, MapiSyncCheckpoint,
-        UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
+        MapiCalendarPropertyValue, MapiCalendarRecipientResponseTime, MapiCheckpointKind,
+        MapiContactCreateOutcome, MapiContentTableQuery, MapiContentTableQueryResult,
+        MapiContentTableSortField, MapiCustomPropertyObjectKind, MapiCustomPropertyValue,
+        MapiEventCreateOutcome, MapiFolderHierarchyCommitOutcome,
+        MapiFolderHierarchyProfileSnapshot, MapiFolderProfilePropertyValue, MapiFolderVersion,
+        MapiIdentityLookupRecord, MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest,
+        MapiLocalFreebusyCommit, MapiLocalFreebusyProjection, MapiMailboxContentCommitTime,
+        MapiNamedPropertyMapping, MapiNotificationPoll, MapiSpecialFolderAlias, MapiSyncChangeSet,
+        MapiSyncCheckpoint, UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
     },
 };
 
@@ -4289,6 +4289,8 @@ struct FakeStore {
     mapi_special_folder_aliases: Arc<Mutex<HashMap<u64, MapiSpecialFolderAlias>>>,
     mapi_special_folder_alias_change_numbers: Arc<Mutex<HashMap<u64, u64>>>,
     mapi_event_identity_versions: Arc<Mutex<HashMap<Uuid, MapiEventVersion>>>,
+    mapi_calendar_recipient_response_times: Arc<Mutex<Vec<MapiCalendarRecipientResponseTime>>>,
+    mapi_calendar_recipient_response_time_fetches: Arc<AtomicU64>,
     mapi_named_properties: Arc<Mutex<FakeMapiNamedProperties>>,
     mapi_custom_property_values: Arc<Mutex<HashMap<FakeMapiCustomPropertyKey, Vec<u8>>>>,
     mapi_folder_profile_property_values:
@@ -8344,6 +8346,25 @@ impl ExchangeStore for FakeStore {
                 .collect::<Vec<_>>();
             values.sort_by_key(|value| (value.event_id, value.property_tag, value.property_type));
             Ok(values)
+        })
+    }
+
+    fn fetch_mapi_calendar_recipient_response_times<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        event_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<MapiCalendarRecipientResponseTime>> {
+        Box::pin(async move {
+            self.mapi_calendar_recipient_response_time_fetches
+                .fetch_add(1, Ordering::Relaxed);
+            Ok(self
+                .mapi_calendar_recipient_response_times
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|value| event_ids.contains(&value.event_id))
+                .cloned()
+                .collect())
         })
     }
 

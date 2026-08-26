@@ -465,6 +465,9 @@ pub(in crate::mapi) const PSETID_TASK_GUID: [u8; 16] = [
 pub(in crate::mapi) const PSETID_APPOINTMENT_GUID: [u8; 16] = [
     0x02, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
 ];
+pub(in crate::mapi) const PSETID_CALENDAR_ASSISTANT_GUID: [u8; 16] = [
+    0x07, 0x0E, 0x00, 0x11, 0x1B, 0xB5, 0xD6, 0x40, 0xAF, 0x21, 0xCA, 0xA8, 0x5E, 0xDA, 0xB1, 0xD0,
+];
 pub(in crate::mapi) const PSETID_MEETING_GUID: [u8; 16] = [
     0x90, 0xDA, 0xD8, 0x6E, 0x0B, 0x45, 0x1B, 0x10, 0x98, 0xDA, 0x00, 0xAA, 0x00, 0x3F, 0x13, 0x05,
 ];
@@ -539,8 +542,13 @@ pub(in crate::mapi) const PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY: 
 // flag and proposed UTC endpoints on a Meeting Response object.
 pub(in crate::mapi) const PID_LID_APPOINTMENT_PROPOSED_START_WHOLE: u32 = 0x0000_8250;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_PROPOSED_END_WHOLE: u32 = 0x0000_8251;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_PROPOSED_DURATION: u32 = 0x0000_8256;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_COUNTER_PROPOSAL: u32 = 0x0000_8257;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_PROPOSAL_NUMBER: u32 = 0x0000_8259;
+pub(in crate::mapi) const PID_LID_SERVER_PROCESSED: u32 = 0x0000_85CC;
+pub(in crate::mapi) const PID_LID_SERVER_PROCESSING_ACTIONS: u32 = 0x0000_85CD;
+pub(in crate::mapi) const PID_LID_SERVER_PROCESSED_NAMED_ID: u16 = 0x81E7;
+pub(in crate::mapi) const PID_LID_SERVER_PROCESSING_ACTIONS_NAMED_ID: u16 = 0x81E8;
 pub(in crate::mapi) const PID_LID_OUTLOOK_APPOINTMENT_8F07: u32 = 0x0000_8F07;
 pub(in crate::mapi) const PID_LID_COMPANIES: u32 = 0x0000_8539;
 pub(in crate::mapi) const PID_LID_CONTACTS: u32 = 0x0000_853A;
@@ -667,8 +675,13 @@ pub(in crate::mapi) const PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY_T
     0x825F_0102;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_PROPOSED_START_WHOLE_TAG: u32 = 0x8250_0040;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_PROPOSED_END_WHOLE_TAG: u32 = 0x8251_0040;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_PROPOSED_DURATION_TAG: u32 = 0x8256_0003;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_COUNTER_PROPOSAL_TAG: u32 = 0x8257_000B;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_PROPOSAL_NUMBER_TAG: u32 = 0x8259_0003;
+pub(in crate::mapi) const PID_LID_SERVER_PROCESSED_TAG: u32 =
+    (PID_LID_SERVER_PROCESSED_NAMED_ID as u32) << 16 | 0x000B;
+pub(in crate::mapi) const PID_LID_SERVER_PROCESSING_ACTIONS_TAG: u32 =
+    (PID_LID_SERVER_PROCESSING_ACTIONS_NAMED_ID as u32) << 16 | 0x0003;
 pub(in crate::mapi) const PID_LID_REMINDER_TIME_TAG: u32 = 0x8502_0040;
 pub(in crate::mapi) const PID_LID_REMINDER_SET_TAG: u32 = 0x8503_000B;
 pub(in crate::mapi) const PID_LID_SIDE_EFFECTS_TAG: u32 = 0x8510_0003;

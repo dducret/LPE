@@ -311,6 +311,13 @@ pub(crate) struct MapiCalendarPropertyValue {
     pub(crate) property_value: Vec<u8>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiCalendarRecipientResponseTime {
+    pub(crate) event_id: Uuid,
+    pub(crate) attendee_email: String,
+    pub(crate) response_sent_at: String,
+}
+
 pub(crate) const MAPI_CALENDAR_STANDARD_PASSTHROUGH_PROPERTY_TAGS: &[u32] = &[
     0x0002_000B, // PidTagAlternateRecipientAllowed
     0x0017_0003, // PidTagImportance

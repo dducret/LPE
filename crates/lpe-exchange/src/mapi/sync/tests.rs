@@ -1095,7 +1095,7 @@ fn calendar_sync_object_projects_stable_identity_and_attachment_presence() {
             organizer_json:
                 r#"{"email":"alice@example.test","common_name":"Alice"}"#.to_string(),
             attendees: "Bob".to_string(),
-            attendees_json: r#"{"organizer":{"email":"alice@example.test","common_name":"Alice"},"attendees":[{"email":"bob@example.test","common_name":"Bob","role":"REQ-PARTICIPANT","partstat":"accepted","rsvp":false}]}"#.to_string(),
+            attendees_json: r#"{"organizer":{"email":"alice@example.test","common_name":"Alice"},"attendees":[{"email":"bob@example.test","common_name":"Bob","role":"REQ-PARTICIPANT","partstat":"accepted","rsvp":false,"proposed_start":"2026-05-25T15:00:00Z","proposed_end":"2026-05-25T15:30:00Z","counter_proposal":true}]}"#.to_string(),
             notes: String::new(),
             body_html: "<p>Agenda</p>".to_string(),
         },
@@ -1123,6 +1123,10 @@ fn calendar_sync_object_projects_stable_identity_and_attachment_presence() {
             size_octets: 12,
         }],
         stored_properties: Vec::new(),
+        recipient_response_times: HashMap::from([(
+            "bob@example.test".to_string(),
+            mapi_mailstore::filetime_from_rfc3339_utc("2026-05-25T13:50:00Z"),
+        )]),
     };
 
     let sync = calendar_sync_object(&event, None);
@@ -1157,9 +1161,15 @@ fn calendar_sync_object_projects_stable_identity_and_attachment_presence() {
     assert_eq!(organizer.recipient_type, 1);
     assert_eq!(organizer.recipient_flags, 3);
     assert_eq!(organizer.track_status, 0);
+    assert_eq!(organizer.track_status_time, None);
+    assert_eq!(organizer.proposed, None);
+    assert_eq!(organizer.proposed_start, None);
+    assert_eq!(organizer.proposed_end, None);
     assert_eq!(organizer.display_type_ex, 0x4000_0000);
     assert_eq!(organizer.address_type, "EX");
     assert_eq!(organizer.smtp_address, "alice@example.test");
+    assert!(organizer.search_key.starts_with(b"EX:"));
+    assert_eq!(organizer.search_key.last(), Some(&0));
     assert!(organizer.email_address.ends_with("/cn=alice-example-test"));
     assert_eq!(&organizer.entry_id[..4], &[0, 0, 0, 0]);
     assert_eq!(
@@ -1171,10 +1181,37 @@ fn calendar_sync_object_projects_stable_identity_and_attachment_presence() {
     assert_eq!(attendee.recipient_type, 1);
     assert_eq!(attendee.recipient_flags, 1);
     assert_eq!(attendee.track_status, 3);
+    assert_eq!(
+        attendee.track_status_time,
+        Some(mapi_mailstore::filetime_from_rfc3339_utc(
+            "2026-05-25T13:50:00Z"
+        ))
+    );
+    assert_eq!(attendee.proposed, Some(true));
+    assert_eq!(
+        attendee.proposed_start,
+        Some(mapi_mailstore::filetime_from_rfc3339_utc(
+            "2026-05-25T15:00:00Z"
+        ))
+    );
+    assert_eq!(
+        attendee.proposed_end,
+        Some(mapi_mailstore::filetime_from_rfc3339_utc(
+            "2026-05-25T15:30:00Z"
+        ))
+    );
+    let mut incomplete_proposal = event.clone();
+    incomplete_proposal.event.attendees_json = r#"{"organizer":{"email":"alice@example.test","common_name":"Alice"},"attendees":[{"email":"bob@example.test","common_name":"Bob","role":"REQ-PARTICIPANT","partstat":"accepted","rsvp":false,"proposed_start":"2026-05-25T15:00:00Z","counter_proposal":true}]}"#.to_string();
+    let incomplete_attendee =
+        &super::calendar::calendar_recipient_sync_facts(&incomplete_proposal)[1];
+    assert_eq!(incomplete_attendee.proposed, Some(false));
+    assert_eq!(incomplete_attendee.proposed_start, None);
+    assert_eq!(incomplete_attendee.proposed_end, None);
     assert_eq!(attendee.display_type_ex, 0);
     assert_eq!(attendee.address_type, "SMTP");
     assert_eq!(attendee.email_address, "bob@example.test");
     assert_eq!(attendee.smtp_address, "bob@example.test");
+    assert_eq!(attendee.search_key, b"SMTP:BOB@EXAMPLE.TEST\0");
     assert_eq!(&attendee.entry_id[..4], &[0, 0, 0, 0]);
     assert_eq!(
         &attendee.entry_id[4..20],

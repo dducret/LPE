@@ -836,9 +836,11 @@ async fn mapi_over_http_microsoft_oxcmapihttp_connect_execute_reconnect_disconne
 
 #[tokio::test]
 async fn mapi_over_http_store_load_failure_after_logon_is_unknown_failure_with_session_cookies() {
+    let response_time_fetches = Arc::new(AtomicU64::new(0));
     let store = FakeStore {
         session: Some(FakeStore::account()),
         fail_fetch_mapi_event_versions: true,
+        mapi_calendar_recipient_response_time_fetches: response_time_fetches.clone(),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -890,6 +892,11 @@ async fn mapi_over_http_store_load_failure_after_logon_is_unknown_failure_with_s
         .unwrap();
 
     assert_eq!(ipm_subtree.headers().get("x-responsecode").unwrap(), "0");
+    assert_eq!(
+        response_time_fetches.load(Ordering::Relaxed),
+        0,
+        "IPM hierarchy count-only loading must not fetch Calendar recipient response state"
+    );
 
     let mut open_calendar_rops = Vec::new();
     append_rop_open_folder(

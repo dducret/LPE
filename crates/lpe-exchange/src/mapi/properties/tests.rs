@@ -4248,6 +4248,7 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
         lowercase_unprefixed_uid.as_bytes()
     );
     let mut counter = email.clone();
+    counter.body_text.clear();
     counter.calendar_meeting_response = Some(lpe_storage::CalendarMeetingResponse {
         method: "COUNTER".to_string(),
         transport_attachment_id: None,
@@ -4300,11 +4301,16 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
         email_property_value(&counter, PID_TAG_HAS_NAMED_PROPERTIES),
         Some(MapiValue::Bool(true))
     );
+    assert_eq!(email_property_value(&counter, PID_TAG_PROCESSED), None);
+    assert!(!email_meeting_property_tags(&counter).contains(&PID_TAG_PROCESSED));
     assert_eq!(
-        email_property_value(&counter, PID_TAG_PROCESSED),
+        email_property_value(&counter, PID_LID_SERVER_PROCESSED_TAG),
         Some(MapiValue::Bool(true))
     );
-    assert!(email_meeting_property_tags(&counter).contains(&PID_TAG_PROCESSED));
+    assert_eq!(
+        email_property_value(&counter, PID_LID_SERVER_PROCESSING_ACTIONS_TAG),
+        Some(MapiValue::I32(0x0000_0080))
+    );
     let mut unresolved_counter = counter.clone();
     unresolved_counter
         .calendar_meeting_response
@@ -4313,7 +4319,15 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
         .server_processed = false;
     assert_eq!(
         email_property_value(&unresolved_counter, PID_TAG_PROCESSED),
-        Some(MapiValue::Bool(false))
+        None
+    );
+    assert_eq!(
+        email_property_value(&unresolved_counter, PID_LID_SERVER_PROCESSED_TAG),
+        None
+    );
+    assert_eq!(
+        email_property_value(&unresolved_counter, PID_LID_SERVER_PROCESSING_ACTIONS_TAG),
+        None
     );
     for (method, partstat, subject, prefix, normalized) in [
         (
@@ -4366,6 +4380,26 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
         )))
     );
     assert_eq!(
+        email_property_value(&counter, PID_LID_APPOINTMENT_PROPOSED_DURATION_TAG),
+        Some(MapiValue::I32(60))
+    );
+    assert_eq!(
+        email_property_value(&counter, PID_LID_APPOINTMENT_DURATION_TAG),
+        Some(MapiValue::I32(30))
+    );
+    assert_eq!(
+        email_property_value(&counter, PID_LID_APPOINTMENT_STATE_FLAGS_TAG),
+        Some(MapiValue::I32(3))
+    );
+    assert_eq!(
+        email_property_value(&counter, PID_LID_RESPONSE_STATUS_TAG),
+        Some(MapiValue::I32(0))
+    );
+    assert_eq!(
+        email_property_value(&counter, PID_LID_IS_EXCEPTION_TAG),
+        Some(MapiValue::Bool(false))
+    );
+    assert_eq!(
         email_property_value(&counter, PID_LID_APPOINTMENT_START_WHOLE_TAG),
         Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
             "2026-08-24T06:30:00Z"
@@ -4393,7 +4427,7 @@ fn email_message_class_and_content_class_follow_canonical_projection() {
     );
     assert_eq!(
         email_property_value(&counter, PID_LID_IS_SILENT_TAG),
-        Some(MapiValue::Bool(counter.body_text.trim().is_empty()))
+        Some(MapiValue::Bool(false))
     );
     assert_eq!(
         email_property_value(&counter, PID_LID_APPOINTMENT_SEQUENCE_TAG),

@@ -31,11 +31,16 @@ pub(crate) struct SpecialMessageRecipientSyncFact {
     pub(crate) recipient_type: u32,
     pub(crate) recipient_flags: u32,
     pub(crate) track_status: u32,
+    pub(crate) track_status_time: Option<u64>,
+    pub(crate) proposed: Option<bool>,
+    pub(crate) proposed_start: Option<u64>,
+    pub(crate) proposed_end: Option<u64>,
     pub(crate) display_type_ex: u32,
     pub(crate) address_type: String,
     pub(crate) email_address: String,
     pub(crate) smtp_address: String,
     pub(crate) display_name: String,
+    pub(crate) search_key: Vec<u8>,
     pub(crate) entry_id: Vec<u8>,
 }
 

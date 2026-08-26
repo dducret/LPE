@@ -23,6 +23,7 @@ pub(super) async fn append_message_state_dispatch_response<S>(
     match RopId::from_u8(request.rop_id) {
         Some(RopId::ReloadCachedInformation) => {
             append_reload_cached_information_response(
+                principal,
                 session,
                 handle_slots,
                 request,

@@ -139,6 +139,15 @@ pub(crate) struct MapiEvent {
     pub(crate) version: MapiEventVersion,
     pub(crate) attachments: Vec<MapiAttachment>,
     pub(crate) stored_properties: Vec<MapiCustomPropertyValue>,
+    pub(crate) recipient_response_times: HashMap<String, u64>,
+}
+
+impl MapiEvent {
+    pub(crate) fn recipient_response_time(&self, attendee_email: &str) -> Option<u64> {
+        self.recipient_response_times
+            .get(&lpe_storage::normalize_calendar_email(attendee_email))
+            .copied()
+    }
 }
 
 #[derive(Debug, Clone)]

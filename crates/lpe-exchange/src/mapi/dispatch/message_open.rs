@@ -180,7 +180,9 @@ pub(super) fn append_open_message_response(
             },
         );
         set_handle_slot(handle_slots, request.output_handle_index, handle);
-        responses.extend_from_slice(&rop_open_message_response(request, &event.event.title, 0));
+        responses.extend_from_slice(&rop_open_calendar_event_response_with_recipients(
+            request, event, principal,
+        ));
         output_handles.push(handle);
     } else if let Some(task) = snapshot.task_for_id(folder_id, message_id) {
         let handle = session.allocate_output_handle(

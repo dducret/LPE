@@ -1502,6 +1502,9 @@ fn microsoft_oxcfxics_calendar_content_sync_replaces_recipient_collection_with_o
         0x00, 0x00, 0x00, 0x00, 0xdc, 0xa7, 0x40, 0xc8, 0xc0, 0x42, 0x10, 0x1a, 0xb4, 0xb9, 0x08,
         0x00, 0x2b, 0x2f, 0xe1, 0x82, 0x01, 0x00, 0x00, 0x00,
     ];
+    let organizer_search_key = b"EX:TEST@L-P-E.CH\0".to_vec();
+    let attendee_search_key = b"EX:ALICE@EXAMPLE.TEST\0".to_vec();
+    let attendee_track_status_time = filetime_from_rfc3339_utc("2026-08-11T08:45:00Z");
     let appointment = SpecialMessageSyncFact {
         folder_id: crate::mapi::identity::CALENDAR_FOLDER_ID,
         item_id: crate::mapi::identity::mapi_store_id(321),
@@ -1519,6 +1522,10 @@ fn microsoft_oxcfxics_calendar_content_sync_replaces_recipient_collection_with_o
                 recipient_type: 1,
                 recipient_flags: 3,
                 track_status: 0,
+                track_status_time: None,
+                proposed: None,
+                proposed_start: None,
+                proposed_end: None,
                 display_type_ex: 0x4000_0000,
                 address_type: "EX".to_string(),
                 email_address:
@@ -1526,6 +1533,7 @@ fn microsoft_oxcfxics_calendar_content_sync_replaces_recipient_collection_with_o
                         .to_string(),
                 smtp_address: "test@l-p-e.ch".to_string(),
                 display_name: "test".to_string(),
+                search_key: organizer_search_key.clone(),
                 entry_id: entry_id.clone(),
             },
             SpecialMessageRecipientSyncFact {
@@ -1533,6 +1541,10 @@ fn microsoft_oxcfxics_calendar_content_sync_replaces_recipient_collection_with_o
                 recipient_type: 1,
                 recipient_flags: 1,
                 track_status: 3,
+                track_status_time: Some(attendee_track_status_time),
+                proposed: Some(true),
+                proposed_start: Some(filetime_from_rfc3339_utc("2026-08-11T09:30:00Z")),
+                proposed_end: Some(filetime_from_rfc3339_utc("2026-08-11T10:00:00Z")),
                 display_type_ex: 0x4000_0000,
                 address_type: "EX".to_string(),
                 email_address:
@@ -1540,6 +1552,7 @@ fn microsoft_oxcfxics_calendar_content_sync_replaces_recipient_collection_with_o
                         .to_string(),
                 smtp_address: "alice@example.test".to_string(),
                 display_name: "Alice".to_string(),
+                search_key: attendee_search_key.clone(),
                 entry_id: entry_id.clone(),
             },
         ],
@@ -1589,6 +1602,37 @@ fn microsoft_oxcfxics_calendar_content_sync_replaces_recipient_collection_with_o
             .count(),
         2
     );
+    let recipient_starts = buffer
+        .windows(START_RECIP.to_le_bytes().len())
+        .enumerate()
+        .filter_map(|(offset, window)| (window == START_RECIP.to_le_bytes()).then_some(offset))
+        .collect::<Vec<_>>();
+    let organizer_row = &buffer[recipient_starts[0]..recipient_starts[1]];
+    let attendee_row = &buffer[recipient_starts[1]..];
+    for proposal_tag in [
+        PID_TAG_RECIPIENT_PROPOSED,
+        PID_TAG_RECIPIENT_PROPOSED_START_TIME,
+        PID_TAG_RECIPIENT_PROPOSED_END_TIME,
+    ] {
+        assert_absent_property(organizer_row, proposal_tag);
+    }
+    assert_absent_property(organizer_row, PID_TAG_RECIPIENT_TRACK_STATUS_TIME);
+    assert_i64_property(
+        attendee_row,
+        PID_TAG_RECIPIENT_TRACK_STATUS_TIME,
+        attendee_track_status_time as i64,
+    );
+    assert_bool_property(attendee_row, PID_TAG_RECIPIENT_PROPOSED, true);
+    assert_i64_property(
+        attendee_row,
+        PID_TAG_RECIPIENT_PROPOSED_START_TIME,
+        filetime_from_rfc3339_utc("2026-08-11T09:30:00Z") as i64,
+    );
+    assert_i64_property(
+        attendee_row,
+        PID_TAG_RECIPIENT_PROPOSED_END_TIME,
+        filetime_from_rfc3339_utc("2026-08-11T10:00:00Z") as i64,
+    );
     let message_start = buffer
         .windows(4)
         .position(|window| window == INCR_SYNC_MESSAGE.to_le_bytes())
@@ -1629,9 +1673,14 @@ fn microsoft_oxcfxics_calendar_content_sync_replaces_recipient_collection_with_o
             PID_TAG_RECIPIENT_FLAGS,
             PID_TAG_RECIPIENT_ORDER,
             PID_TAG_RECIPIENT_TRACK_STATUS,
+            PID_TAG_RECIPIENT_TRACK_STATUS_TIME,
+            PID_TAG_RECIPIENT_PROPOSED,
+            PID_TAG_RECIPIENT_PROPOSED_START_TIME,
+            PID_TAG_RECIPIENT_PROPOSED_END_TIME,
             PID_TAG_ADDRESS_TYPE_W,
             PID_TAG_EMAIL_ADDRESS_W,
             PID_TAG_SMTP_ADDRESS_W,
+            PID_TAG_SEARCH_KEY,
             PID_TAG_ENTRY_ID,
             PID_TAG_RECIPIENT_ENTRY_ID,
             END_TO_RECIP,
@@ -1665,6 +1714,8 @@ fn microsoft_oxcfxics_calendar_content_sync_replaces_recipient_collection_with_o
         &utf16z("/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=test-l-p-e-ch"),
     );
     assert_variable_property_present(&buffer, PID_TAG_SMTP_ADDRESS_W, &utf16z("test@l-p-e.ch"));
+    assert_variable_property_present(&buffer, PID_TAG_SEARCH_KEY, &organizer_search_key);
+    assert_variable_property_present(&buffer, PID_TAG_SEARCH_KEY, &attendee_search_key);
     assert_variable_property_present(&buffer, PID_TAG_ENTRY_ID, &entry_id);
     assert_variable_property_present(&buffer, PID_TAG_RECIPIENT_ENTRY_ID, &entry_id);
 }
@@ -2270,11 +2321,15 @@ fn meeting_response_subject_relationship_matches_copy_to_and_contents_sync() {
 #[test]
 fn meeting_response_fast_transfer_projects_counter_proposal_named_properties() {
     const PID_TAG_HAS_NAMED_PROPERTIES: u32 = 0x664A_000B;
+    const PID_TAG_PROCESSED: u32 = 0x7D01_000B;
     const PID_TAG_SUBJECT_PREFIX_W: u32 = 0x003D_001F;
     const PID_LID_APPOINTMENT_COUNTER_PROPOSAL_TAG: u32 = 0x8257_000B;
     const PID_LID_APPOINTMENT_PROPOSED_START_WHOLE_TAG: u32 = 0x8250_0040;
     const PID_LID_APPOINTMENT_PROPOSED_END_WHOLE_TAG: u32 = 0x8251_0040;
+    const PID_LID_APPOINTMENT_PROPOSED_DURATION_TAG: u32 = 0x8256_0003;
     const PID_LID_IS_SILENT_TAG: u32 = 0x81E6_000B;
+    const PID_LID_SERVER_PROCESSED_TAG: u32 = 0x81E7_000B;
+    const PID_LID_SERVER_PROCESSING_ACTIONS_TAG: u32 = 0x81E8_0003;
     const PSETID_APPOINTMENT_GUID: [u8; 16] = [
         0x02, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x46,
@@ -2283,6 +2338,10 @@ fn meeting_response_fast_transfer_projects_counter_proposal_named_properties() {
         0x90, 0xDA, 0xD8, 0x6E, 0x0B, 0x45, 0x1B, 0x10, 0x98, 0xDA, 0x00, 0xAA, 0x00, 0x3F, 0x13,
         0x05,
     ];
+    const PSETID_CALENDAR_ASSISTANT_GUID: [u8; 16] = [
+        0x07, 0x0E, 0x00, 0x11, 0x1B, 0xB5, 0xD6, 0x40, 0xAF, 0x21, 0xCA, 0xA8, 0x5E, 0xDA, 0xB1,
+        0xD0,
+    ];
 
     let mut email = test_email();
     crate::mapi::identity::remember_mapi_identity(
@@ -2290,10 +2349,11 @@ fn meeting_response_fast_transfer_projects_counter_proposal_named_properties() {
         crate::mapi::identity::mapi_store_id(51),
     );
     email.subject = "New Time Proposed: Probe 10".to_string();
+    email.body_text.clear();
     email.calendar_meeting_response = Some(lpe_storage::CalendarMeetingResponse {
         method: "COUNTER".to_string(),
         transport_attachment_id: None,
-        server_processed: false,
+        server_processed: true,
         organizer: None,
         attendee_email: "denis.ducret@sdic.ch".to_string(),
         attendee_name: "Denis Ducret".to_string(),
@@ -2334,6 +2394,7 @@ fn meeting_response_fast_transfer_projects_counter_proposal_named_properties() {
 
     for buffer in [&copy_to, &contents_sync] {
         assert_bool_property(buffer, PID_TAG_HAS_NAMED_PROPERTIES, true);
+        assert_absent_property(buffer, PID_TAG_PROCESSED);
         assert_variable_property_present(
             buffer,
             PID_TAG_MESSAGE_CLASS_W,
@@ -2368,10 +2429,31 @@ fn meeting_response_fast_transfer_projects_counter_proposal_named_properties() {
         );
         assert_named_lid_property(
             buffer,
+            PID_LID_APPOINTMENT_PROPOSED_DURATION_TAG,
+            PSETID_APPOINTMENT_GUID,
+            0x8256,
+            &30i32.to_le_bytes(),
+        );
+        assert_named_lid_property(
+            buffer,
             PID_LID_IS_SILENT_TAG,
             PSETID_MEETING_GUID,
             0x0004,
             &[0, 0],
+        );
+        assert_named_lid_property(
+            buffer,
+            PID_LID_SERVER_PROCESSED_TAG,
+            PSETID_CALENDAR_ASSISTANT_GUID,
+            0x85CC,
+            &[1, 0],
+        );
+        assert_named_lid_property(
+            buffer,
+            PID_LID_SERVER_PROCESSING_ACTIONS_TAG,
+            PSETID_CALENDAR_ASSISTANT_GUID,
+            0x85CD,
+            &0x0000_0080i32.to_le_bytes(),
         );
     }
 }

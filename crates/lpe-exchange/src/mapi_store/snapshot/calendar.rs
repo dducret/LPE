@@ -36,6 +36,38 @@ pub(super) fn fallback_event_version(event: &AccessibleEvent, event_id: u64) -> 
 }
 
 impl MapiMailStoreSnapshot {
+    pub(crate) fn with_calendar_recipient_response_times(
+        mut self,
+        values: Vec<crate::store::MapiCalendarRecipientResponseTime>,
+    ) -> Self {
+        let mut by_event = HashMap::<Uuid, HashMap<String, u64>>::new();
+        let mut ambiguous = HashSet::<(Uuid, String)>::new();
+        for value in values {
+            let attendee_email = lpe_storage::normalize_calendar_email(&value.attendee_email);
+            let response_time = mapi_mailstore::filetime_from_rfc3339_utc(&value.response_sent_at);
+            if attendee_email.is_empty() || response_time == 0 {
+                continue;
+            }
+            let ambiguity_key = (value.event_id, attendee_email.clone());
+            if ambiguous.contains(&ambiguity_key) {
+                continue;
+            }
+            let event_values = by_event.entry(value.event_id).or_default();
+            if event_values
+                .insert(attendee_email.clone(), response_time)
+                .is_some()
+            {
+                event_values.remove(&attendee_email);
+                ambiguous.insert(ambiguity_key);
+            }
+        }
+        for event in &mut self.events {
+            event.recipient_response_times =
+                by_event.remove(&event.canonical_id).unwrap_or_default();
+        }
+        self
+    }
+
     pub(crate) fn with_calendar_property_values(
         mut self,
         values: Vec<crate::store::MapiCalendarPropertyValue>,

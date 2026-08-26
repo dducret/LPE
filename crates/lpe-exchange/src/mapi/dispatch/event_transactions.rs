@@ -1071,6 +1071,7 @@ mod calendar_search_key_tests {
                 property_type: MapiPropertyType::Boolean.as_u16(),
                 property_value: vec![1],
             }],
+            recipient_response_times: HashMap::new(),
         };
 
         assert!(validate_effective_calendar_passthrough_invariants(
@@ -1368,6 +1369,7 @@ mod calendar_search_key_tests {
             },
             attachments: Vec::new(),
             stored_properties: Vec::new(),
+            recipient_response_times: HashMap::new(),
         };
         let mut transaction = MapiEventTransaction::new(0x01, event.version.canonical_modseq);
         transaction

@@ -1,55 +1,87 @@
 use super::*;
 use crate::mapi::wire::MapiPropertyType;
-use lpe_storage::{parse_calendar_participants_metadata, AccessibleEvent};
+use lpe_storage::parse_calendar_participants_metadata;
 
 fn calendar_recipient_sync_fact(
-    event: &AccessibleEvent,
+    event: &crate::mapi_store::MapiEvent,
     recipient: PendingRecipient,
     track_status: u32,
+    track_status_time: Option<u64>,
+    proposed: Option<bool>,
+    proposed_start: Option<u64>,
+    proposed_end: Option<u64>,
 ) -> mapi_mailstore::SpecialMessageRecipientSyncFact {
     let display_name = recipient
         .display_name
         .clone()
         .unwrap_or_else(|| recipient.address.clone());
-    let identity = calendar_participant_identity(event, &display_name, &recipient.address);
+    let identity = calendar_participant_identity(&event.event, &display_name, &recipient.address);
     mapi_mailstore::SpecialMessageRecipientSyncFact {
         row_id: recipient.row_id,
         recipient_type: u32::from(recipient.recipient_type),
         recipient_flags: recipient.recipient_flags,
         track_status,
+        track_status_time,
+        proposed,
+        proposed_start,
+        proposed_end,
         display_type_ex: identity.display_type_ex,
         address_type: identity.address_type,
         email_address: identity.email_address,
         smtp_address: recipient.address,
         display_name,
+        search_key: identity.search_key,
         entry_id: identity.entry_id,
     }
 }
 
 pub(super) fn calendar_recipient_sync_facts(
-    event: &AccessibleEvent,
+    event: &crate::mapi_store::MapiEvent,
 ) -> Vec<mapi_mailstore::SpecialMessageRecipientSyncFact> {
-    let participant_metadata = parse_calendar_participants_metadata(&event.attendees_json);
-    calendar_pending_recipients(event)
+    let participant_metadata = parse_calendar_participants_metadata(&event.event.attendees_json);
+    calendar_pending_recipients(&event.event)
         .into_iter()
         .filter(|recipient| !recipient.address.trim().is_empty())
         .map(|recipient| {
-            let track_status = if recipient.is_calendar_organizer() {
-                0
+            let attendee = if recipient.is_calendar_organizer() {
+                None
             } else {
                 recipient
                     .row_id
                     .checked_sub(1)
                     .and_then(|index| participant_metadata.attendees.get(index as usize))
-                    .map(|attendee| match attendee.partstat.as_str() {
-                        "tentative" => 2,
-                        "accepted" => 3,
-                        "declined" => 4,
-                        _ => 0,
-                    })
-                    .unwrap_or(0)
             };
-            calendar_recipient_sync_fact(event, recipient, track_status)
+            let track_status = attendee
+                .map(|attendee| match attendee.partstat.as_str() {
+                    "tentative" => 2,
+                    "accepted" => 3,
+                    "declined" => 4,
+                    _ => 0,
+                })
+                .unwrap_or(0);
+            let proposed_interval = attendee
+                .filter(|attendee| attendee.counter_proposal)
+                .and_then(|attendee| {
+                    let start = mapi_mailstore::filetime_from_rfc3339_utc(
+                        attendee.proposed_start.as_deref()?,
+                    );
+                    let end = mapi_mailstore::filetime_from_rfc3339_utc(
+                        attendee.proposed_end.as_deref()?,
+                    );
+                    (start != 0 && end > start).then_some((start, end))
+                });
+            let track_status_time = attendee
+                .filter(|_| track_status != 0)
+                .and_then(|attendee| event.recipient_response_time(&attendee.email));
+            calendar_recipient_sync_fact(
+                event,
+                recipient,
+                track_status,
+                track_status_time,
+                attendee.map(|_| proposed_interval.is_some()),
+                proposed_interval.map(|(start, _)| start),
+                proposed_interval.map(|(_, end)| end),
+            )
         })
         .collect()
 }
@@ -140,7 +172,7 @@ pub(super) fn calendar_sync_object(
     reminder: Option<&lpe_storage::ClientReminder>,
 ) -> mapi_mailstore::SpecialMessageSyncFact {
     let mut properties = stored_calendar_sync_properties(event);
-    let recipients = calendar_recipient_sync_facts(&event.event);
+    let recipients = calendar_recipient_sync_facts(event);
     for property_tag in [
         PID_TAG_CREATION_TIME,
         PID_TAG_START_DATE,
