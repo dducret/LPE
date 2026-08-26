@@ -10058,28 +10058,7 @@ impl ExchangeStore for FakeStore {
         input: MapiEventCommitInput,
     ) -> StoreFuture<'a, MapiEventCommitOutcome> {
         let imported_identity = input.imported_identity.clone();
-        if let Some(identity) = imported_identity.as_ref() {
-            let expected_source_key = self
-                .mapi_identity_source_keys
-                .lock()
-                .unwrap()
-                .get(&input.event_id)
-                .cloned()
-                .or_else(|| {
-                    self.mapi_identities
-                        .lock()
-                        .unwrap()
-                        .get(&input.event_id)
-                        .copied()
-                        .map(crate::mapi::identity::source_key_for_object_id)
-                });
-            if expected_source_key.as_deref() != Some(identity.source_key.as_slice()) {
-                return Box::pin(async {
-                    Err(anyhow::anyhow!(
-                        "imported Event update SourceKey does not match its current identity"
-                    ))
-                });
-            }
+        let imported_mapi_object_id = if let Some(identity) = imported_identity.as_ref() {
             if !test_mapi_pcl_includes_change_key(
                 &identity.predecessor_change_list,
                 &identity.change_key,
@@ -10090,7 +10069,43 @@ impl ExchangeStore for FakeStore {
                     ))
                 });
             }
+            match crate::mapi::identity::object_id_from_source_key(&identity.source_key) {
+                Some(object_id) => Some(object_id),
+                None => {
+                    return Box::pin(async {
+                        Err(anyhow::anyhow!("invalid imported Event update SourceKey"))
+                    });
+                }
+            }
+        } else {
+            None
+        };
+        if imported_mapi_object_id.is_some_and(|object_id| {
+            self.retired_mapi_identities
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|retired| retired.object_id == object_id)
+        }) {
+            return Box::pin(async {
+                Err(anyhow::anyhow!(
+                    "imported Event update SourceKey was already retired"
+                ))
+            });
         }
+        let current_mapi_object_id = self
+            .mapi_identities
+            .lock()
+            .unwrap()
+            .get(&input.event_id)
+            .copied()
+            .or_else(|| crate::mapi::identity::mapped_mapi_object_id(&input.event_id))
+            .or(imported_mapi_object_id)
+            .unwrap_or_else(|| {
+                crate::mapi::identity::mapi_store_id(
+                    crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER,
+                )
+            });
         let mut events = self.events.lock().unwrap();
         let mut deleted_events = self.deleted_calendar_events.lock().unwrap();
         let Some(event) = events
@@ -10299,6 +10314,38 @@ impl ExchangeStore for FakeStore {
             .lock()
             .unwrap()
             .insert(input.event_id, version.clone());
+        let mapi_object_id = imported_mapi_object_id.unwrap_or(current_mapi_object_id);
+        if mapi_object_id != current_mapi_object_id {
+            let old_source_key = self
+                .mapi_identity_source_keys
+                .lock()
+                .unwrap()
+                .get(&input.event_id)
+                .cloned()
+                .unwrap_or_else(|| {
+                    crate::mapi::identity::source_key_for_object_id(current_mapi_object_id)
+                });
+            self.retired_mapi_identities
+                .lock()
+                .unwrap()
+                .push(MapiIdentityLookupRecord {
+                    object_kind: MapiIdentityObjectKind::CalendarEvent,
+                    canonical_id: input.event_id,
+                    object_id: current_mapi_object_id,
+                    source_key: old_source_key,
+                });
+        }
+        self.mapi_identities
+            .lock()
+            .unwrap()
+            .insert(input.event_id, mapi_object_id);
+        self.mapi_identity_source_keys.lock().unwrap().insert(
+            input.event_id,
+            imported_identity
+                .as_ref()
+                .map(|identity| identity.source_key.clone())
+                .unwrap_or_else(|| crate::mapi::identity::source_key_for_object_id(mapi_object_id)),
+        );
         let reminder = self
             .reminders
             .lock()
@@ -10315,6 +10362,7 @@ impl ExchangeStore for FakeStore {
             .unwrap_or_default();
         Box::pin(async move {
             Ok(MapiEventCommitOutcome::Saved(MapiEventCommitSuccess {
+                mapi_object_id,
                 version,
                 reminder,
                 attachments,

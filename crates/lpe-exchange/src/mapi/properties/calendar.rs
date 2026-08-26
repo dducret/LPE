@@ -481,6 +481,179 @@ mod tests {
         )]))
         .is_err());
     }
+
+    #[test]
+    fn calendar_response_status_distinguishes_organizer_attendee_and_appointment() {
+        let mut event = default_event_for_mapping(Uuid::nil(), "calendar");
+        event.owner_email = "owner@example.test".to_string();
+        event.owner_display_name = "Owner".to_string();
+        event.attendees = "Owner".to_string();
+        event.organizer_json =
+            r#"{"email":"organizer@example.test","common_name":"Organizer","is_meeting":true}"#
+                .to_string();
+
+        for (partstat, expected) in [
+            ("tentative", 2),
+            ("accepted", 3),
+            ("declined", 4),
+            ("needs-action", 5),
+        ] {
+            event.attendees_json =
+                serialize_calendar_participants_metadata(&CalendarParticipantsMetadata {
+                    organizer: Some(CalendarOrganizerMetadata {
+                        email: "organizer@example.test".to_string(),
+                        common_name: "Organizer".to_string(),
+                    }),
+                    attendees: vec![CalendarParticipantMetadata {
+                        email: "owner@example.test".to_string(),
+                        common_name: "Owner".to_string(),
+                        role: "REQ-PARTICIPANT".to_string(),
+                        partstat: partstat.to_string(),
+                        rsvp: false,
+                        proposed_start: None,
+                        proposed_end: None,
+                        counter_proposal: false,
+                    }],
+                });
+            assert_eq!(
+                event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_RESPONSE_STATUS_TAG,),
+                Some(MapiValue::I32(expected)),
+                "attendee participation {partstat}"
+            );
+        }
+
+        event.organizer_json =
+            r#"{"email":"owner@example.test","common_name":"Owner","is_meeting":true}"#.to_string();
+        event.attendees_json =
+            serialize_calendar_participants_metadata(&CalendarParticipantsMetadata {
+                organizer: Some(CalendarOrganizerMetadata {
+                    email: "owner@example.test".to_string(),
+                    common_name: "Owner".to_string(),
+                }),
+                attendees: Vec::new(),
+            });
+        assert_eq!(
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_RESPONSE_STATUS_TAG,),
+            Some(MapiValue::I32(1)),
+        );
+
+        event.attendees.clear();
+        event.attendees_json =
+            serialize_calendar_participants_metadata(&CalendarParticipantsMetadata::default());
+        event.organizer_json = "{}".to_string();
+        assert_eq!(
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_RESPONSE_STATUS_TAG,),
+            Some(MapiValue::I32(0)),
+        );
+    }
+
+    #[test]
+    fn imported_response_status_updates_only_the_mailbox_owner_attendee() {
+        let mut existing = default_event_for_mapping(Uuid::nil(), "calendar");
+        existing.owner_email = "owner@example.test".to_string();
+        existing.owner_display_name = "Owner".to_string();
+        existing.organizer_json =
+            r#"{"email":"organizer@example.test","common_name":"Organizer","is_meeting":true}"#
+                .to_string();
+        existing.attendees = "Owner, Other".to_string();
+        existing.attendees_json =
+            serialize_calendar_participants_metadata(&CalendarParticipantsMetadata {
+                organizer: Some(CalendarOrganizerMetadata {
+                    email: "organizer@example.test".to_string(),
+                    common_name: "Organizer".to_string(),
+                }),
+                attendees: vec![
+                    CalendarParticipantMetadata {
+                        email: "owner@example.test".to_string(),
+                        common_name: "Owner".to_string(),
+                        role: "REQ-PARTICIPANT".to_string(),
+                        partstat: "needs-action".to_string(),
+                        rsvp: true,
+                        proposed_start: None,
+                        proposed_end: None,
+                        counter_proposal: false,
+                    },
+                    CalendarParticipantMetadata {
+                        email: "other@example.test".to_string(),
+                        common_name: "Other".to_string(),
+                        role: "REQ-PARTICIPANT".to_string(),
+                        partstat: "declined".to_string(),
+                        rsvp: false,
+                        proposed_start: Some("2026-08-25T10:00:00Z".to_string()),
+                        proposed_end: Some("2026-08-25T11:00:00Z".to_string()),
+                        counter_proposal: true,
+                    },
+                ],
+            });
+        let properties = HashMap::from([
+            (PID_LID_RESPONSE_STATUS_TAG, MapiValue::I32(3)),
+            (
+                PID_LID_TO_ATTENDEES_STRING_W_TAG,
+                MapiValue::String("Owner; Other".to_string()),
+            ),
+        ]);
+
+        let mut input =
+            event_input_from_mapi(Uuid::nil(), Some(existing.id), &existing, &properties).unwrap();
+        apply_calendar_pending_recipients(
+            &mut input,
+            &existing,
+            &properties,
+            &[
+                PendingRecipient {
+                    row_id: 0,
+                    recipient_type: 1,
+                    recipient_flags: 0x0000_0003,
+                    address: "organizer@example.test".to_string(),
+                    display_name: Some("Organizer".to_string()),
+                },
+                PendingRecipient {
+                    row_id: 1,
+                    recipient_type: 1,
+                    recipient_flags: 0x0000_0001,
+                    address: "owner@example.test".to_string(),
+                    display_name: Some("Owner".to_string()),
+                },
+                PendingRecipient {
+                    row_id: 2,
+                    recipient_type: 1,
+                    recipient_flags: 0x0000_0001,
+                    address: "other@example.test".to_string(),
+                    display_name: Some("Other".to_string()),
+                },
+            ],
+        );
+
+        let participants = parse_calendar_participants_metadata(&input.attendees_json);
+        let owner = participants
+            .attendees
+            .iter()
+            .find(|attendee| attendee.email == "owner@example.test")
+            .unwrap();
+        let other = participants
+            .attendees
+            .iter()
+            .find(|attendee| attendee.email == "other@example.test")
+            .unwrap();
+        assert_eq!(owner.partstat, "accepted");
+        assert!(owner.rsvp);
+        assert_eq!(other.partstat, "declined");
+        assert_eq!(
+            other.proposed_start.as_deref(),
+            Some("2026-08-25T10:00:00Z")
+        );
+        assert_eq!(other.proposed_end.as_deref(), Some("2026-08-25T11:00:00Z"));
+        assert!(other.counter_proposal);
+
+        let invalid = event_input_from_mapi(
+            Uuid::nil(),
+            Some(existing.id),
+            &existing,
+            &HashMap::from([(PID_LID_RESPONSE_STATUS_TAG, MapiValue::I32(6))]),
+        )
+        .unwrap_err();
+        assert!(invalid.to_string().contains("response status 6"));
+    }
 }
 
 pub(in crate::mapi) fn default_event_input(
@@ -520,6 +693,7 @@ pub(in crate::mapi) fn event_input_from_mapi(
     properties: &HashMap<u32, MapiValue>,
 ) -> Result<UpsertClientEventInput> {
     reject_unsupported_mapi_event_properties(properties)?;
+    let imported_uid = calendar_event_uid_from_mapi(properties)?;
     let participants = event_participants_from_mapi(existing, properties);
     let recurrence = properties
         .get(&PID_LID_APPOINTMENT_RECUR_TAG)
@@ -562,15 +736,7 @@ pub(in crate::mapi) fn event_input_from_mapi(
     Ok(UpsertClientEventInput {
         id,
         account_id,
-        uid: properties
-            .get(&PID_LID_GLOBAL_OBJECT_ID_TAG)
-            .or_else(|| properties.get(&PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG))
-            .and_then(|value| match value {
-                MapiValue::Binary(value) => lpe_storage::calendar_uid_from_global_object_id(value)
-                    .map(|uid| lpe_storage::normalize_calendar_meeting_uid(&uid)),
-                _ => None,
-            })
-            .unwrap_or_else(|| existing.uid.clone()),
+        uid: imported_uid.unwrap_or_else(|| existing.uid.clone()),
         date,
         time,
         time_zone,
@@ -615,6 +781,86 @@ pub(in crate::mapi) fn event_input_from_mapi(
         notes: clearable_pending_text_property(properties, &[PID_TAG_BODY_W], &existing.notes),
         body_html: clearable_pending_html_property(properties, &existing.body_html),
     })
+}
+
+pub(in crate::mapi) fn calendar_event_uid_from_mapi(
+    properties: &HashMap<u32, MapiValue>,
+) -> Result<Option<String>> {
+    calendar_event_uid_from_mapi_with_exception_policy(properties, true)
+}
+
+pub(in crate::mapi) fn validate_calendar_event_identity_for_staging(
+    properties: &HashMap<u32, MapiValue>,
+) -> Result<()> {
+    calendar_event_uid_from_mapi_with_exception_policy(properties, false).map(|_| ())
+}
+
+pub(in crate::mapi) fn validate_calendar_event_input_for_staging(
+    account_id: Uuid,
+    collection_id: &str,
+    properties: &HashMap<u32, MapiValue>,
+) -> Result<()> {
+    // Retain a structurally valid exception identity on the handle so Save can
+    // reject the whole unsupported object instead of creating it without GOID.
+    validate_calendar_event_identity_for_staging(properties)?;
+    let mut properties = properties.clone();
+    for tag in [
+        PID_LID_GLOBAL_OBJECT_ID_TAG,
+        PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG,
+        PID_LID_IS_EXCEPTION_TAG,
+    ] {
+        properties.remove(&tag);
+    }
+    event_input_from_mapi(
+        account_id,
+        None,
+        &default_event_for_mapping(account_id, collection_id),
+        &properties,
+    )
+    .map(|_| ())
+}
+
+fn calendar_event_uid_from_mapi_with_exception_policy(
+    properties: &HashMap<u32, MapiValue>,
+    reject_top_level_exception: bool,
+) -> Result<Option<String>> {
+    let global = match properties.get(&PID_LID_GLOBAL_OBJECT_ID_TAG) {
+        Some(MapiValue::Binary(value)) => Some(value.as_slice()),
+        Some(_) => bail!("Calendar GlobalObjectId must be binary"),
+        None => None,
+    };
+    let clean = match properties.get(&PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG) {
+        Some(MapiValue::Binary(value)) => Some(value.as_slice()),
+        Some(_) => bail!("Calendar CleanGlobalObjectId must be binary"),
+        None => None,
+    };
+    let canonical_uid = |value: &[u8]| {
+        lpe_storage::calendar_uid_from_global_object_id(value)
+            .map(|uid| lpe_storage::normalize_calendar_meeting_uid(&uid))
+            .ok_or_else(|| anyhow::anyhow!("Calendar GlobalObjectId is malformed"))
+    };
+    let global_uid = global.map(canonical_uid).transpose()?;
+    let clean_uid = clean.map(canonical_uid).transpose()?;
+
+    if let (Some(global), Some(clean)) = (global, clean) {
+        let mut expected_clean = global.to_vec();
+        expected_clean[16..20].fill(0);
+        if clean != expected_clean {
+            bail!("Calendar CleanGlobalObjectId does not match GlobalObjectId");
+        }
+    }
+
+    let is_exception = match properties.get(&PID_LID_IS_EXCEPTION_TAG) {
+        Some(MapiValue::Bool(value)) => *value,
+        Some(_) => bail!("Calendar IsException must be boolean"),
+        None => false,
+    };
+    let has_occurrence_date = global.is_some_and(|value| value[16..20] != [0, 0, 0, 0]);
+    if reject_top_level_exception && (is_exception || has_occurrence_date) {
+        bail!("top-level Calendar exception imports are not supported");
+    }
+
+    Ok(global_uid.or(clean_uid))
 }
 
 pub(in crate::mapi) fn calendar_pending_recipients(
@@ -664,6 +910,7 @@ pub(in crate::mapi) fn apply_calendar_pending_recipients(
     recipients: &[PendingRecipient],
 ) {
     let mut metadata = parse_calendar_participants_metadata(&input.attendees_json);
+    let previous_attendees = metadata.attendees.clone();
     if let Some(organizer) = recipients
         .iter()
         .find(|recipient| recipient.is_calendar_organizer())
@@ -698,6 +945,8 @@ pub(in crate::mapi) fn apply_calendar_pending_recipients(
             counter_proposal: false,
         })
         .collect();
+    preserve_calendar_attendee_response_state(&mut metadata.attendees, &previous_attendees);
+    apply_owner_response_status_from_mapi(&mut metadata, existing, properties);
     input.attendees = calendar_attendee_labels(&metadata);
     input.attendees_json = serialize_calendar_participants_metadata(&metadata);
     input.organizer_json = organizer_json_from_mapi(
@@ -895,12 +1144,15 @@ fn event_participants_from_mapi(
     properties: &HashMap<u32, MapiValue>,
 ) -> MapiEventParticipants {
     let mut metadata = parse_calendar_participants_metadata(&existing.attendees_json);
+    let previous_attendees = metadata.attendees.clone();
     if let Some(organizer) = organizer_from_mapi(properties) {
         metadata.organizer = Some(organizer);
     }
     if let Some(attendees) = attendees_from_mapi(properties) {
         metadata.attendees = attendees;
+        preserve_calendar_attendee_response_state(&mut metadata.attendees, &previous_attendees);
     }
+    apply_owner_response_status_from_mapi(&mut metadata, existing, properties);
     let attendees_json = serialize_calendar_participants_metadata(&metadata);
     let organizer_json = organizer_json_from_mapi(
         existing,
@@ -912,6 +1164,87 @@ fn event_participants_from_mapi(
         organizer_json,
         attendees: calendar_attendee_labels(&metadata),
         attendees_json,
+    }
+}
+
+fn preserve_calendar_attendee_response_state(
+    attendees: &mut [CalendarParticipantMetadata],
+    previous_attendees: &[CalendarParticipantMetadata],
+) {
+    for attendee in attendees {
+        let previous = if attendee.email.trim().is_empty() {
+            unique_attendee_with_name(previous_attendees, &attendee.common_name)
+        } else {
+            let email = normalize_calendar_email(&attendee.email);
+            previous_attendees.iter().find(|previous| {
+                normalize_calendar_email(&previous.email).eq_ignore_ascii_case(&email)
+            })
+        };
+        let Some(previous) = previous else {
+            continue;
+        };
+        if attendee.email.trim().is_empty() {
+            attendee.email = previous.email.clone();
+        }
+        if attendee.common_name.trim().is_empty() {
+            attendee.common_name = previous.common_name.clone();
+        }
+        attendee.partstat = previous.partstat.clone();
+        attendee.rsvp = previous.rsvp;
+        attendee.proposed_start = previous.proposed_start.clone();
+        attendee.proposed_end = previous.proposed_end.clone();
+        attendee.counter_proposal = previous.counter_proposal;
+    }
+}
+
+fn unique_attendee_with_name<'a>(
+    attendees: &'a [CalendarParticipantMetadata],
+    common_name: &str,
+) -> Option<&'a CalendarParticipantMetadata> {
+    let common_name = common_name.trim();
+    if common_name.is_empty() {
+        return None;
+    }
+    let mut matching = attendees.iter().filter(|attendee| {
+        attendee
+            .common_name
+            .trim()
+            .eq_ignore_ascii_case(common_name)
+    });
+    let attendee = matching.next()?;
+    matching.next().is_none().then_some(attendee)
+}
+
+fn apply_owner_response_status_from_mapi(
+    metadata: &mut CalendarParticipantsMetadata,
+    existing: &AccessibleEvent,
+    properties: &HashMap<u32, MapiValue>,
+) {
+    let partstat = match properties
+        .get(&PID_LID_RESPONSE_STATUS_TAG)
+        .and_then(MapiValue::as_i64)
+    {
+        Some(2) => "tentative",
+        Some(3) => "accepted",
+        Some(4) => "declined",
+        Some(5) => "needs-action",
+        _ => return,
+    };
+    let owner_email = normalize_calendar_email(&existing.owner_email);
+    if owner_email.is_empty() {
+        return;
+    }
+    let organizer = metadata
+        .organizer
+        .clone()
+        .unwrap_or_else(|| calendar_organizer(existing));
+    if normalize_calendar_email(&organizer.email).eq_ignore_ascii_case(&owner_email) {
+        return;
+    }
+    if let Some(attendee) = metadata.attendees.iter_mut().find(|attendee| {
+        normalize_calendar_email(&attendee.email).eq_ignore_ascii_case(&owner_email)
+    }) {
+        attendee.partstat = partstat.to_string();
     }
 }
 
@@ -1032,6 +1365,14 @@ pub(in crate::mapi) fn reject_unsupported_mapi_event_properties(
                 return Err(anyhow!(
                     "unsupported MAPI appointment state flags {flags:#010X}"
                 ));
+            }
+        }
+        if *tag == PID_LID_RESPONSE_STATUS_TAG {
+            let status = value
+                .as_i64()
+                .ok_or_else(|| anyhow!("invalid MAPI meeting response status value"))?;
+            if !(0..=5).contains(&status) {
+                return Err(anyhow!("unsupported MAPI meeting response status {status}"));
             }
         }
     }

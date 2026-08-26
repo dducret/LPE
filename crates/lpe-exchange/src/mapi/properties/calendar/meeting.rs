@@ -14,11 +14,35 @@ pub(super) fn appointment_state_flags(event: &AccessibleEvent) -> i32 {
 }
 
 pub(super) fn response_status(event: &AccessibleEvent) -> i32 {
-    if appointment_state_flags(event) & 0x0000_0001 != 0 {
-        1
-    } else {
-        0
+    if appointment_state_flags(event) & 0x0000_0001 == 0 {
+        return 0;
     }
+
+    let owner_email = normalize_calendar_email(&event.owner_email);
+    let participants = parse_calendar_participants_metadata(&event.attendees_json);
+    let organizer = participants
+        .organizer
+        .unwrap_or_else(|| calendar_organizer(event));
+    if !owner_email.is_empty()
+        && normalize_calendar_email(&organizer.email).eq_ignore_ascii_case(&owner_email)
+    {
+        return 1;
+    }
+
+    participants
+        .attendees
+        .iter()
+        .find(|attendee| {
+            !owner_email.is_empty()
+                && normalize_calendar_email(&attendee.email).eq_ignore_ascii_case(&owner_email)
+        })
+        .map(|attendee| match attendee.partstat.as_str() {
+            "tentative" => 2,
+            "accepted" => 3,
+            "declined" => 4,
+            _ => 5,
+        })
+        .unwrap_or(5)
 }
 
 pub(in crate::mapi) fn materialize_owner_meeting_organizer(

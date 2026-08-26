@@ -108,6 +108,9 @@ calendar_meeting_request_correlation_index_shape_status="$(
 mapi_calendar_event_identity_moves_table="$(
   psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT to_regclass('public.mapi_calendar_event_identity_moves')"
 )"
+mapi_calendar_event_identity_retirement_shape_ok="$(
+  mapi_calendar_event_identity_retirement_shape_ok "${DATABASE_URL}"
+)"
 mapi_local_replica_range_shape_ok="$(
   mapi_local_replica_range_shape_ok "${DATABASE_URL}"
 )"
@@ -138,6 +141,7 @@ if [[ "${schema_version}" != "${expected_schema_version}" \
   || "${calendar_event_projection_state_shape_status}" != "1" \
   || "${calendar_meeting_request_correlation_index_shape_status}" != "1" \
   || "${mapi_calendar_event_identity_moves_table}" != "mapi_calendar_event_identity_moves" \
+  || "${mapi_calendar_event_identity_retirement_shape_ok}" != "1" \
   || "${mapi_local_replica_range_shape_ok}" != "1" \
   || "${mapi_outlook_cache_fidelity_shape_ok}" != "1" \
   || "${deleted_calendar_event_constraint_count}" != "2" \
@@ -145,7 +149,7 @@ if [[ "${schema_version}" != "${expected_schema_version}" \
   || "${mapi_calendar_event_move_change_key_constraint_count}" != "2" \
   || "${mapi_special_folder_alias_shape_ok}" != "1" \
   || "${mail_change_log_copy_kind_shape_status}" != "1" ]]; then
-  echo "Schema initialization validation failed: version=${schema_version}, MAPI identity version shape count=${mapi_identity_version_column_count}, MAPI store identity shape=${mapi_store_identity_shape_ok}, Calendar lifecycle/replay/projection shape count=${calendar_event_lifecycle_column_count}, Calendar meeting-response replay default/check shape=${calendar_meeting_response_state_shape_status}, Calendar Event projection-state shape=${calendar_event_projection_state_shape_status}, Calendar meeting-request correlation index shape=${calendar_meeting_request_correlation_index_shape_status}, Calendar identity-move table=${mapi_calendar_event_identity_moves_table:-missing}, MAPI local replica range table shape=${mapi_local_replica_range_shape_ok}, MAPI WLink/configuration FAI fidelity shape=${mapi_outlook_cache_fidelity_shape_ok}, deleted Calendar object-kind constraint count=${deleted_calendar_event_constraint_count}, MAPI identity key constraint count=${mapi_identity_constraint_count}, Calendar move ChangeKey constraint count=${mapi_calendar_event_move_change_key_constraint_count}, MAPI special-folder alias shape=${mapi_special_folder_alias_shape_ok}, mailbox copy change-kind shape=${mail_change_log_copy_kind_shape_status}." >&2
+  echo "Schema initialization validation failed: version=${schema_version}, MAPI identity version shape count=${mapi_identity_version_column_count}, MAPI store identity shape=${mapi_store_identity_shape_ok}, Calendar lifecycle/replay/projection shape count=${calendar_event_lifecycle_column_count}, Calendar meeting-response replay default/check shape=${calendar_meeting_response_state_shape_status}, Calendar Event projection-state shape=${calendar_event_projection_state_shape_status}, Calendar meeting-request correlation index shape=${calendar_meeting_request_correlation_index_shape_status}, Calendar identity-move table=${mapi_calendar_event_identity_moves_table:-missing}, Calendar Event identity-retirement/global MAPI identity-claim shape=${mapi_calendar_event_identity_retirement_shape_ok}, MAPI local replica range table shape=${mapi_local_replica_range_shape_ok}, MAPI WLink/configuration FAI fidelity shape=${mapi_outlook_cache_fidelity_shape_ok}, deleted Calendar object-kind constraint count=${deleted_calendar_event_constraint_count}, MAPI identity key constraint count=${mapi_identity_constraint_count}, Calendar move ChangeKey constraint count=${mapi_calendar_event_move_change_key_constraint_count}, MAPI special-folder alias shape=${mapi_special_folder_alias_shape_ok}, mailbox copy change-kind shape=${mail_change_log_copy_kind_shape_status}." >&2
   echo "Initialize a fresh LPE ${expected_schema_version%-sql} database after correcting the canonical schema source." >&2
   exit 1
 fi

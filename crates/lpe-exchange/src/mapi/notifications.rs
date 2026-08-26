@@ -10,6 +10,8 @@ use crate::mapi_store::MapiMailStoreSnapshot;
 use lpe_storage::JmapMailbox;
 use uuid::Uuid;
 
+mod rekey;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::mapi) struct MapiNotificationRegistration {
     // [MS-OXCROPS] section 2.2.14.2: RopNotify carries the associated LogonId.

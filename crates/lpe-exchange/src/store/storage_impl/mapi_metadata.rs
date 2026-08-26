@@ -1132,6 +1132,26 @@ macro_rules! store_impl_mapi_metadata {
                     }
                     "calendar_event" => {
                         let object_id = row.get::<Uuid, _>("object_id");
+                        let identity_account_id = summary_json
+                            .get("mapiIdentityAccountId")
+                            .and_then(serde_json::Value::as_str)
+                            .and_then(|value| Uuid::parse_str(value).ok());
+                        if identity_account_id == Some(account_id) {
+                            if let Some(retired_object_id) = summary_json
+                                .get("oldMapiObjectId")
+                                .and_then(serde_json::Value::as_u64)
+                                .filter(|object_id| *object_id > 0)
+                            {
+                                if !changes
+                                    .deleted_calendar_event_object_ids
+                                    .contains(&retired_object_id)
+                                {
+                                    changes
+                                        .deleted_calendar_event_object_ids
+                                        .push(retired_object_id);
+                                }
+                            }
+                        }
                         if change_kind == "destroyed" || change_kind == "expunged" {
                             push_unique_uuid(&mut changes.deleted_calendar_event_ids, object_id);
                         } else {

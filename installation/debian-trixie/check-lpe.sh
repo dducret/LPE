@@ -340,6 +340,12 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_ca
   || fail "Calendar Event identity-move table is missing. Initialize a fresh LPE ${expected_release_version} database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Calendar Event identity-move table is present"
 
+mapi_calendar_event_identity_retirement_shape_ok="$(mapi_calendar_event_identity_retirement_shape_ok "$DATABASE_URL")" \
+  || fail "Unable to inspect the Calendar Event identity-retirement and global identity-claim shape"
+[[ "$mapi_calendar_event_identity_retirement_shape_ok" == "1" ]] \
+  || fail "Calendar Event identity-retirement or global MAPI identity-claim shape is missing or incompatible. Initialize a fresh LPE ${expected_release_version} database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
+pass "Calendar Event identity-retirement and global MAPI identity-claim shape is current"
+
 deleted_calendar_event_constraint_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(DISTINCT table_row.relname) FROM pg_constraint constraint_row JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace WHERE namespace_row.nspname = 'public' AND table_row.relname IN ('mail_change_log', 'mapi_object_identities') AND constraint_row.contype = 'c' AND pg_get_constraintdef(constraint_row.oid) LIKE '%deleted_calendar_event%';")" \
   || fail "Unable to inspect deleted Calendar object-kind constraints"
 [[ "$deleted_calendar_event_constraint_count" == "2" ]] \

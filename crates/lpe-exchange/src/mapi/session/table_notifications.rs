@@ -329,6 +329,16 @@ pub(super) fn notification_events_have_same_origin(
         return false;
     }
 
+    // A Calendar identity replacement preserves the canonical Event UUID but
+    // retires one message object and creates another. Concrete, distinct MIDs
+    // must therefore remain separate notification origins.
+    if matches!(
+        (origin.message_id, event.message_id),
+        (Some(origin_id), Some(event_id)) if origin_id != event_id
+    ) {
+        return false;
+    }
+
     let canonical_message_matches = matches!(
         (origin.canonical_message_id, event.canonical_message_id),
         (Some(origin_id), Some(event_id)) if origin_id == event_id

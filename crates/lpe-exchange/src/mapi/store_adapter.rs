@@ -806,16 +806,17 @@ where
         "fetch durable MAPI event versions",
         loaded_event_ids.len(),
     );
-    let event_versions = if calendar_event_versions_required(plan, &identities) {
-        Some(
-            store
-                .fetch_mapi_event_versions(account_id, &loaded_event_ids)
-                .await
-                .context("fetch durable MAPI Event versions")?,
-        )
-    } else {
-        None
-    };
+    let event_versions =
+        if snapshot_backed_contents || calendar_event_versions_required(plan, &identities) {
+            Some(
+                store
+                    .fetch_mapi_event_versions(account_id, &loaded_event_ids)
+                    .await
+                    .context("fetch durable MAPI Event versions")?,
+            )
+        } else {
+            None
+        };
     log_mapi_store_load_step(
         account_id,
         plan,

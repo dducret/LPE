@@ -22,6 +22,8 @@ use sqlx::{
 use uuid::Uuid;
 
 const SCHEMA_SQL: &str = include_str!("../sql/schema.sql");
+const MAPI_IDENTITY_RETIREMENT_SHAPE_SQL: &str =
+    include_str!("../src/core/mapi_calendar_event_identity_retirement_schema.sql");
 const PLATFORM_TENANT_ID: Uuid = Uuid::from_u128(1);
 
 struct RuntimeFixture {
@@ -136,6 +138,12 @@ async fn run_runtime_drift_validation(pool: &PgPool) -> Result<()> {
             &mut failures,
             "MAPI special-folder alias constraints",
             exercise_mapi_special_folder_alias_constraints(pool, &fixture).await,
+        );
+
+        collect(
+            &mut failures,
+            "permanent MAPI identity claim ledger",
+            exercise_mapi_identity_claim_ledger_guards(pool, &fixture).await,
         );
 
         collect(
@@ -4437,6 +4445,208 @@ async fn exercise_mapi_special_folder_alias_constraints(
     Ok(())
 }
 
+async fn exercise_mapi_identity_claim_ledger_guards(
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    anyhow::ensure!(
+        mapi_identity_claim_shape_is_current(pool).await?,
+        "fresh schema must start with a complete MAPI identity claim ledger"
+    );
+
+    let truncate_error = sqlx::query("TRUNCATE mapi_object_identity_claims")
+        .execute(pool)
+        .await
+        .expect_err("the permanent MAPI identity claim ledger must reject TRUNCATE");
+    let truncate_code = truncate_error
+        .as_database_error()
+        .and_then(|error| error.code().map(|code| code.into_owned()));
+    anyhow::ensure!(
+        truncate_code.as_deref() == Some("55000"),
+        "identity claim TRUNCATE must fail with object_not_in_prerequisite_state, got {truncate_code:?}"
+    );
+
+    let alias = sqlx::query(
+        r#"
+        SELECT alias_folder_id, source_key
+        FROM mapi_special_folder_aliases
+        WHERE tenant_id = $1 AND account_id = $2
+        ORDER BY alias_folder_id
+        LIMIT 1
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .fetch_one(pool)
+    .await?;
+    let alias_folder_id = alias.get::<i64, _>("alias_folder_id");
+    let alias_source_key = alias.get::<Vec<u8>, _>("source_key");
+    remove_identity_claim_for_guard_test(pool, alias_folder_id).await?;
+    anyhow::ensure!(
+        !mapi_identity_claim_shape_is_current(pool).await?,
+        "schema guard accepted a special-folder alias without its exact claim"
+    );
+    insert_identity_claim_for_guard_test(pool, alias_folder_id, &alias_source_key).await?;
+
+    let event_id = Uuid::new_v4();
+    let old_counter = 0x30_0000_u64;
+    let new_counter = old_counter + 1;
+    let old_object_id = mapi_store_id(old_counter) as i64;
+    let new_object_id = mapi_store_id(new_counter) as i64;
+    let old_source_key = mapi_source_key(old_counter);
+    let new_source_key = mapi_source_key(new_counter);
+    let mut old_pcl = vec![old_source_key.len() as u8];
+    old_pcl.extend_from_slice(&old_source_key);
+    let mut new_pcl = vec![new_source_key.len() as u8];
+    new_pcl.extend_from_slice(&new_source_key);
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_object_identities (
+            tenant_id, account_id, object_kind, canonical_id,
+            mapi_global_counter, mapi_object_id, source_key, change_key,
+            instance_key, mapi_change_number, predecessor_change_list
+        )
+        VALUES ($1, $2, 'calendar_event', $3, $4, $5, $6, $6, $6, $4, $7)
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(event_id)
+    .bind(old_counter as i64)
+    .bind(old_object_id)
+    .bind(&old_source_key)
+    .bind(&old_pcl)
+    .execute(pool)
+    .await?;
+
+    remove_identity_claim_for_guard_test(pool, old_object_id).await?;
+    anyhow::ensure!(
+        !mapi_identity_claim_shape_is_current(pool).await?,
+        "schema guard accepted a live MAPI identity without its exact claim"
+    );
+    insert_identity_claim_for_guard_test(pool, old_object_id, &old_source_key).await?;
+
+    sqlx::query(
+        r#"
+        UPDATE mapi_object_identities
+        SET mapi_global_counter = $4,
+            mapi_object_id = $5,
+            source_key = $6,
+            change_key = $6,
+            instance_key = $6,
+            mapi_change_number = $4,
+            predecessor_change_list = $7
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'calendar_event'
+          AND canonical_id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(event_id)
+    .bind(new_counter as i64)
+    .bind(new_object_id)
+    .bind(&new_source_key)
+    .bind(&new_pcl)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_calendar_event_identity_retirements (
+            tenant_id, account_id, event_id,
+            old_mapi_object_id, replacement_mapi_object_id,
+            old_source_key, replacement_source_key, retired_change_number
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(event_id)
+    .bind(old_object_id)
+    .bind(new_object_id)
+    .bind(&old_source_key)
+    .bind(&new_source_key)
+    .bind(new_counter as i64)
+    .execute(pool)
+    .await?;
+
+    remove_identity_claim_for_guard_test(pool, old_object_id).await?;
+    anyhow::ensure!(
+        !mapi_identity_claim_shape_is_current(pool).await?,
+        "schema guard accepted retirement history without its old identity claim"
+    );
+    insert_identity_claim_for_guard_test(pool, old_object_id, &old_source_key).await?;
+    anyhow::ensure!(
+        mapi_identity_claim_shape_is_current(pool).await?,
+        "restoring every exact claim did not restore the canonical schema shape"
+    );
+
+    sqlx::query("DELETE FROM mapi_calendar_event_identity_retirements WHERE event_id = $1")
+        .bind(event_id)
+        .execute(pool)
+        .await?;
+    sqlx::query(
+        "DELETE FROM mapi_object_identities WHERE object_kind = 'calendar_event' AND canonical_id = $1",
+    )
+    .bind(event_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn mapi_identity_claim_shape_is_current(pool: &PgPool) -> Result<bool> {
+    let schema_name = sqlx::query_scalar::<_, String>("SELECT current_schema()")
+        .fetch_one(pool)
+        .await?;
+    Ok(
+        sqlx::query_scalar::<_, bool>(MAPI_IDENTITY_RETIREMENT_SHAPE_SQL)
+            .bind(schema_name)
+            .fetch_one(pool)
+            .await?,
+    )
+}
+
+async fn remove_identity_claim_for_guard_test(pool: &PgPool, object_id: i64) -> Result<()> {
+    sqlx::query(
+        "ALTER TABLE mapi_object_identity_claims DISABLE TRIGGER mapi_object_identity_claims_immutable",
+    )
+    .execute(pool)
+    .await?;
+    let deleted = sqlx::query("DELETE FROM mapi_object_identity_claims WHERE mapi_object_id = $1")
+        .bind(object_id)
+        .execute(pool)
+        .await;
+    let reenabled = sqlx::query(
+        "ALTER TABLE mapi_object_identity_claims ENABLE TRIGGER mapi_object_identity_claims_immutable",
+    )
+    .execute(pool)
+    .await;
+    let deleted = deleted?;
+    reenabled?;
+    anyhow::ensure!(
+        deleted.rows_affected() == 1,
+        "expected one MAPI identity claim for object {object_id}"
+    );
+    Ok(())
+}
+
+async fn insert_identity_claim_for_guard_test(
+    pool: &PgPool,
+    object_id: i64,
+    source_key: &[u8],
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO mapi_object_identity_claims (mapi_object_id, source_key) VALUES ($1, $2)",
+    )
+    .bind(object_id)
+    .bind(source_key)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 async fn insert_mapi_special_folder_alias(
     pool: &PgPool,
     fixture: &RuntimeFixture,
@@ -6688,6 +6898,12 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
         ),
         fixture.account_email
     );
+    let outbox_internet_message_id = "<mapi-outbox-source@example.test>";
+    let outbox_date_header = "Mon, 24 Aug 2026 10:10:00 +0200";
+    let outbox_raw_message = format!(
+        "Date: {outbox_date_header}\r\nMessage-ID: {outbox_internet_message_id}\r\nFrom: {}\r\nTo: organizer@example.test\r\nSubject: New Time Proposed: canonical Outbox source\r\n\r\nCanonical Outbox scheduling response",
+        fixture.account_email
+    );
     let outbox_source = storage
         .import_jmap_email(
             JmapImportedEmailInput {
@@ -6695,7 +6911,7 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
                 submitted_by_account_id: fixture.account_id,
                 mailbox_id: outbox_mailbox_id,
                 source: "mapi-save-message".to_string(),
-                raw_message: None,
+                raw_message: Some(outbox_raw_message.into_bytes()),
                 from_display: Some("Alice MAPI".to_string()),
                 from_address: fixture.account_email.clone(),
                 sender_display: None,
@@ -6709,10 +6925,7 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
                 subject: "New Time Proposed: canonical Outbox source".to_string(),
                 body_text: "Canonical Outbox scheduling response".to_string(),
                 body_html_sanitized: None,
-                internet_message_id: Some(format!(
-                    "<mapi-outbox-source-{}@example.test>",
-                    Uuid::new_v4()
-                )),
+                internet_message_id: Some(outbox_internet_message_id.to_string()),
                 mime_blob_ref: format!("mapi-save-message:{}", Uuid::new_v4()),
                 size_octets: outbox_calendar.len() as i64,
                 received_at: None,
@@ -6768,7 +6981,7 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
                 draft_message_id: Some(outbox_source.id),
                 account_id: fixture.account_id,
                 submitted_by_account_id: fixture.account_id,
-                source: "mapi".to_string(),
+                source: "mapi-submit-message".to_string(),
                 from_display: outbox_source.from_display.clone(),
                 from_address: outbox_source.from_address.clone(),
                 sender_display: outbox_source.sender_display.clone(),
@@ -6798,6 +7011,18 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
         )
         .await
         .context("submit canonical MAPI Outbox source")?;
+    let outbox_queue_protocol = sqlx::query_scalar::<_, String>(
+        "SELECT source_protocol FROM submission_queue WHERE tenant_id = $1 AND id = $2",
+    )
+    .bind(fixture.tenant_id)
+    .bind(outbox_submission.outbound_queue_id)
+    .fetch_one(pool)
+    .await
+    .context("load saved-message MAPI submission source protocol")?;
+    anyhow::ensure!(
+        outbox_queue_protocol == "mapi",
+        "saved-message MAPI send must use canonical submission_queue source_protocol=mapi"
+    );
     anyhow::ensure!(
         storage
             .fetch_jmap_emails(fixture.account_id, &[outbox_source.id])
@@ -6814,8 +7039,12 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
     let sent_outbox_raw = String::from_utf8_lossy(&sent_outbox_raw.blob_bytes);
     anyhow::ensure!(
         sent_outbox_raw.contains("Content-Type: text/calendar; method=COUNTER; charset=UTF-8")
-            && sent_outbox_raw.contains("METHOD:COUNTER"),
-        "canonical Outbox submission hydration must preserve the selected scheduling MIME body"
+            && sent_outbox_raw.contains("METHOD:COUNTER")
+            && sent_outbox_raw.contains(&format!("Date: {outbox_date_header}\r\n"))
+            && sent_outbox_raw.contains(&format!(
+                "Message-ID: {outbox_internet_message_id}\r\n"
+            )),
+        "canonical Outbox submission hydration must preserve the scheduling body and valid source identity headers"
     );
 
     let submitted = storage
@@ -6824,7 +7053,7 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
                 draft_message_id: None,
                 account_id: fixture.account_id,
                 submitted_by_account_id: fixture.account_id,
-                source: "mapi".to_string(),
+                source: "mapi-submit-message".to_string(),
                 from_display: Some("Alice MAPI".to_string()),
                 from_address: fixture.account_email.clone(),
                 sender_display: None,
@@ -6841,7 +7070,7 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
                 subject: "MAPI interoperability gate".to_string(),
                 body_text: "MAPI gate searchable body".to_string(),
                 body_html_sanitized: None,
-                internet_message_id: Some(format!("<mapi-gate-{}@example.test>", Uuid::new_v4())),
+                internet_message_id: None,
                 mime_blob_ref: None,
                 size_octets: 256,
                 unread: Some(false),
@@ -6864,6 +7093,51 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
         )
         .await
         .context("submit MAPI-sourced canonical message")?;
+
+    let stored_internet_message_id = sqlx::query_scalar::<_, String>(
+        "SELECT internet_message_id FROM messages WHERE tenant_id = $1 AND id = $2",
+    )
+    .bind(fixture.tenant_id)
+    .bind(submitted.message_id)
+    .fetch_one(pool)
+    .await
+    .context("load generated MAPI submission Message-ID")?;
+    let sent_raw = storage
+        .fetch_jmap_message_blob(fixture.account_id, submitted.message_id)
+        .await
+        .context("fetch generated-identity MAPI Sent MIME")?
+        .context("generated-identity MAPI Sent MIME is missing")?;
+    let sent_headers = lpe_storage::mail::parse_header_records(&sent_raw.blob_bytes);
+    let message_id_headers = sent_headers
+        .iter()
+        .filter(|header| header.name.eq_ignore_ascii_case("message-id"))
+        .collect::<Vec<_>>();
+    let date_headers = sent_headers
+        .iter()
+        .filter(|header| header.name.eq_ignore_ascii_case("date"))
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        message_id_headers.len() == 1
+            && message_id_headers[0].value == stored_internet_message_id,
+        "MAPI submit without a client Message-ID must persist and render one exact canonical identity"
+    );
+    anyhow::ensure!(
+        date_headers.len() == 1
+            && lpe_storage::mail::parse_message_date_header(&sent_raw.blob_bytes).is_some(),
+        "MAPI submit without a client Date must render one RFC-compliant canonical Date"
+    );
+    let outbound = storage
+        .fetch_outbound_handoff_batch(1_000)
+        .await
+        .context("fetch canonical outbound handoff after MAPI submit")?
+        .into_iter()
+        .find(|handoff| handoff.queue_id == submitted.outbound_queue_id)
+        .context("MAPI submission is missing from canonical outbound handoff")?;
+    anyhow::ensure!(
+        outbound.internet_message_id.as_deref() == Some(stored_internet_message_id.as_str())
+            && outbound.raw_message == sent_raw.blob_bytes,
+        "canonical outbound handoff must use the stored Sent MIME and its persisted Message-ID"
+    );
 
     let queue_protocol = sqlx::query_scalar::<_, String>(
         r#"
@@ -8673,6 +8947,13 @@ async fn exercise_canonical_identity_allocation(
     pool: &PgPool,
     fixture: &RuntimeFixture,
 ) -> Result<()> {
+    let mapi_identity_count_before = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM mapi_object_identities WHERE tenant_id = $1",
+    )
+    .bind(fixture.tenant_id)
+    .fetch_one(pool)
+    .await
+    .context("count MAPI identities before non-MAPI sender projection")?;
     let default_identity_count = sqlx::query_scalar::<_, i64>(
         r#"
         SELECT COUNT(*)
@@ -8831,21 +9112,14 @@ async fn exercise_canonical_identity_allocation(
     );
 
     let mapi_identity_count = sqlx::query_scalar::<_, i64>(
-        r#"
-        SELECT COUNT(*)
-        FROM mapi_object_identities
-        WHERE tenant_id = $1
-          AND account_id IN ($2, $3)
-        "#,
+        "SELECT COUNT(*) FROM mapi_object_identities WHERE tenant_id = $1",
     )
     .bind(fixture.tenant_id)
-    .bind(fixture.account_id)
-    .bind(grantee_id)
     .fetch_one(pool)
     .await
     .context("count MAPI identities after non-MAPI sender projection")?;
     anyhow::ensure!(
-        mapi_identity_count == 0,
+        mapi_identity_count == mapi_identity_count_before,
         "canonical sender identity allocation must not create MAPI identity rows"
     );
 

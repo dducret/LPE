@@ -363,6 +363,23 @@ Protocol adapters store only cursor rows:
   multi-replica PCL required by [MS-OXCFXICS] sections 3.1.5.6.1 and
   3.1.5.6.2. The 24-byte `LongTermID` form with its two-byte pad remains a
   protocol conversion value and is not stored as a SourceKey.
+  When LPE's GOID correlation policy resolves a different valid client-reserved
+  MID/SourceKey to an existing canonical Event, the active principal-scoped
+  `mapi_object_identities` row is rekeyed without changing the Event UUID.
+  `mapi_calendar_event_identity_retirements` records every old and replacement
+  MID/SourceKey pair plus the retirement CN, so repeated replacements retain
+  the full history. `mapi_object_identity_claims` permanently claims every
+  MID/SourceKey pair ever assigned through `mapi_object_identities` or a
+  client-reserved special-folder alias; UPDATE, DELETE, and TRUNCATE guards make
+  the ledger immutable, and startup verifies that live identities, aliases, and
+  both sides of every retirement remain covered. Claims and table triggers make
+  reuse fail across MAPI object kinds and FIDs, not only Calendar imports. The active identity,
+  retirement row, and Calendar change journal commit together; download ICS
+  replays the exact old MID as a deletion while the Save response returns the
+  new MID. Content still follows the ordinary PCL conflict winner. This GOID
+  correlation is an LPE interoperability policy, not a claim that
+  [MS-OXCFXICS] mandates GOID-based correlation. The fresh schema includes this
+  retirement table and has no inferred-history fallback.
   In-place normal-mail content, recipient, attachment, non-read flag, and
   existing-draft mutations retain their MID and SourceKey while atomically
   advancing the durable CN, ChangeKey, and PCL. This is distinct from the
@@ -562,6 +579,12 @@ Submission uses:
   rows.
 - `submission_events` for immutable relay, deferred, quarantine,
   bounce, failure, and duplicate-handoff results.
+
+`submission_queue.source_protocol` stores the canonical protocol rather than
+the adapter action label. The exact MAPI SubmitMessage, EWS CreateItem/SendItem,
+and ActiveSync SendMail/SmartReply/SmartForward labels normalize to `mapi`,
+`ews`, and `activesync` respectively; similar unrecognized labels do not inherit
+those protocol identities.
 
 `LPE` creates the authoritative `Sent` mailbox membership before handoff to
 `LPE-CT`. `LPE-CT` remains responsible for SMTP custody, retries, DKIM, SPF,

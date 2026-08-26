@@ -324,6 +324,9 @@ mod tests {
     #[test]
     fn only_transport_content_properties_require_scheduling_regeneration() {
         assert!(saved_submission_content_property_tag(PID_TAG_SUBJECT_W));
+        assert!(saved_submission_content_property_tag(
+            PID_TAG_SUBJECT_PREFIX_W
+        ));
         assert!(saved_submission_content_property_tag(PID_TAG_BODY_HTML_W));
         assert!(saved_submission_content_property_tag(
             PID_LID_APPOINTMENT_PROPOSED_START_WHOLE_TAG

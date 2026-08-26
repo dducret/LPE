@@ -781,10 +781,7 @@ pub(in crate::mapi) fn jmap_import_from_pending_message(
     recipients: &[PendingRecipient],
     mut attachments: Vec<AttachmentUploadInput>,
 ) -> Result<JmapImportedEmailInput> {
-    let subject = pending_text_property(
-        properties,
-        &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
-    );
+    let subject = pending_message_subject(properties);
     let body_text = pending_body_text_property(properties);
     let (from_address, from_display, sender_address, sender_display) =
         pending_message_submit_identity(principal, properties);
@@ -868,10 +865,7 @@ pub(in crate::mapi) fn mapi_submit_from_pending_message(
     properties: &HashMap<u32, MapiValue>,
     recipients: &[PendingRecipient],
 ) -> Result<SubmitMessageInput> {
-    let subject = pending_text_property(
-        properties,
-        &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
-    );
+    let subject = pending_message_subject(properties);
     let body_text = pending_body_text_property(properties);
     let (from_address, from_display, sender_address, sender_display) =
         pending_message_submit_identity(principal, properties);
@@ -910,6 +904,19 @@ pub(in crate::mapi) fn mapi_submit_from_pending_message(
         replace_attachments: false,
         attachments,
     })
+}
+
+pub(in crate::mapi) fn pending_message_subject(properties: &HashMap<u32, MapiValue>) -> String {
+    if let Some(subject) = optional_pending_text_property(properties, &[PID_TAG_SUBJECT_W]) {
+        return subject;
+    }
+
+    // [MS-OXCMSG] sections 2.2.1.9, 2.2.1.10, and 2.2.1.46 define the
+    // full subject as the exact concatenation of SubjectPrefix and
+    // NormalizedSubject. Outlook meeting responses can omit PidTagSubject.
+    let prefix = pending_text_property(properties, &[PID_TAG_SUBJECT_PREFIX_W]);
+    let normalized = pending_text_property(properties, &[PID_TAG_NORMALIZED_SUBJECT_W]);
+    format!("{prefix}{normalized}")
 }
 
 fn pending_message_submit_identity(

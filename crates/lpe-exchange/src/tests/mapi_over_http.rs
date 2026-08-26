@@ -4,6 +4,7 @@ mod calendar;
 mod calendar_identity_scope;
 mod connect;
 mod contacts;
+mod custom_calendar_versions;
 mod exact_object_contracts;
 mod free_busy;
 mod hierarchy;

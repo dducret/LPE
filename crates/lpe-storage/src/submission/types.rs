@@ -469,9 +469,12 @@ pub(super) fn source_protocol_sql(source: &str) -> &'static str {
     match source.trim().to_lowercase().as_str() {
         "web" => "web",
         "jmap" => "jmap",
-        "ews" => "ews",
-        "mapi" => "mapi",
-        "activesync" => "activesync",
+        "ews" | "ews-createitem" | "ews-senditem" => "ews",
+        "mapi" | "mapi-submit-message" => "mapi",
+        "activesync"
+        | "activesync-sendmail"
+        | "activesync-smartreply"
+        | "activesync-smartforward" => "activesync",
         "lpe_ct_submission" | "lpe-ct-submission" => "lpe_ct_submission",
         _ => "jmap",
     }
@@ -479,7 +482,46 @@ pub(super) fn source_protocol_sql(source: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{canonical_submission_phases, CanonicalSubmissionPhase};
+    use super::{canonical_submission_phases, source_protocol_sql, CanonicalSubmissionPhase};
+
+    #[test]
+    fn mapi_submit_adapter_source_uses_the_canonical_mapi_protocol() {
+        for source in ["mapi", "mapi-submit-message", " MAPI-SUBMIT-MESSAGE "] {
+            assert_eq!(source_protocol_sql(source), "mapi");
+        }
+
+        for source in [
+            "mapi-save-message",
+            "mapi-submit-message-extra",
+            "not-mapi-submit-message",
+        ] {
+            assert_eq!(source_protocol_sql(source), "jmap");
+        }
+    }
+
+    #[test]
+    fn native_adapter_sources_use_their_canonical_protocols() {
+        for source in ["ews", "ews-createitem", "ews-senditem", " EWS-SENDITEM "] {
+            assert_eq!(source_protocol_sql(source), "ews");
+        }
+        for source in [
+            "activesync",
+            "activesync-sendmail",
+            "activesync-smartreply",
+            "activesync-smartforward",
+            " ACTIVESYNC-SMARTREPLY ",
+        ] {
+            assert_eq!(source_protocol_sql(source), "activesync");
+        }
+        for source in [
+            "ews-createitem-extra",
+            "not-ews-senditem",
+            "activesync-sendmail-extra",
+            "not-activesync-smartreply",
+        ] {
+            assert_eq!(source_protocol_sql(source), "jmap");
+        }
+    }
 
     #[test]
     fn canonical_submission_persists_sent_before_queue_handoff() {

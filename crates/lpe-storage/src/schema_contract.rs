@@ -936,6 +936,57 @@ fn mapi_identity_mapping_is_store_backed() {
             "Deleted Items identity moves must preserve old/new MAPI identity metadata: {required}"
         );
     }
+
+    let identity_retirements = table_definition("mapi_calendar_event_identity_retirements");
+    for required in [
+        "event_id UUID NOT NULL",
+        "old_mapi_object_id BIGINT NOT NULL CHECK ((old_mapi_object_id & 65535) = 1)",
+        "replacement_mapi_object_id BIGINT NOT NULL CHECK ((replacement_mapi_object_id & 65535) = 1)",
+        "old_source_key BYTEA NOT NULL CHECK (octet_length(old_source_key) = 22)",
+        "replacement_source_key BYTEA NOT NULL CHECK (octet_length(replacement_source_key) = 22)",
+        "retired_change_number BIGINT NOT NULL CHECK (retired_change_number >= 43 AND retired_change_number < 140737454800896)",
+        "PRIMARY KEY (tenant_id, account_id, old_mapi_object_id)",
+        "UNIQUE (old_mapi_object_id)",
+        "UNIQUE (old_source_key)",
+        "CHECK (old_mapi_object_id <> replacement_mapi_object_id)",
+        "CHECK (old_source_key <> replacement_source_key)",
+    ] {
+        assert!(
+            identity_retirements.contains(required),
+            "Calendar Event identity retirements must prevent retired MAPI identities from becoming active again: {required}"
+        );
+    }
+    assert_schema_contains_all(&[
+        "CREATE INDEX mapi_calendar_event_identity_retirements_event_idx",
+        "ON mapi_calendar_event_identity_retirements (tenant_id, account_id, event_id, created_at)",
+    ]);
+
+    let identity_claims = table_definition("mapi_object_identity_claims");
+    for required in [
+        "mapi_object_id BIGINT PRIMARY KEY CHECK ((mapi_object_id & 65535) = 1)",
+        "source_key BYTEA NOT NULL UNIQUE CHECK (octet_length(source_key) = 22)",
+        "claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+    ] {
+        assert!(
+            identity_claims.contains(required),
+            "the global MAPI identity ledger must claim every assigned MID/FID and SourceKey: {required}"
+        );
+    }
+    assert_schema_contains_all(&[
+        "CREATE FUNCTION claim_mapi_object_identity()",
+        "CREATE TRIGGER mapi_object_identities_claim_identity",
+        "AFTER INSERT OR UPDATE OF mapi_object_id, source_key ON mapi_object_identities",
+        "CREATE FUNCTION claim_mapi_special_folder_alias_identity()",
+        "CREATE TRIGGER mapi_special_folder_aliases_claim_identity",
+        "AFTER INSERT OR UPDATE OF alias_folder_id, source_key ON mapi_special_folder_aliases",
+        "INSERT INTO mapi_object_identity_claims (mapi_object_id, source_key)",
+        "CREATE FUNCTION prevent_mapi_object_identity_claim_mutation()",
+        "CREATE TRIGGER mapi_object_identity_claims_immutable",
+        "BEFORE UPDATE OR DELETE ON mapi_object_identity_claims",
+        "CREATE TRIGGER mapi_object_identity_claims_no_truncate",
+        "BEFORE TRUNCATE ON mapi_object_identity_claims",
+        "MAPI object identity claims are immutable",
+    ]);
 }
 
 #[test]
@@ -1690,6 +1741,8 @@ fn updater_rejects_an_incomplete_current_schema_before_stopping_lpe() {
             "recipient_suggestions_active_email_idx",
             "recoverable_items",
             "public_folder_replicas",
+            "mapi_calendar_event_identity_retirements",
+            "mapi_object_identity_claims",
             "mapi_local_replica_range_shape_ok",
             "mapi_outlook_cache_fidelity_shape_ok",
             "mapi_identity_key_constraint_count",
@@ -1721,6 +1774,44 @@ fn updater_rejects_an_incomplete_current_schema_before_stopping_lpe() {
             label,
             source,
             &["canonical_schema_shape_is_current", "complete canonical"],
+        );
+    }
+}
+
+#[test]
+fn deployment_scripts_require_calendar_event_identity_retirement_history() {
+    assert_source_contains_all(
+        "shared canonical schema validation",
+        INSTALL_COMMON_SCRIPT,
+        &[
+            "('mapi_calendar_event_identity_retirements', 'r')",
+            "('mapi_object_identity_claims', 'r')",
+            "mapi_calendar_event_identity_retirement_shape_ok",
+            "to_regclass('public.mapi_calendar_event_identity_retirements')",
+            "to_regclass('public.mapi_object_identity_claims')",
+            "mapi_object_identities_claim_identity",
+            "mapi_special_folder_aliases_claim_identity",
+            "mapi_object_identity_claims_immutable",
+            "mapi_object_identity_claims_no_truncate",
+            "FROM public.mapi_object_identities identity",
+            "FROM public.mapi_special_folder_aliases alias",
+            "FROM public.mapi_calendar_event_identity_retirements retirement",
+            "replacement_claim.source_key = retirement.replacement_source_key",
+            "trigger_row.tgenabled = 'O'",
+        ],
+    );
+    for (label, source) in [
+        ("init-schema.sh", INIT_LPE_SCRIPT),
+        ("check-lpe.sh", CHECK_LPE_SCRIPT),
+    ] {
+        assert_source_contains_all(
+            label,
+            source,
+            &[
+                "mapi_calendar_event_identity_retirement_shape_ok",
+                "Calendar Event identity-retirement",
+                "global MAPI identity-claim shape",
+            ],
         );
     }
 }
@@ -1937,6 +2028,7 @@ fn schema_initializer_resets_atomically_and_validates_durable_mapi_shape() {
             "mapi_store_identity_shape_ok",
             "mapi_identity_key_constraint_count",
             "mapi_calendar_event_move_change_key_constraint_count",
+            "mapi_calendar_event_identity_retirement_shape_ok",
             "FROM information_schema.columns",
             "table_name = 'mapi_object_identities'",
             "column_name IN ('mapi_change_number', 'predecessor_change_list')",
@@ -2033,6 +2125,9 @@ fn runtime_schema_check_rejects_missing_required_mapi_shape() {
             "FROM public.schema_metadata",
             "\"calendar_events\"",
             "\"mapi_calendar_event_identity_moves\"",
+            "\"mapi_calendar_event_identity_retirements\"",
+            "\"mapi_object_identity_claims\"",
+            "core/mapi_calendar_event_identity_retirement_schema.sql",
             "\"mapi_store_identity\"",
             "\"mapi_mailbox_replicas\"",
             "\"mapi_local_replica_id_ranges\"",

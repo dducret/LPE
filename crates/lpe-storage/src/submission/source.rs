@@ -22,6 +22,8 @@ pub(super) struct ClaimedSubmissionSource {
     pub(super) imap_uid: i64,
     pub(super) modseq: u64,
     pub(super) is_seen: bool,
+    pub(super) internet_message_id: Option<String>,
+    pub(super) date_header: Option<String>,
 }
 
 impl Storage {
@@ -38,12 +40,26 @@ impl Storage {
         let rows = sqlx::query(
             r#"
             SELECT mm.id, mm.mailbox_id, mm.message_id, mm.thread_id,
-                   mm.imap_uid, mm.modseq, mm.is_seen
+                   mm.imap_uid, mm.modseq, mm.is_seen,
+                   m.internet_message_id,
+                   date_header.header_value AS date_header
             FROM mailbox_messages mm
             JOIN mailboxes mb
               ON mb.tenant_id = mm.tenant_id
              AND mb.account_id = mm.account_id
              AND mb.id = mm.mailbox_id
+            JOIN messages m
+              ON m.tenant_id = mm.tenant_id
+             AND m.id = mm.message_id
+            LEFT JOIN LATERAL (
+                SELECT header_value
+                FROM message_headers
+                WHERE tenant_id = m.tenant_id
+                  AND message_id = m.id
+                  AND lower(header_name) = 'date'
+                ORDER BY ordinal, id
+                LIMIT 1
+            ) date_header ON TRUE
             WHERE mm.tenant_id = $1
               AND mm.account_id = $2
               AND mm.message_id = $3
@@ -84,6 +100,8 @@ impl Storage {
                 .try_into()
                 .map_err(|_| anyhow!("claimed submission source has an invalid modseq"))?,
             is_seen: row.try_get("is_seen")?,
+            internet_message_id: row.try_get("internet_message_id")?,
+            date_header: row.try_get("date_header")?,
         })
     }
 

@@ -802,6 +802,8 @@ macro_rules! store_impl_public_address_im {
             let mut events = Vec::new();
             for row in rows.into_iter().take(100) {
                 cursor = Some(row.get("cursor"));
+                let calendar_rekey_ids =
+                    mapi_calendar_rekey_notification_ids_from_change_row(&row, account_id);
                 if let Some(event) = mapi_notification_event_from_change_row(
                     row,
                     &calendar_folder_ids,
@@ -810,6 +812,21 @@ macro_rules! store_impl_public_address_im {
                     &mailbox_folder_ids,
                     &mailbox_message_ids,
                 ) {
+                    if let Some((old_message_id, new_message_id)) = calendar_rekey_ids {
+                        if let Some(rekey_events) = event
+                            .calendar_identity_rekey_events(old_message_id, new_message_id)
+                        {
+                            events.extend(rekey_events);
+                            continue;
+                        }
+                        tracing::warn!(
+                            adapter = "mapi",
+                            operation = "poll notifications",
+                            old_message_id = format_args!("{old_message_id:#018x}"),
+                            new_message_id = format_args!("{new_message_id:#018x}"),
+                            "calendar identity replacement did not match its durable notification"
+                        );
+                    }
                     let source_hierarchy_table_event = event.source_hierarchy_table_event();
                     events.push(event);
                     if let Some(source_hierarchy_table_event) = source_hierarchy_table_event {

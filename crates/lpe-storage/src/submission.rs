@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Result};
+use chrono::Utc;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -717,6 +718,19 @@ impl Storage {
         let message_id = Uuid::new_v4();
         let thread_id = Uuid::new_v4();
         let outbound_queue_id = Uuid::new_v4();
+        let submitted_at = Utc::now();
+        let mime_identity = mime::resolve_submission_mime_identity(
+            input.internet_message_id.as_deref(),
+            source_claim
+                .as_ref()
+                .and_then(|claim| claim.internet_message_id.as_deref()),
+            source_claim
+                .as_ref()
+                .and_then(|claim| claim.date_header.as_deref()),
+            message_id,
+            &authorization.from_address,
+            submitted_at,
+        );
         let participants_normalized =
             participants_normalized(&authorization.from_address, &visible_recipients);
         let domain_id = self
@@ -727,6 +741,7 @@ impl Storage {
             &input,
             &body_text,
             &submission_attachments,
+            &mime_identity,
         );
         let blob_id = self
             .store_message_blob_in_tx(
@@ -769,7 +784,7 @@ impl Storage {
                         )
                         VALUES (
                             $1, $2, $3, $4, $5, $6,
-                            $7, $8, NOW(), NOW(), $9, FALSE
+                            $7, $8, $10, $10, $9, FALSE
                         )
                         "#,
                     )
@@ -777,11 +792,12 @@ impl Storage {
                     .bind(&tenant_id)
                     .bind(domain_id)
                     .bind(blob_id)
-                    .bind(input.internet_message_id.clone())
+                    .bind(&mime_identity.internet_message_id)
                     .bind(sha256_hex(raw_message.as_bytes()))
                     .bind(authorized_calendar_response_content_sha256.as_deref())
                     .bind(&subject)
                     .bind(input.size_octets.max(0))
+                    .bind(submitted_at)
                     .execute(&mut *tx)
                     .await?;
 

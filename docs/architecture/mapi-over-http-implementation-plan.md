@@ -1828,33 +1828,65 @@ not by itself authorize broad client publication.
   It must never fall through to generic mail persistence for an
   `IPM.Appointment`.
 - The same import ROP for an existing active or deleted Event returns a writable
-  handle for that canonical Event. The imported SourceKey has to match its
-  current identity; the following property writes and Save update the same
-  Event and preserve its MID/SourceKey while allocating a distinct server CN.
-  A non-conflicting or client-winning update keeps the imported ChangeKey and
-  LMT; a server-winning conflict keeps the current server ChangeKey and LMT,
-  and either accepted conflict commits the merged predecessor lineage. This includes
-  Outlook's required move-then-modify sequence and is atomic through the parent Save; invalid
-  identity material leaves the Event unchanged. This follows `[MS-OXCFXICS]`
-  sections 3.1.5.3, 3.3.4.3.3.2.1.1, and 3.3.4.3.3.2.2.1 and
-  `[MS-OXCMSG]` sections 2.2.3.3.1 and 3.2.5.3.
+  handle for that canonical Event. A matching SourceKey preserves the current
+  MID/SourceKey while Save allocates a distinct server CN. If LPE's GOID
+  correlation policy resolves a different valid client-reserved SourceKey/MID
+  to an existing active Event, Save retains the canonical Event UUID, rekeys
+  only the principal's active MAPI projection to the imported identity, and returns the
+  new MID. The old MID/SourceKey is recorded in repeatable retirement history,
+  and the old MID is emitted as the exact Calendar ICS deletion. A global
+  durable identity-claim ledger prevents any MAPI object or client-reserved
+  special-folder alias from reusing either member of a previously assigned
+  internal-ID/SourceKey pair. A non-conflicting or client-winning update keeps
+  the imported ChangeKey and LMT; a server-winning conflict keeps the current server
+  ChangeKey and LMT, and either accepted conflict commits the merged predecessor
+  lineage. Thus replacement identity does not override the normal content
+  winner. Global and Clean Global Object IDs are decoded through one canonical
+  native/third-party `vCal-Uid` path and, when both are supplied, must be
+  identical after zeroing the occurrence date in the Clean value. Malformed or
+  mismatched pairs fail, and an occurrence-dated GOID or `PidLidIsException`
+  top-level upload remains unsaved until standalone exception import has a
+  canonical representation. This follows `[MS-OXOCAL]` sections 2.2.1.27 and
+  2.2.1.28. The identity transition and canonical Event update are atomic through
+  the parent Save; invalid identity material leaves the Event unchanged. GOID
+  correlation is an LPE interoperability policy and is not attributed to
+  `[MS-OXCFXICS]`. Imported identity and conflict handling follow
+  `[MS-OXCFXICS]` sections 3.1.5.3, 3.1.5.6, and
+  3.3.4.3.3.2.2.1. Exact MID deletion replay follows
+  `[MS-OXCFXICS]` sections 2.2.1.3.1 and 3.2.5.3, while returning the committed
+  replacement MID follows `[MS-OXCMSG]` sections 2.2.3.3.2 and 3.2.5.3.
+- The same-folder identity transition is also two message-object notification
+  events: `ObjectDeleted` for the exact retired MID, followed by
+  `ObjectCreated` for the replacement MID. The committed Calendar change row
+  carries both identities so other live sessions replay the same ordering.
+  Execute-local own-action correlation compares concrete MIDs before the shared
+  canonical Event UUID and therefore cannot collapse the pair; the replacement
+  alone supplies the parent-folder scope for the single hierarchy count
+  refresh. This follows `[MS-OXCNOTIF]` sections 2.2.1.1, 2.2.1.4.1.2, and
+  3.1.4.3.
 - Associated/FAI Save likewise retains the imported ChangeKey. Exchange controls
   `logs/test1_202608031300.saz` raw 306->307, 467->468, 513->514, and
   689->690 preserve the imported associated ChangeKey on initial creation and
   later updates, consistent with the general ICS imported-version rule.
-- Existing-Event imports compare the incoming and current PCLs as specified by
-  `[MS-OXCFXICS]` section 3.1.5.6.1. An older or equal client version is
-  acknowledged without mutating the Event. A conflict with `FailOnConflict`
-  returns `SyncConflict (0x80040802)`; an accepted conflict merges both PCLs
-  and applies the section 3.1.5.6.2.2 last-writer-wins rule. The resulting PCL
-  is a successor of both versions as required by sections 3.1.5.6.2 and
+- Matching-SourceKey Existing-Event imports compare the incoming and current
+  PCLs as specified by `[MS-OXCFXICS]` section 3.1.5.6.1. For an LPE
+  GOID-correlated replacement SourceKey, LPE applies the same PCL and
+  last-writer-wins content-winner algorithm as interoperability policy. An
+  older or equal matching-SourceKey client version is acknowledged without
+  mutating the Event. A conflict with `FailOnConflict` returns
+  `SyncConflict (0x80040802)`; an accepted conflict merges both PCLs and applies
+  the section 3.1.5.6.2.2 last-writer-wins rule. The resulting PCL is a
+  successor of both versions as required by sections 3.1.5.6.2 and
   3.2.5.9.4.2.
 - After a new or changed Calendar import is saved, its upload collector unions
-  the Event's distinct server CN into `MetaTagCnsetSeen`; it does not add that
-  CN to `MetaTagCnsetSeenFAI` or `MetaTagCnsetRead`, and the upload collector
-  never returns `MetaTagIdsetGiven`. The client advances its local Given set
-  after a successful import. This follows `[MS-OXCFXICS]` sections 3.1.5.2.1,
-  3.1.5.3, 3.2.5.2.1, and 3.3.5.8.7.
+  the Event's distinct server CN into `MetaTagCnsetSeen` only when the accepted
+  client content is reflected in the resulting object. A server-winning
+  conflict does not add the retained authoritative CN, so the next download
+  remains able to return that version. Neither case adds the CN to
+  `MetaTagCnsetSeenFAI` or `MetaTagCnsetRead`, and the upload collector never
+  returns `MetaTagIdsetGiven`. The client advances its local Given set after a
+  successful import. This follows `[MS-OXCFXICS]` sections 2.2.1.1.2,
+  3.1.5.2.1, 3.1.5.3, 3.2.5.2.1, 3.2.5.3, and 3.3.5.8.7.
 - Content and hierarchy manifests are selected from canonical folder membership
   and canonical change tracking rather than from primary mailbox fields alone.
 - FastTransfer source buffering emits parseable transfer chunks and validates
@@ -1886,6 +1918,10 @@ not by itself authorize broad client publication.
   for the supported cached-mode sync path.
 - Notes and Journal item projection uses canonical item state and must remain
   aligned with canonical API behavior.
+- Every snapshot-backed Calendar contents load fetches and applies the durable
+  Event CN/ChangeKey/PCL/LMT tuple, including a custom Calendar Folder. A table
+  row and a later open of the same Event therefore expose one version identity
+  rather than fallback table values followed by a different durable tuple.
 - Session-scoped notification support can mark content and hierarchy changes as
   pending, include bounded TableModified-style payloads with the changed folder
   ID, changed message/object ID, canonical change cursor, modseq, folder counts,
@@ -2626,7 +2662,13 @@ FastTransfer/ICS calendar sync can project the bounded recurrence blob back
 from canonical event state. Appointment-like `IPM.Schedule.Meeting.Request`
 payloads that contain only the bounded event property subset are canonicalized
 as `calendar_events`; bounded meeting responses update canonical attendee
-participation status on the existing event. An inbound `text/calendar`
+participation status on the existing event. `PidLidResponseStatus` is projected
+as `0` for an Appointment, `1` only when the mailbox owner organizes the
+Meeting, and `2`/`3`/`4`/`5` from that owner's tentative/accepted/declined/not-
+responded attendee state for an externally organized Meeting. Importing this
+property changes only that owner-attendee; rebuilding recipients preserves the
+other attendees' participation, RSVP, proposed times, and counter markers.
+This follows `[MS-OXOCAL]` sections 2.2.1.11 and 3.1.4.8.1. An inbound `text/calendar`
 `METHOD:REQUEST` with exactly one `VEVENT` is projected as
 `IPM.Schedule.Meeting.Request` even when the RFC 5322 message omits the legacy
 top-level `Content-Class` header. A conflicting MIME `method` parameter is
@@ -2798,6 +2840,14 @@ recipient and no `Bcc`. When the iCalendar response supplies `ORGANIZER`, that
 identity must equal the visible recipient. This response authorization check
 precedes MIME, `Sent`, queue, and source-expunge writes; outbound Event
 correlation remains deferred until attendee-copy save ordering is canonical.
+For MAPI submission, a nonempty full `PidTagSubject` is authoritative; when it
+is absent, the mail Subject and scheduling `SUMMARY` are the exact
+`PidTagSubjectPrefix + PidTagNormalizedSubject` concatenation. Canonical
+submission resolves one safe `Date` and `Message-ID` before rendering the raw
+message, preserves valid locked source/client values, otherwise generates the
+ID from the canonical Message UUID and sender domain, and persists the same
+identity in `messages`, `Sent` MIME, and the outbound handoff. The internal
+`mapi-submit-message` source label maps to queue protocol `mapi`, not `jmap`.
 When a MAPI response supplies `PidLidAppointmentSequence`, it must fit a
 nonnegative 32-bit iCalendar `SEQUENCE`; an invalid value rejects submission
 instead of sending a response that the organizer cannot correlate. Older

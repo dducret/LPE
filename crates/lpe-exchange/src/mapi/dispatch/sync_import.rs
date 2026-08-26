@@ -1359,6 +1359,13 @@ where
     } else {
         Vec::new()
     };
+    if folder_id == CALENDAR_FOLDER_ID
+        || snapshot
+            .collaboration_folder_for_id(folder_id)
+            .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
+    {
+        deleted_object_ids.extend(changes.deleted_calendar_event_object_ids.iter().copied());
+    }
     let associated_config_ids = changes
         .deleted_associated_config_ids
         .iter()
@@ -1377,6 +1384,8 @@ where
                 .unwrap_or_default(),
         );
     }
+    deleted_object_ids.sort_unstable();
+    deleted_object_ids.dedup();
     deleted_object_ids
 }
 

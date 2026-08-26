@@ -5,6 +5,7 @@ pub(in crate::mapi) fn meeting_scheduling_input_property_tag(property_tag: u32) 
         canonical_property_storage_tag(property_tag),
         PID_TAG_MESSAGE_CLASS_W
             | PID_TAG_SUBJECT_W
+            | PID_TAG_SUBJECT_PREFIX_W
             | PID_TAG_NORMALIZED_SUBJECT_W
             | PID_TAG_BODY_W
             | PID_TAG_BODY_HTML_W
@@ -165,10 +166,7 @@ fn meeting_response_attachment(
             PID_TAG_CREATION_TIME,
         ],
     );
-    let subject = pending_text_property(
-        properties,
-        &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
-    );
+    let subject = pending_message_subject(properties);
     let body = pending_body_text_property(properties);
     let location = optional_pending_text_property(properties, &[PID_LID_LOCATION_W_TAG]);
     let Some(organizer_address) = normalize_mapi_submit_address(organizer.address.clone()) else {
@@ -354,10 +352,7 @@ fn meeting_request_attachment(
         ],
     );
 
-    let subject = pending_text_property(
-        properties,
-        &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
-    );
+    let subject = pending_message_subject(properties);
     let body = pending_body_text_property(properties);
     let location = optional_pending_text_property(properties, &[PID_LID_LOCATION_W_TAG]);
     let mut lines = vec![

@@ -582,6 +582,7 @@ impl MapiMailStoreSnapshot {
     pub(crate) fn remember_updated_event(
         &mut self,
         folder_id: u64,
+        previous_event_id: u64,
         event_id: u64,
         event: AccessibleEvent,
         version: MapiEventVersion,
@@ -590,8 +591,10 @@ impl MapiMailStoreSnapshot {
         if let Some(current) = self
             .events
             .iter_mut()
-            .find(|current| current.folder_id == folder_id && current.id == event_id)
+            .find(|current| current.folder_id == folder_id && current.id == previous_event_id)
         {
+            current.id = event_id;
+            current.source_key = mapi_mailstore::source_key_for_store_id(event_id);
             current.canonical_id = event.id;
             current.event = event;
             current.version = version;

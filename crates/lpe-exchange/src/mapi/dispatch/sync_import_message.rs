@@ -52,6 +52,7 @@ pub(super) fn imported_event_transaction(
     mut imported_identity: MapiEventImportedIdentity,
     fail_on_conflict: bool,
 ) -> Result<MapiEventTransaction, u32> {
+    let replacement_identity = imported_identity.source_key != event.source_key;
     let relation = sync_import_version_relation(
         &imported_identity.predecessor_change_list,
         &event.version.predecessor_change_list,
@@ -59,6 +60,13 @@ pub(super) fn imported_event_transaction(
     .map_err(|_| 0x8004_0102u32)?;
     let import_disposition = match relation {
         SyncImportVersionRelation::Newer => MapiEventImportDisposition::Apply,
+        SyncImportVersionRelation::OlderOrSame if replacement_identity => {
+            imported_identity.change_key = event.version.change_key.clone();
+            imported_identity.predecessor_change_list =
+                event.version.predecessor_change_list.clone();
+            imported_identity.last_modification_time = event.version.last_modification_time;
+            MapiEventImportDisposition::KeepServerContent
+        }
         SyncImportVersionRelation::OlderOrSame => MapiEventImportDisposition::IgnoreOlderOrSame,
         SyncImportVersionRelation::Conflict if fail_on_conflict => return Err(0x8004_0802),
         SyncImportVersionRelation::Conflict => {

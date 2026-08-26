@@ -948,7 +948,7 @@ used_for = [
   "Repeated property mutation and save through a Message handle retained read/write by SaveFlags bit 0x02",
   "Outlook Contacts FAI SaveFlags 0x0E handling with unlisted bits ignored and compatible ForceSave/KeepOpenReadWrite behavior retained",
   "Calendar Event optimistic conflict detection at Save and ForceSave overwrite semantics",
-  "Deterministic Calendar Subject, NormalizedSubject, and empty SubjectPrefix relationship",
+  "Deterministic full Subject concatenation from SubjectPrefix and NormalizedSubject, including Calendar response submission",
   "Coherent PidTagBodyHtml and PidTagHtml conversion for Calendar Event bodies",
   "Calendar Event PidTagLocalCommitTime update when RopSaveChangesMessage is processed",
   "Committed FAI content PidTagLocalCommitTime as the server commit performed by RopSaveChangesMessage, distinct from an imported PidTagLastModificationTime",
@@ -2150,6 +2150,7 @@ used_for = [
   "Partial-recipient Meeting Updates sent only to newly added attendees",
   "Client-authored PidLidAppointmentColor validation and durable Calendar passthrough",
   "Probe H PidLidIntendedBusyStatus signed-value preservation across import, canonical update, and full ICS replay",
+  "Localized Meeting Response SubjectPrefix preservation in canonical MAPI submission subjects",
 ]
 sections = [
   "2.2.1 Common Properties",
@@ -2193,6 +2194,7 @@ sections = [
   "2.2.6.4 PidLidIntendedBusyStatus Property",
   "2.2.6.5 PidLidMeetingType Property",
   "2.2.6.6 PidLidAppointmentMessageClass Property",
+  "2.2.7.2 PidTagSubjectPrefix Property",
   "2.2.12.5 PidTagScheduleInfoAppointmentTombstone Property",
   "2.2.12.5.1 Record Structure",
   "3.1.4.2 Converting an Appointment Object to a Meeting Object",

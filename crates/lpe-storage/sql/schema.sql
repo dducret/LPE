@@ -2435,6 +2435,91 @@ CREATE INDEX mapi_calendar_event_identity_moves_old_id_idx
 CREATE INDEX mapi_calendar_event_identity_moves_old_source_key_idx
     ON mapi_calendar_event_identity_moves (tenant_id, account_id, old_source_key);
 
+CREATE TABLE mapi_calendar_event_identity_retirements (
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    event_id UUID NOT NULL,
+    old_mapi_object_id BIGINT NOT NULL CHECK ((old_mapi_object_id & 65535) = 1),
+    replacement_mapi_object_id BIGINT NOT NULL CHECK ((replacement_mapi_object_id & 65535) = 1),
+    old_source_key BYTEA NOT NULL CHECK (octet_length(old_source_key) = 22),
+    replacement_source_key BYTEA NOT NULL CHECK (octet_length(replacement_source_key) = 22),
+    retired_change_number BIGINT NOT NULL CHECK (retired_change_number >= 43 AND retired_change_number < 140737454800896),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, account_id, old_mapi_object_id),
+    UNIQUE (old_mapi_object_id),
+    UNIQUE (old_source_key),
+    CHECK (old_mapi_object_id <> replacement_mapi_object_id),
+    CHECK (old_source_key <> replacement_source_key),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX mapi_calendar_event_identity_retirements_event_idx
+    ON mapi_calendar_event_identity_retirements (tenant_id, account_id, event_id, created_at);
+
+CREATE TABLE mapi_object_identity_claims (
+    mapi_object_id BIGINT PRIMARY KEY CHECK ((mapi_object_id & 65535) = 1),
+    source_key BYTEA NOT NULL UNIQUE CHECK (octet_length(source_key) = 22),
+    claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE FUNCTION claim_mapi_object_identity()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF TG_OP = 'UPDATE'
+       AND OLD.mapi_object_id = NEW.mapi_object_id
+       AND OLD.source_key = NEW.source_key THEN
+        RETURN NEW;
+    END IF;
+    INSERT INTO mapi_object_identity_claims (mapi_object_id, source_key)
+    VALUES (NEW.mapi_object_id, NEW.source_key);
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER mapi_object_identities_claim_identity
+AFTER INSERT OR UPDATE OF mapi_object_id, source_key ON mapi_object_identities
+FOR EACH ROW EXECUTE FUNCTION claim_mapi_object_identity();
+
+CREATE FUNCTION claim_mapi_special_folder_alias_identity()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF TG_OP = 'UPDATE'
+       AND OLD.alias_folder_id = NEW.alias_folder_id
+       AND OLD.source_key = NEW.source_key THEN
+        RETURN NEW;
+    END IF;
+    INSERT INTO mapi_object_identity_claims (mapi_object_id, source_key)
+    VALUES (NEW.alias_folder_id, NEW.source_key);
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER mapi_special_folder_aliases_claim_identity
+AFTER INSERT OR UPDATE OF alias_folder_id, source_key ON mapi_special_folder_aliases
+FOR EACH ROW EXECUTE FUNCTION claim_mapi_special_folder_alias_identity();
+
+CREATE FUNCTION prevent_mapi_object_identity_claim_mutation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'MAPI object identity claims are immutable'
+        USING ERRCODE = '55000';
+END;
+$$;
+
+CREATE TRIGGER mapi_object_identity_claims_immutable
+BEFORE UPDATE OR DELETE ON mapi_object_identity_claims
+FOR EACH ROW EXECUTE FUNCTION prevent_mapi_object_identity_claim_mutation();
+
+CREATE TRIGGER mapi_object_identity_claims_no_truncate
+BEFORE TRUNCATE ON mapi_object_identity_claims
+FOR EACH STATEMENT EXECUTE FUNCTION prevent_mapi_object_identity_claim_mutation();
+
 CREATE TABLE mapi_named_properties (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,

@@ -1,17 +1,47 @@
 use super::{AttachmentUploadInput, SubmitMessageInput};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+use chrono::{DateTime, Utc};
 use lpe_domain::mail_format::{
     format_mailbox_address, quote_header_parameter, sanitize_header_value, DisplayNamePolicy,
 };
 use uuid::Uuid;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SubmissionMimeIdentity {
+    pub(super) internet_message_id: String,
+    pub(super) date: String,
+}
+
+pub(super) fn resolve_submission_mime_identity(
+    supplied_internet_message_id: Option<&str>,
+    source_internet_message_id: Option<&str>,
+    source_date: Option<&str>,
+    message_id: Uuid,
+    from_address: &str,
+    submitted_at: DateTime<Utc>,
+) -> SubmissionMimeIdentity {
+    let internet_message_id = supplied_internet_message_id
+        .and_then(valid_internet_message_id)
+        .or_else(|| source_internet_message_id.and_then(valid_internet_message_id))
+        .unwrap_or_else(|| generated_internet_message_id(message_id, from_address));
+    let date = source_date
+        .and_then(valid_date_header)
+        .unwrap_or_else(|| submitted_at.to_rfc2822());
+
+    SubmissionMimeIdentity {
+        internet_message_id,
+        date,
+    }
+}
 
 pub(super) fn render_submission_raw_message(
     from_address: &str,
     input: &SubmitMessageInput,
     body_text: &str,
     attachments: &[AttachmentUploadInput],
+    identity: &SubmissionMimeIdentity,
 ) -> String {
-    let mut headers = submission_headers(from_address, input);
+    let mut headers = submission_headers(from_address, input, identity);
     let Some((calendar_index, calendar)) = attachments
         .iter()
         .enumerate()
@@ -91,11 +121,19 @@ pub(super) fn render_submission_raw_message(
     headers.join("\r\n")
 }
 
-fn submission_headers(from_address: &str, input: &SubmitMessageInput) -> Vec<String> {
-    let mut headers = vec![format!(
-        "From: {}",
-        header_mailbox(input.from_display.as_deref(), from_address)
-    )];
+fn submission_headers(
+    from_address: &str,
+    input: &SubmitMessageInput,
+    identity: &SubmissionMimeIdentity,
+) -> Vec<String> {
+    let mut headers = vec![
+        format!("Date: {}", identity.date),
+        format!("Message-ID: {}", identity.internet_message_id),
+        format!(
+            "From: {}",
+            header_mailbox(input.from_display.as_deref(), from_address)
+        ),
+    ];
     if let Some(sender_address) = input
         .sender_address
         .as_deref()
@@ -117,6 +155,76 @@ fn submission_headers(from_address: &str, input: &SubmitMessageInput) -> Vec<Str
         sanitize_header_value(&input.subject)
     ));
     headers
+}
+
+fn valid_internet_message_id(value: &str) -> Option<String> {
+    let value = value.trim();
+    let inner = value.strip_prefix('<')?.strip_suffix('>')?;
+    let (left, right) = inner.split_once('@')?;
+    if right.contains('@') || !is_dot_atom(left) || !is_message_id_right(right) {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+fn is_dot_atom(value: &str) -> bool {
+    !value.is_empty()
+        && value.split('.').all(|atom| {
+            !atom.is_empty()
+                && atom.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric()
+                        || matches!(
+                            byte,
+                            b'!' | b'#'
+                                | b'$'
+                                | b'%'
+                                | b'&'
+                                | b'\''
+                                | b'*'
+                                | b'+'
+                                | b'-'
+                                | b'/'
+                                | b'='
+                                | b'?'
+                                | b'^'
+                                | b'_'
+                                | b'`'
+                                | b'{'
+                                | b'|'
+                                | b'}'
+                                | b'~'
+                        )
+                })
+        })
+}
+
+fn is_message_id_right(value: &str) -> bool {
+    is_dot_atom(value)
+        || value
+            .strip_prefix('[')
+            .and_then(|value| value.strip_suffix(']'))
+            .is_some_and(|literal| {
+                !literal.is_empty()
+                    && literal
+                        .bytes()
+                        .all(|byte| byte.is_ascii_graphic() && !matches!(byte, b'[' | b']' | b'\\'))
+            })
+}
+
+fn generated_internet_message_id(message_id: Uuid, from_address: &str) -> String {
+    let domain = from_address
+        .rsplit_once('@')
+        .map(|(_, domain)| domain.trim())
+        .filter(|domain| is_dot_atom(domain))
+        .unwrap_or("lpe.invalid");
+    format!("<{message_id}@{domain}>")
+}
+
+fn valid_date_header(value: &str) -> Option<String> {
+    let value = value.trim();
+    DateTime::parse_from_rfc2822(value)
+        .is_ok()
+        .then(|| value.to_string())
 }
 
 fn render_attachment_mime_part(attachment: &AttachmentUploadInput) -> Vec<String> {
@@ -227,6 +335,82 @@ mod tests {
         }
     }
 
+    fn identity() -> SubmissionMimeIdentity {
+        SubmissionMimeIdentity {
+            internet_message_id: "<submission@example.test>".to_string(),
+            date: "Tue, 25 Aug 2026 18:00:00 +0000".to_string(),
+        }
+    }
+
+    fn submitted_at() -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339("2026-08-25T18:00:00Z")
+            .expect("fixed submission time must parse")
+            .with_timezone(&Utc)
+    }
+
+    #[test]
+    fn missing_submission_identity_is_generated_once_for_the_canonical_mime() {
+        let message_id = Uuid::parse_str("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")
+            .expect("fixed message id must parse");
+        let identity = resolve_submission_mime_identity(
+            None,
+            None,
+            None,
+            message_id,
+            "sender@example.test",
+            submitted_at(),
+        );
+        assert_eq!(
+            identity.internet_message_id,
+            "<aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee@example.test>"
+        );
+        assert_eq!(identity.date, "Tue, 25 Aug 2026 18:00:00 +0000");
+
+        let input = input();
+        let raw =
+            render_submission_raw_message("sender@example.test", &input, "Agenda", &[], &identity);
+        assert_eq!(raw.matches("\r\nMessage-ID:").count(), 1);
+        assert_eq!(raw.matches("\r\nDate:").count(), 0);
+        assert!(raw.starts_with(
+            "Date: Tue, 25 Aug 2026 18:00:00 +0000\r\nMessage-ID: <aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee@example.test>\r\n"
+        ));
+    }
+
+    #[test]
+    fn valid_client_submission_identity_is_preserved() {
+        let identity = resolve_submission_mime_identity(
+            Some("  <client.id+tag@example.test>  "),
+            Some("<source@example.test>"),
+            Some("Mon, 24 Aug 2026 22:15:01 +0200"),
+            Uuid::nil(),
+            "sender@example.test",
+            submitted_at(),
+        );
+
+        assert_eq!(
+            identity,
+            SubmissionMimeIdentity {
+                internet_message_id: "<client.id+tag@example.test>".to_string(),
+                date: "Mon, 24 Aug 2026 22:15:01 +0200".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn unsafe_client_identity_falls_back_without_header_injection() {
+        let identity = resolve_submission_mime_identity(
+            Some("<client@example.test>\r\nBcc: injected@example.test"),
+            Some("<source@example.test>"),
+            Some("Mon, 24 Aug 2026 22:15:01 +0200\r\nX-Injected: yes"),
+            Uuid::nil(),
+            "sender@example.test",
+            submitted_at(),
+        );
+
+        assert_eq!(identity.internet_message_id, "<source@example.test>");
+        assert_eq!(identity.date, "Tue, 25 Aug 2026 18:00:00 +0000");
+    }
+
     #[test]
     fn calendar_invitation_renders_calendar_mime_without_bcc() {
         let input = input();
@@ -242,6 +426,7 @@ mod tests {
                 is_scheduling_body: true,
                 blob_bytes: b"BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nEND:VCALENDAR".to_vec(),
             }],
+            &identity(),
         );
 
         assert!(raw.contains("Content-Type: multipart/alternative"));
@@ -301,6 +486,7 @@ mod tests {
                     blob_bytes: ordinary_ics.to_vec(),
                 },
             ],
+            &identity(),
         );
 
         assert!(raw.contains("Content-Type: multipart/mixed"));
@@ -342,6 +528,7 @@ mod tests {
                 is_scheduling_body: true,
                 blob_bytes: b"BEGIN:VCALENDAR\r\nMETHOD:REPLY\r\nEND:VCALENDAR".to_vec(),
             }],
+            &identity(),
         );
 
         assert!(raw.contains("From: \"Ducret, Denis\" <denis.ducret@sdic.ch>"));
@@ -369,6 +556,7 @@ mod tests {
                 is_scheduling_body: true,
                 blob_bytes: b"BEGIN:VCALENDAR\r\nMETHOD:REPLY\r\nEND:VCALENDAR".to_vec(),
             }],
+            &identity(),
         );
 
         assert!(!raw.contains("\r\nBcc: injected@example.test"));
@@ -392,6 +580,7 @@ mod tests {
             &input,
             "Agenda",
             &[],
+            &identity(),
         );
 
         assert!(!raw.contains("\r\nBcc: injected@example.test"));
@@ -415,6 +604,7 @@ mod tests {
                 is_scheduling_body: false,
                 blob_bytes: ordinary_calendar.to_vec(),
             }],
+            &identity(),
         );
 
         assert!(!raw.contains("Content-Class: urn:content-classes:calendarmessage"));

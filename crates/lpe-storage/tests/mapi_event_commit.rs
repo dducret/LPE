@@ -2013,6 +2013,355 @@ async fn microsoft_oxcfxics_imported_event_save_preserves_client_version_and_all
 }
 
 #[tokio::test]
+async fn calendar_event_rekey_retires_each_mid_and_never_reuses_its_identity() -> Result<()> {
+    let _guard = database_test_lock().lock().await;
+    let Some(fixture) = event_fixture().await? else {
+        return Ok(());
+    };
+    let event_id = Uuid::new_v4();
+    let source_counter = 0x0df8_974b_7f70;
+    let first_replacement_counter = source_counter + 1;
+    let second_replacement_counter = source_counter + 2;
+    reserve_imported_event_range(&fixture, source_counter, second_replacement_counter).await?;
+    let initial_change_key = vec![
+        0x67, 0x45, 0x48, 0x20, 0x69, 0x60, 0xca, 0x40, 0x9d, 0x80, 0x08, 0x17, 0x06, 0x0f, 0xa2,
+        0xc1, 0x00, 0x00, 0x04, 0x60,
+    ];
+    let mut create = create_input(
+        fixture.account_id,
+        "default",
+        event_id,
+        "Probe 4 initial identity",
+    );
+    create.imported_identity = Some(MapiEventImportedIdentity {
+        source_key: change_key(source_counter),
+        change_key: initial_change_key.clone(),
+        predecessor_change_list: predecessor_change_list(&initial_change_key),
+        last_modification_time: 134_309_167_800_000_000,
+    });
+    let created = fixture.storage.create_mapi_event(create).await?;
+
+    let mut expected_modseq = created.version.canonical_modseq;
+    let mut previous_counter = source_counter;
+    for (index, replacement_counter) in [first_replacement_counter, second_replacement_counter]
+        .into_iter()
+        .enumerate()
+    {
+        let mut imported_change_key = vec![0x68; 16];
+        imported_change_key.extend_from_slice(&(0x470u64 + index as u64).to_be_bytes()[2..]);
+        let imported_predecessor_change_list = predecessor_change_list(&imported_change_key);
+        let imported_last_modification_time = 134_309_168_400_000_000 + index as u64 * 600_000_000;
+        let mut event = create_input(
+            fixture.account_id,
+            "default",
+            event_id,
+            &format!("Probe 4 replacement {}", index + 1),
+        )
+        .event;
+        event.sequence = (index + 1) as i32;
+        let outcome = fixture
+            .storage
+            .commit_mapi_event_update(MapiEventCommitInput {
+                principal_account_id: fixture.account_id,
+                event_id,
+                expected_modseq,
+                force_save: false,
+                imported_identity: Some(MapiEventImportedIdentity {
+                    source_key: change_key(replacement_counter),
+                    change_key: imported_change_key.clone(),
+                    predecessor_change_list: imported_predecessor_change_list.clone(),
+                    last_modification_time: imported_last_modification_time,
+                }),
+                event: Some(event),
+                reminder: MapiEventReminderPatch::default(),
+                custom_property_upserts: Vec::new(),
+                custom_property_deletes: Vec::new(),
+                attachment_changes: MapiEventAttachmentChanges::default(),
+            })
+            .await?;
+        let MapiEventCommitOutcome::Saved(saved) = outcome else {
+            panic!("expected replacement Calendar identity to be saved");
+        };
+        assert_eq!(saved.mapi_object_id, mapi_store_id(replacement_counter));
+        assert!(saved.version.change_number > replacement_counter);
+        assert_eq!(saved.version.change_key, imported_change_key);
+        assert_eq!(
+            saved.version.predecessor_change_list,
+            imported_predecessor_change_list
+        );
+        assert_eq!(
+            saved.version.last_modification_time,
+            imported_last_modification_time
+        );
+        expected_modseq = saved.version.canonical_modseq;
+
+        let retirement = sqlx::query(
+            r#"
+            SELECT old_mapi_object_id, replacement_mapi_object_id,
+                   old_source_key, replacement_source_key
+            FROM mapi_calendar_event_identity_retirements
+            WHERE account_id = $1 AND event_id = $2 AND old_mapi_object_id = $3
+            "#,
+        )
+        .bind(fixture.account_id)
+        .bind(event_id)
+        .bind(mapi_store_id(previous_counter) as i64)
+        .fetch_one(fixture.storage.pool())
+        .await?;
+        assert_eq!(
+            retirement.get::<i64, _>("replacement_mapi_object_id"),
+            mapi_store_id(replacement_counter) as i64
+        );
+        assert_eq!(
+            retirement.get::<Vec<u8>, _>("old_source_key"),
+            change_key(previous_counter)
+        );
+        assert_eq!(
+            retirement.get::<Vec<u8>, _>("replacement_source_key"),
+            change_key(replacement_counter)
+        );
+        previous_counter = replacement_counter;
+    }
+
+    let change_log_count_before_rejected_reuse =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM mail_change_log WHERE object_id = $1")
+            .bind(event_id)
+            .fetch_one(fixture.storage.pool())
+            .await?;
+    let retirement_count_before_rejected_reuse = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM mapi_calendar_event_identity_retirements \
+         WHERE account_id = $1 AND event_id = $2",
+    )
+    .bind(fixture.account_id)
+    .bind(event_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    let rejected_change_key = vec![0x69; 22];
+    let rejected_reuse = fixture
+        .storage
+        .commit_mapi_event_update(MapiEventCommitInput {
+            principal_account_id: fixture.account_id,
+            event_id,
+            expected_modseq,
+            force_save: false,
+            imported_identity: Some(MapiEventImportedIdentity {
+                source_key: change_key(source_counter),
+                change_key: rejected_change_key.clone(),
+                predecessor_change_list: predecessor_change_list(&rejected_change_key),
+                last_modification_time: 134_309_169_600_000_000,
+            }),
+            event: Some(
+                create_input(
+                    fixture.account_id,
+                    "default",
+                    event_id,
+                    "Rejected retired identity reuse",
+                )
+                .event,
+            ),
+            reminder: MapiEventReminderPatch::default(),
+            custom_property_upserts: Vec::new(),
+            custom_property_deletes: Vec::new(),
+            attachment_changes: MapiEventAttachmentChanges::default(),
+        })
+        .await
+        .expect_err("rekeying a Calendar Event back to a retired SourceKey must fail");
+    assert!(
+        format!("{rejected_reuse:#}").contains("already retired"),
+        "unexpected retired identity rejection: {rejected_reuse:#}"
+    );
+
+    let persisted = sqlx::query(
+        r#"
+        SELECT event.id, event.title, event.modseq,
+               identity.mapi_object_id, identity.source_key
+        FROM calendar_events event
+        JOIN mapi_object_identities identity
+          ON identity.tenant_id = event.tenant_id
+         AND identity.account_id = $2
+         AND identity.object_kind = 'calendar_event'
+         AND identity.canonical_id = event.id
+         AND identity.deleted_at IS NULL
+        WHERE event.id = $1
+        "#,
+    )
+    .bind(event_id)
+    .bind(fixture.account_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(persisted.get::<Uuid, _>("id"), event_id);
+    assert_eq!(persisted.get::<String, _>("title"), "Probe 4 replacement 2");
+    assert_eq!(persisted.get::<i64, _>("modseq"), expected_modseq);
+    assert_eq!(
+        persisted.get::<i64, _>("mapi_object_id"),
+        mapi_store_id(second_replacement_counter) as i64
+    );
+    assert_eq!(
+        persisted.get::<Vec<u8>, _>("source_key"),
+        change_key(second_replacement_counter)
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM mapi_calendar_event_identity_retirements \
+             WHERE account_id = $1 AND event_id = $2"
+        )
+        .bind(fixture.account_id)
+        .bind(event_id)
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        retirement_count_before_rejected_reuse
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM mail_change_log WHERE object_id = $1")
+            .bind(event_id)
+            .fetch_one(fixture.storage.pool())
+            .await?,
+        change_log_count_before_rejected_reuse
+    );
+
+    let journal = sqlx::query(
+        r#"
+        SELECT summary_json
+        FROM mail_change_log
+        WHERE object_kind = 'calendar_event'
+          AND object_id = $1
+          AND jsonb_typeof(summary_json->'oldMapiObjectId') = 'number'
+        ORDER BY cursor
+        "#,
+    )
+    .bind(event_id)
+    .fetch_all(fixture.storage.pool())
+    .await?;
+    assert_eq!(journal.len(), 2);
+    let account_id = fixture.account_id.to_string();
+    for (row, (old_counter, new_counter)) in journal.iter().zip([
+        (source_counter, first_replacement_counter),
+        (first_replacement_counter, second_replacement_counter),
+    ]) {
+        let summary = row.get::<serde_json::Value, _>("summary_json");
+        assert_eq!(
+            summary
+                .get("mapiIdentityAccountId")
+                .and_then(serde_json::Value::as_str),
+            Some(account_id.as_str())
+        );
+        assert_eq!(
+            summary
+                .get("oldMapiObjectId")
+                .and_then(serde_json::Value::as_u64),
+            Some(mapi_store_id(old_counter))
+        );
+        assert_eq!(
+            summary
+                .get("newMapiObjectId")
+                .and_then(serde_json::Value::as_u64),
+            Some(mapi_store_id(new_counter))
+        );
+    }
+
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM mapi_object_identity_claims \
+             WHERE mapi_object_id = ANY($1)"
+        )
+        .bind(
+            &[
+                mapi_store_id(source_counter) as i64,
+                mapi_store_id(first_replacement_counter) as i64,
+                mapi_store_id(second_replacement_counter) as i64,
+            ][..]
+        )
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        3
+    );
+
+    let reuse_change_number = FIRST_RESERVED_HIGH_GLOBAL_COUNTER - 10;
+    let reuse_change_key = change_key(reuse_change_number);
+    let reuse_error = sqlx::query(
+        r#"
+        INSERT INTO mapi_object_identities (
+            tenant_id, account_id, object_kind, canonical_id,
+            mapi_global_counter, mapi_object_id, source_key, change_key,
+            instance_key, mapi_change_number, predecessor_change_list
+        )
+        VALUES ($1, $2, 'contact', $3, $4, $5, $6, $7, $6, $8, $9)
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(Uuid::new_v4())
+    .bind(source_counter as i64)
+    .bind(mapi_store_id(source_counter) as i64)
+    .bind(change_key(source_counter))
+    .bind(&reuse_change_key)
+    .bind(reuse_change_number as i64)
+    .bind(predecessor_change_list(&reuse_change_key))
+    .execute(fixture.storage.pool())
+    .await
+    .expect_err("a retired Calendar MID/SourceKey must be rejected for every MAPI object kind");
+    assert_eq!(
+        reuse_error
+            .as_database_error()
+            .and_then(|error| error.code().map(|code| code.into_owned()))
+            .as_deref(),
+        Some("23505")
+    );
+
+    for (label, global_counter, object_id, source_key, change_number, constraint) in [
+        (
+            "retired SourceKey with a fresh MID",
+            second_replacement_counter + 10,
+            mapi_store_id(second_replacement_counter + 10),
+            change_key(source_counter),
+            FIRST_RESERVED_HIGH_GLOBAL_COUNTER - 11,
+            "mapi_object_identity_claims_source_key_key",
+        ),
+        (
+            "retired MID with a fresh SourceKey",
+            second_replacement_counter + 11,
+            mapi_store_id(source_counter),
+            change_key(second_replacement_counter + 11),
+            FIRST_RESERVED_HIGH_GLOBAL_COUNTER - 12,
+            "mapi_object_identity_claims_pkey",
+        ),
+    ] {
+        let imported_change_key = change_key(change_number);
+        let error = sqlx::query(
+            r#"
+            INSERT INTO mapi_object_identities (
+                tenant_id, account_id, object_kind, canonical_id,
+                mapi_global_counter, mapi_object_id, source_key, change_key,
+                instance_key, mapi_change_number, predecessor_change_list
+            )
+            VALUES ($1, $2, 'contact', $3, $4, $5, $6, $7, $6, $8, $9)
+            "#,
+        )
+        .bind(fixture.tenant_id)
+        .bind(fixture.account_id)
+        .bind(Uuid::new_v4())
+        .bind(global_counter as i64)
+        .bind(object_id as i64)
+        .bind(&source_key)
+        .bind(&imported_change_key)
+        .bind(change_number as i64)
+        .bind(predecessor_change_list(&imported_change_key))
+        .execute(fixture.storage.pool())
+        .await
+        .expect_err(label);
+        assert_eq!(
+            error
+                .as_database_error()
+                .and_then(|error| error.constraint()),
+            Some(constraint),
+            "{label} must fail at the permanent identity ledger"
+        );
+    }
+
+    fixture.cleanup().await
+}
+
+#[tokio::test]
 async fn microsoft_oxcfxics_imported_calendar_move_is_atomic_and_keeps_destination_xids(
 ) -> Result<()> {
     let _guard = database_test_lock().lock().await;

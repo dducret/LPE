@@ -13,6 +13,7 @@ include!("storage_impl/mapi_permissions.rs");
 include!("storage_impl/mapi_special_folder_aliases.rs");
 include!("storage_impl/ews_notifications.rs");
 include!("storage_impl/public_address_im.rs");
+include!("storage_impl/calendar_rekey_notifications.rs");
 include!("storage_impl/collaboration.rs");
 include!("storage_impl/mailbox_config.rs");
 include!("storage_impl/messages.rs");

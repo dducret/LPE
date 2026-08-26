@@ -88,6 +88,31 @@ fn valid_swapped_todo_data() -> Vec<u8> {
 }
 
 #[test]
+fn pending_and_saved_message_submit_builders_use_the_mapi_adapter_source() {
+    let principal = store_test_principal(Uuid::from_u128(0x5555));
+    let properties = HashMap::from([(
+        PID_TAG_SUBJECT_W,
+        MapiValue::String("MAPI source protocol".to_string()),
+    )]);
+    let recipients = vec![PendingRecipient {
+        row_id: 1,
+        address: "recipient@example.test".to_string(),
+        display_name: Some("Recipient".to_string()),
+        recipient_type: 0x01,
+        recipient_flags: 0x0000_0001,
+    }];
+
+    let pending = mapi_submit_from_pending_message(&principal, &properties, &recipients).unwrap();
+    let saved_email = recipient_delivery_test_email();
+    let saved = mapi_submit_from_email(&principal, &saved_email, Vec::new());
+
+    assert_eq!(pending.source, "mapi-submit-message");
+    assert_eq!(pending.draft_message_id, None);
+    assert_eq!(saved.source, "mapi-submit-message");
+    assert_eq!(saved.draft_message_id, Some(saved_email.id));
+}
+
+#[test]
 fn pending_html_only_message_derives_plain_body_for_save_and_submit() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
@@ -292,8 +317,12 @@ fn meeting_response_submit_correlates_declined_counter_and_represented_sender() 
         MapiValue::String("IPM.Schedule.Meeting.Resp.Neg".to_string()),
     );
     properties.insert(
-        PID_TAG_SUBJECT_W,
-        MapiValue::String("New Time Proposed: Probe 6".to_string()),
+        PID_TAG_SUBJECT_PREFIX_W,
+        MapiValue::String("New Time Proposed: ".to_string()),
+    );
+    properties.insert(
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        MapiValue::String("Probe 6".to_string()),
     );
     properties.insert(
         PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
@@ -348,6 +377,7 @@ fn meeting_response_submit_correlates_declined_counter_and_represented_sender() 
 
     let submitted = mapi_submit_from_pending_message(&principal, &properties, &recipients).unwrap();
 
+    assert_eq!(submitted.subject, "New Time Proposed: Probe 6");
     assert_eq!(submitted.from_address, "attendee@example.test");
     assert_eq!(submitted.from_display.as_deref(), Some("Attendee"));
     assert_eq!(
@@ -365,6 +395,7 @@ fn meeting_response_submit_correlates_declined_counter_and_represented_sender() 
     assert!(submitted.attachments[0].is_scheduling_body);
     let calendar = String::from_utf8_lossy(&submitted.attachments[0].blob_bytes);
     assert!(calendar.contains("METHOD:COUNTER"));
+    assert!(calendar.contains("SUMMARY:New Time Proposed: Probe 6"));
     assert!(calendar.contains("PARTSTAT=DECLINED:mailto:attendee@example.test"));
     assert!(calendar.contains("ORGANIZER;CN=\"Organizer\":mailto:organizer@example.test"));
     assert!(calendar.contains("X-MS-OLK-ORIGINALSTART:20260821T180000Z"));
@@ -390,9 +421,26 @@ fn meeting_response_submit_correlates_declined_counter_and_represented_sender() 
         Some("delegate@example.test")
     );
     assert_eq!(imported.sender_display.as_deref(), Some("Delegate"));
+    assert_eq!(imported.subject, "New Time Proposed: Probe 6");
     assert_eq!(imported.attachments.len(), 1);
     assert!(imported.attachments[0].is_scheduling_body);
     assert!(String::from_utf8_lossy(&imported.attachments[0].blob_bytes).contains("METHOD:COUNTER"));
+
+    properties.insert(
+        PID_TAG_SUBJECT_W,
+        MapiValue::String("New Time Proposed: Probe 6".to_string()),
+    );
+    let with_full_subject =
+        mapi_submit_from_pending_message(&principal, &properties, &recipients).unwrap();
+    assert_eq!(with_full_subject.subject, "New Time Proposed: Probe 6");
+    assert!(
+        String::from_utf8_lossy(&with_full_subject.attachments[0].blob_bytes)
+            .contains("SUMMARY:New Time Proposed: Probe 6")
+    );
+    assert!(
+        !String::from_utf8_lossy(&with_full_subject.attachments[0].blob_bytes)
+            .contains("SUMMARY:New Time Proposed: New Time Proposed: Probe 6")
+    );
 
     properties.remove(&PID_TAG_SENT_REPRESENTING_NAME_W);
     let without_represented_name =
@@ -5518,7 +5566,7 @@ fn calendar_projection_does_not_mark_an_appointment_without_attendees_as_a_meeti
 }
 
 #[test]
-fn mapi_event_write_uses_the_same_uid_form_as_external_meeting_responses() {
+fn mapi_event_write_validates_and_canonicalizes_global_object_ids() {
     let mut existing = default_event_for_mapping(Uuid::nil(), "default");
     existing.uid = "existing@example.test".to_string();
 
@@ -5540,7 +5588,7 @@ fn mapi_event_write_uses_the_same_uid_form_as_external_meeting_responses() {
     occurrence_goid[16..20].copy_from_slice(&[0x07, 0xEA, 0x08, 0x18]);
     let mut clean_goid = occurrence_goid.clone();
     clean_goid[16..20].fill(0);
-    let native = event_input_from_mapi(
+    let occurrence_error = event_input_from_mapi(
         Uuid::nil(),
         Some(existing.id),
         &existing,
@@ -5548,6 +5596,27 @@ fn mapi_event_write_uses_the_same_uid_form_as_external_meeting_responses() {
             PID_LID_GLOBAL_OBJECT_ID_TAG,
             MapiValue::Binary(occurrence_goid),
         )]),
+    )
+    .unwrap_err();
+    assert!(
+        format!("{occurrence_error:#}").contains("top-level Calendar exception"),
+        "unexpected occurrence rejection: {occurrence_error:#}"
+    );
+
+    let native = event_input_from_mapi(
+        Uuid::nil(),
+        Some(existing.id),
+        &existing,
+        &HashMap::from([
+            (
+                PID_LID_GLOBAL_OBJECT_ID_TAG,
+                MapiValue::Binary(clean_goid.clone()),
+            ),
+            (
+                PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG,
+                MapiValue::Binary(clean_goid.clone()),
+            ),
+        ]),
     )
     .unwrap();
     assert_eq!(
@@ -5564,8 +5633,43 @@ fn mapi_event_write_uses_the_same_uid_form_as_external_meeting_responses() {
             MapiValue::Binary(vec![0x04, 0x00]),
         )]),
     )
-    .unwrap();
-    assert_eq!(malformed.uid, existing.uid);
+    .unwrap_err();
+    assert!(format!("{malformed:#}").contains("malformed"));
+
+    let mut mismatched_clean = clean_goid.clone();
+    *mismatched_clean.last_mut().unwrap() ^= 0x01;
+    let mismatch = event_input_from_mapi(
+        Uuid::nil(),
+        Some(existing.id),
+        &existing,
+        &HashMap::from([
+            (PID_LID_GLOBAL_OBJECT_ID_TAG, MapiValue::Binary(clean_goid)),
+            (
+                PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG,
+                MapiValue::Binary(mismatched_clean),
+            ),
+        ]),
+    )
+    .unwrap_err();
+    assert!(format!("{mismatch:#}").contains("does not match"));
+
+    let exception = event_input_from_mapi(
+        Uuid::nil(),
+        Some(existing.id),
+        &existing,
+        &HashMap::from([
+            (
+                PID_LID_GLOBAL_OBJECT_ID_TAG,
+                MapiValue::Binary(calendar_global_object_id_from_uid(
+                    "orphan@example.test",
+                    Uuid::nil(),
+                )),
+            ),
+            (PID_LID_IS_EXCEPTION_TAG, MapiValue::Bool(true)),
+        ]),
+    )
+    .unwrap_err();
+    assert!(format!("{exception:#}").contains("top-level Calendar exception"));
 }
 
 #[test]

@@ -413,13 +413,11 @@ fn validate_pending_event_canonical_property_values(
     let (canonical_values, _): (Vec<_>, Vec<_>) = property_values
         .into_iter()
         .partition(|(tag, _)| !is_calendar_passthrough_property_tag(*tag));
-    event_input_from_mapi(
+    validate_calendar_event_input_for_staging(
         account_id,
-        None,
-        &default_event_for_mapping(account_id, DEFAULT_CALENDAR_COLLECTION_ID),
+        DEFAULT_CALENDAR_COLLECTION_ID,
         &canonical_values.into_iter().collect(),
-    )?;
-    Ok(())
+    )
 }
 
 pub(super) fn stage_pending_event_property_deletions(

@@ -11,9 +11,7 @@ use uuid::Uuid;
 
 use crate::{
     mapi_store_identity::{
-        allocate_mapi_store_global_counter_in_tx, ensure_mapi_mailbox_replica_in_tx,
-        MAPI_FIRST_GLOBAL_COUNTER, MAPI_FIRST_RESERVED_HIGH_GLOBAL_COUNTER,
-        MAPI_MAX_GLOBAL_COUNTER,
+        MAPI_FIRST_GLOBAL_COUNTER, MAPI_FIRST_RESERVED_HIGH_GLOBAL_COUNTER, MAPI_MAX_GLOBAL_COUNTER,
     },
     normalize_calendar_meeting_uid, AccessibleEvent, CalendarEventAttachment,
     CanonicalChangeCategory, CollaborationRights, MapiEventAttachmentChanges, Storage,
@@ -28,8 +26,8 @@ use custom_properties::{
     mapi_event_search_key, PID_TAG_SEARCH_KEY,
 };
 use imported_identity::{
-    allocate_mapi_event_identity_in_tx, current_mapi_event_filetime_in_tx,
-    normalize_mapi_event_filetime, validate_imported_identity,
+    allocate_mapi_event_identity_in_tx, rotate_active_mapi_event_identities_in_tx,
+    rotate_mapi_event_identities_in_tx, validate_imported_identity,
 };
 use submission_placeholder::insert_mapi_event_in_tx;
 use submission_placeholder::try_adopt_mapi_submission_placeholder_in_tx;
@@ -116,6 +114,7 @@ pub struct MapiEventVersion {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MapiEventCommitSuccess {
+    pub mapi_object_id: u64,
     pub version: MapiEventVersion,
     pub reminder: MapiEventReminderState,
     pub attachments: Vec<CalendarEventAttachment>,
@@ -141,6 +140,8 @@ pub enum MapiEventCommitOutcome {
 #[derive(Debug)]
 pub(crate) struct EventIdentityVersion {
     account_id: Uuid,
+    mapi_object_id: u64,
+    retired_mapi_object_id: Option<u64>,
     change_number: u64,
     change_key: Vec<u8>,
     predecessor_change_list: Vec<u8>,
@@ -706,6 +707,9 @@ impl Storage {
                 "attachmentChanged": !input.attachment_changes.upserts.is_empty()
                     || !input.attachment_changes.delete_attachment_ids.is_empty(),
                 "mapiChangeNumber": principal_version.change_number,
+                "mapiIdentityAccountId": input.principal_account_id,
+                "oldMapiObjectId": principal_version.retired_mapi_object_id,
+                "newMapiObjectId": principal_version.mapi_object_id,
             }),
         )
         .await?;
@@ -730,6 +734,7 @@ impl Storage {
         tx.commit().await?;
 
         Ok(MapiEventCommitOutcome::Saved(MapiEventCommitSuccess {
+            mapi_object_id: principal_version.mapi_object_id,
             version: MapiEventVersion {
                 event_id: input.event_id,
                 canonical_modseq: modseq,
@@ -1142,122 +1147,6 @@ async fn fetch_mapi_event_reminder_state_in_tx(
 
 pub(crate) const fn mapi_store_id(global_counter: u64) -> u64 {
     ((global_counter & 0x0000_FFFF_FFFF_FFFF) << 16) | 1
-}
-
-async fn rotate_active_mapi_event_identities_in_tx(
-    tx: &mut sqlx::Transaction<'_, Postgres>,
-    tenant_id: &Uuid,
-    event_id: Uuid,
-) -> Result<Vec<EventIdentityVersion>> {
-    rotate_mapi_event_identities_in_tx(tx, tenant_id, event_id, "calendar_event", None, None).await
-}
-
-async fn rotate_mapi_event_identities_in_tx(
-    tx: &mut sqlx::Transaction<'_, Postgres>,
-    tenant_id: &Uuid,
-    event_id: Uuid,
-    object_kind: &str,
-    imported_principal_account_id: Option<Uuid>,
-    imported_identity: Option<&MapiEventImportedIdentity>,
-) -> Result<Vec<EventIdentityVersion>> {
-    if let Some(identity) = imported_identity {
-        validate_imported_identity(identity)?;
-    }
-    let identities = sqlx::query(
-        r#"
-        SELECT account_id, source_key, mapi_change_number, predecessor_change_list
-        FROM mapi_object_identities
-        WHERE tenant_id = $1
-          AND object_kind = $2
-          AND canonical_id = $3
-          AND deleted_at IS NULL
-        ORDER BY account_id
-        FOR UPDATE
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(object_kind)
-    .bind(event_id)
-    .fetch_all(&mut **tx)
-    .await?;
-    let mut versions = Vec::with_capacity(identities.len());
-    let mut imported_identity_applied = false;
-    for identity in identities {
-        let account_id = identity.get::<Uuid, _>("account_id");
-        let source_key = identity.get::<Vec<u8>, _>("source_key");
-        let current_change_number = identity.get::<i64, _>("mapi_change_number");
-        if current_change_number <= 0
-            || current_change_number as u64 >= FIRST_RESERVED_HIGH_GLOBAL_COUNTER
-        {
-            bail!("stored MAPI Event change number is outside the dynamic GLOBCNT range");
-        }
-        let predecessor_change_list = identity.get::<Vec<u8>, _>("predecessor_change_list");
-        let (store_identity, change_number) = allocate_mapi_store_global_counter_in_tx(tx).await?;
-        ensure_mapi_mailbox_replica_in_tx(tx, *tenant_id, account_id, store_identity).await?;
-        let principal_imported_identity =
-            imported_identity.filter(|_| imported_principal_account_id == Some(account_id));
-        let (change_key, predecessor_change_list, last_modification_time) =
-            if let Some(imported) = principal_imported_identity {
-                if source_key != imported.source_key {
-                    bail!("MAPI Event SourceKey changed before the imported update");
-                }
-                imported_identity_applied = true;
-                (
-                    imported.change_key.clone(),
-                    imported.predecessor_change_list.clone(),
-                    normalize_mapi_event_filetime(imported.last_modification_time)?,
-                )
-            } else {
-                let change_key = mapi_change_key(store_identity.replica_guid, change_number);
-                let predecessor_change_list =
-                    merge_predecessor_change_list(&predecessor_change_list, &change_key)?;
-                (
-                    change_key,
-                    predecessor_change_list,
-                    current_mapi_event_filetime_in_tx(tx).await?,
-                )
-            };
-        let updated = sqlx::query(
-            r#"
-            UPDATE mapi_object_identities
-            SET mapi_change_number = $5,
-                change_key = $6,
-                predecessor_change_list = $7,
-                updated_at = TIMESTAMPTZ '1601-01-01 00:00:00+00'
-                    + ($8 / 10000000) * INTERVAL '1 second'
-                    + (($8 / 10) % 1000000) * INTERVAL '1 microsecond'
-            WHERE tenant_id = $1
-              AND account_id = $2
-              AND object_kind = $3
-              AND canonical_id = $4
-              AND deleted_at IS NULL
-            "#,
-        )
-        .bind(tenant_id)
-        .bind(account_id)
-        .bind(object_kind)
-        .bind(event_id)
-        .bind(change_number as i64)
-        .bind(&change_key)
-        .bind(&predecessor_change_list)
-        .bind(last_modification_time as i64)
-        .execute(&mut **tx)
-        .await?;
-        if updated.rows_affected() != 1 {
-            bail!("MAPI Event identity disappeared during version rotation");
-        }
-        versions.push(EventIdentityVersion {
-            account_id,
-            change_number,
-            change_key,
-            predecessor_change_list,
-            last_modification_time,
-        });
-    }
-    if imported_identity.is_some() && !imported_identity_applied {
-        bail!("principal MAPI Event identity was not found for the imported update");
-    }
-    Ok(versions)
 }
 
 impl Storage {

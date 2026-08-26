@@ -75,6 +75,8 @@ impl Storage {
             "calendar_mail_classification_projections",
             "delegation_projection_state",
             "mapi_calendar_event_identity_moves",
+            "mapi_calendar_event_identity_retirements",
+            "mapi_object_identity_claims",
             "mapi_store_identity",
             "mapi_mailbox_replicas",
             "mapi_local_replica_id_ranges",
@@ -110,6 +112,24 @@ impl Storage {
                     "required table {schema_name}.{table} is missing; LPE 0.5.3 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
                 );
             }
+        }
+
+        let mapi_calendar_event_identity_retirement_shape_is_current =
+            sqlx::query_scalar::<_, bool>(include_str!(
+                "core/mapi_calendar_event_identity_retirement_schema.sql"
+            ))
+            .bind(schema_name)
+            .fetch_one(&self.pool)
+            .await
+            .with_context(|| {
+                format!(
+                    "unable to inspect MAPI Calendar Event identity-retirement shape in {schema_name}"
+                )
+            })?;
+        if !mapi_calendar_event_identity_retirement_shape_is_current {
+            bail!(
+                "required MAPI Calendar Event identity-retirement shape is missing or incompatible in {schema_name}; LPE 0.5.3 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+            );
         }
 
         let calendar_mail_classification_shape_is_current = sqlx::query_scalar::<_, bool>(
@@ -1019,7 +1039,7 @@ impl Storage {
         })?;
         if !calendar_request_correlation_index_is_current {
             bail!(
-                "required Calendar meeting-request correlation or placeholder-projection shape is missing or incompatible in {schema_name}; LPE 0.5.2 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+                "required Calendar meeting-request correlation index or placeholder-projection shape is missing or incompatible in {schema_name}; LPE 0.5.2 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
             );
         }
 

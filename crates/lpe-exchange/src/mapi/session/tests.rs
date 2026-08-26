@@ -489,6 +489,102 @@ fn session_does_not_correlate_identityless_same_folder_events() {
 }
 
 #[test]
+fn session_does_not_collapse_rekeyed_message_ids_with_the_same_canonical_event() {
+    let folder_id = crate::mapi::identity::CALENDAR_FOLDER_ID;
+    let canonical_event_id = uuid::Uuid::from_u128(0x58f2_7180_44af_490f_9329_d0bcf2000e27);
+    let old_message_id = crate::mapi::identity::mapi_store_id(0x0111);
+    let new_message_id = crate::mapi::identity::mapi_store_id(0x0112);
+    let old_event = MapiNotificationEvent::content(folder_id, Some(old_message_id))
+        .with_canonical_ids(None, Some(canonical_event_id))
+        .with_object_kind("calendar_event");
+    let new_event = MapiNotificationEvent::content(folder_id, Some(new_message_id))
+        .with_canonical_ids(None, Some(canonical_event_id))
+        .with_object_kind("calendar_event");
+
+    assert!(!notification_events_have_same_origin(
+        &old_event, &new_event
+    ));
+}
+
+#[test]
+fn calendar_rekey_notifies_a_second_session_registered_for_the_retired_mid() {
+    let principal = principal();
+    let saving_session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let observing_session_id =
+        create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:2");
+    let mut saving_session = remove_session(&saving_session_id).unwrap();
+    let mut observing_session = remove_session(&observing_session_id).unwrap();
+    let folder_id = crate::mapi::identity::CALENDAR_FOLDER_ID;
+    let old_message_id = crate::mapi::identity::mapi_store_id(0x0121);
+    let new_message_id = crate::mapi::identity::mapi_store_id(0x0122);
+    let notification_types = MapiNotificationEventMask::ObjectDeleted.as_u16()
+        | MapiNotificationEventMask::ObjectCreated.as_u16();
+    saving_session.handles.insert(
+        91,
+        MapiObject::NotificationSubscription {
+            registration: crate::mapi::notifications::MapiNotificationRegistration {
+                logon_id: 0,
+                notification_types,
+                folder_id: Some(folder_id),
+                message_id: None,
+            },
+        },
+    );
+    observing_session.handles.insert(
+        92,
+        MapiObject::NotificationSubscription {
+            registration: crate::mapi::notifications::MapiNotificationRegistration {
+                logon_id: 0,
+                notification_types,
+                folder_id: Some(folder_id),
+                message_id: Some(old_message_id),
+            },
+        },
+    );
+    let canonical_event_id = uuid::Uuid::from_u128(0x58f2_7180_44af_490f_9329_d0bcf2000e28);
+    let durable_update = MapiNotificationEvent::canonical(
+        MapiNotificationKind::Content,
+        MapiNotificationEventMask::ObjectModified.as_u16(),
+        folder_id,
+        Some(new_message_id),
+        None,
+        71,
+        72,
+        None,
+        None,
+        "updated".to_string(),
+        None,
+        None,
+        Some("Probe rekey".to_string()),
+        None,
+    )
+    .with_canonical_ids(None, Some(canonical_event_id))
+    .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID))
+    .with_object_kind("calendar_event");
+    let rekey_events = durable_update
+        .calendar_identity_rekey_events(old_message_id, new_message_id)
+        .unwrap();
+
+    for event in rekey_events.iter().cloned() {
+        saving_session.record_notification(event.clone());
+        observing_session.record_notification(event);
+    }
+
+    let (saving_deliveries, _) = saving_session.take_pending_notification_delivery_batch();
+    assert_eq!(saving_deliveries.len(), 2);
+    assert_eq!(saving_deliveries[0].2.message_id, Some(old_message_id));
+    assert_eq!(saving_deliveries[1].2.message_id, Some(new_message_id));
+    let (observing_deliveries, _) = observing_session.take_pending_notification_delivery_batch();
+    assert_eq!(observing_deliveries.len(), 1);
+    assert_eq!(observing_deliveries[0].0, 92);
+    assert_eq!(
+        observing_deliveries[0].2.event_mask,
+        MapiNotificationEventMask::ObjectDeleted.as_u16()
+    );
+    assert_eq!(observing_deliveries[0].2.message_id, Some(old_message_id));
+}
+
+#[test]
 fn session_new_mail_hierarchy_row_survives_preceding_basic_table_change() {
     let principal = principal();
     let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");

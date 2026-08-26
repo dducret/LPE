@@ -5255,6 +5255,63 @@ async fn mapi_over_http_associated_config_content_sync_exports_deletes() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_calendar_content_sync_exports_retired_projection_mid() {
+    let account = FakeStore::account();
+    let retired_object_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 51,
+    );
+    let calendar_checkpoint_id =
+        mapi_mailstore::virtual_special_mailbox(crate::mapi::identity::CALENDAR_FOLDER_ID)
+            .unwrap()
+            .id;
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        ..Default::default()
+    };
+    store
+        .store_mapi_sync_checkpoint(
+            account.account_id,
+            Some(calendar_checkpoint_id),
+            MapiCheckpointKind::Content,
+            50,
+            50,
+            serde_json::json!({"source": "previous-run"}),
+        )
+        .await
+        .unwrap();
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 51,
+        current_modseq: 51,
+        deleted_calendar_event_object_ids: vec![retired_object_id],
+        ..Default::default()
+    };
+
+    let client_state = outlook_content_sync_state_properties(
+        &[crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 51],
+        &[],
+        &[],
+        &[],
+    );
+    let response_rops = outlook_content_sync_response_rops_for_store(
+        store,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+        &client_state,
+    )
+    .await;
+
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert!(stream.message_changes.is_empty());
+    assert!(strict_replid_globset_contains_counter(
+        stream.deleted_idset.as_deref().unwrap(),
+        &globcnt_bytes(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 51)
+    )
+    .unwrap());
+}
+
+#[tokio::test]
 async fn mapi_over_http_associated_config_delete_does_not_allocate_identity() {
     let account = FakeStore::account();
     let inbox_id = Uuid::parse_str("55555555-5555-4555-9555-555555555511").unwrap();
@@ -15317,6 +15374,23 @@ fn calendar_sync_conflict_pcl(xids: &[&[u8]]) -> Vec<u8> {
     pcl
 }
 
+fn third_party_calendar_global_object_id(uid: &str) -> Vec<u8> {
+    let mut data = b"vCal-Uid".to_vec();
+    data.extend_from_slice(&1u32.to_le_bytes());
+    data.extend_from_slice(uid.as_bytes());
+
+    let mut value = vec![
+        0x04, 0x00, 0x00, 0x00, 0x82, 0x00, 0xE0, 0x00, 0x74, 0xC5, 0xB7, 0x10, 0x1A, 0x82, 0xE0,
+        0x08,
+    ];
+    value.extend_from_slice(&[0, 0, 0, 0]);
+    value.extend_from_slice(&0u64.to_le_bytes());
+    value.extend_from_slice(&0u64.to_le_bytes());
+    value.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    value.extend_from_slice(&data);
+    value
+}
+
 fn calendar_sync_conflict_store(
     event_id: Uuid,
     message_id: u64,
@@ -15538,18 +15612,23 @@ async fn mapi_over_http_calendar_sync_import_applies_newer_outlook_unicode_subje
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_sync_import_remapped_mid_uses_global_object_id() {
-    // Outlook can reimport a downloaded appointment under a different local MID.
-    // [MS-OXOCAL] section 2.2.1.3 identifies the appointment by its Global
-    // Object ID, while [MS-OXCFXICS] section 3.1.5.6.1 still governs CK/PCL.
+async fn mapi_over_http_calendar_sync_import_remapped_mid_replaces_projection_identity() {
+    // [MS-OXCFXICS] sections 2.2.1.2.5 and 2.2.3.2.4.2.1 make SourceKey
+    // the imported ICS identity. LPE correlates the logical appointment by
+    // Global Object ID while replacing only its MAPI projection identity.
     let event_id = Uuid::parse_str("20260717-1012-4078-8000-000000000306").unwrap();
     let message_id = crate::mapi::identity::mapi_store_id(0x0df8_974b_8036);
     let remapped_message_id = crate::mapi::identity::mapi_store_id(0x0df8_974b_8037);
     let remapped_source_key = crate::mapi::identity::source_key_for_object_id(remapped_message_id);
+    let second_remapped_message_id = crate::mapi::identity::mapi_store_id(0x0df8_974b_8038);
+    let second_remapped_source_key =
+        crate::mapi::identity::source_key_for_object_id(second_remapped_message_id);
     let server_change_key = calendar_sync_conflict_xid(0x31, 20);
     let client_change_key = calendar_sync_conflict_xid(0x31, 21);
+    let second_client_change_key = calendar_sync_conflict_xid(0x31, 22);
     let server_pcl = calendar_sync_conflict_pcl(&[&server_change_key]);
     let client_pcl = calendar_sync_conflict_pcl(&[&client_change_key]);
+    let second_client_pcl = calendar_sync_conflict_pcl(&[&second_client_change_key]);
     let store = calendar_sync_conflict_store(
         event_id,
         message_id,
@@ -15557,18 +15636,17 @@ async fn mapi_over_http_calendar_sync_import_remapped_mid_uses_global_object_id(
         server_pcl,
         "2026-07-17T10:00:00Z",
     );
-    let global_object_id = vec![0x04; 24];
-    store.events.lock().unwrap()[0].uid = format!(
-        "mapi-goid:{}",
-        lpe_domain::crypto::hex_lower(&global_object_id)
-    );
+    let event_uid = "probe-4-remap@example.test";
+    let global_object_id = third_party_calendar_global_object_id(event_uid);
+    store.events.lock().unwrap()[0].uid = event_uid.to_string();
     let events = store.events.clone();
     let identities = store.mapi_identities.clone();
     let source_keys = store.mapi_identity_source_keys.clone();
     let versions = store.mapi_event_identity_versions.clone();
+    let retired_identities = store.retired_mapi_identities.clone();
 
     let response = execute_existing_calendar_sync_import(
-        store,
+        store.clone(),
         &remapped_source_key,
         test_filetime("2026-07-17", "11:00"),
         &client_change_key,
@@ -15587,10 +15665,20 @@ async fn mapi_over_http_calendar_sync_import_remapped_mid_uses_global_object_id(
         events.lock().unwrap()[0].title,
         "Probe B - web update - outlook update"
     );
-    assert_eq!(identities.lock().unwrap()[&event_id], message_id);
+    assert!(contains_bytes(
+        &response,
+        &mapi_wire_id_bytes(remapped_message_id)
+    ));
+    assert_eq!(identities.lock().unwrap()[&event_id], remapped_message_id);
+    assert_eq!(source_keys.lock().unwrap()[&event_id], remapped_source_key);
     assert_eq!(
-        source_keys.lock().unwrap()[&event_id],
-        crate::mapi::identity::source_key_for_object_id(message_id)
+        retired_identities
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|identity| identity.object_id)
+            .collect::<Vec<_>>(),
+        vec![message_id]
     );
     let version = versions.lock().unwrap()[&event_id].clone();
     assert_ne!(
@@ -15602,6 +15690,253 @@ async fn mapi_over_http_calendar_sync_import_remapped_mid_uses_global_object_id(
     assert_eq!(
         version.last_modification_time,
         test_filetime("2026-07-17", "11:00") as u64
+    );
+
+    let second_response = execute_existing_calendar_sync_import(
+        store.clone(),
+        &second_remapped_source_key,
+        test_filetime("2026-07-17", "12:00"),
+        &second_client_change_key,
+        &second_client_pcl,
+        0,
+        Some(&global_object_id),
+        Some("Probe B - second Outlook replacement"),
+        false,
+    )
+    .await;
+
+    assert!(contains_bytes(
+        &second_response,
+        &mapi_wire_id_bytes(second_remapped_message_id)
+    ));
+    assert_eq!(events.lock().unwrap().len(), 1);
+    assert_eq!(
+        events.lock().unwrap()[0].title,
+        "Probe B - second Outlook replacement"
+    );
+    assert_eq!(
+        identities.lock().unwrap()[&event_id],
+        second_remapped_message_id
+    );
+    assert_eq!(
+        source_keys.lock().unwrap()[&event_id],
+        second_remapped_source_key
+    );
+    assert_eq!(
+        crate::mapi::identity::mapped_mapi_object_id(&event_id),
+        Some(second_remapped_message_id)
+    );
+    assert_eq!(
+        crate::mapi::identity::mapped_mapi_source_key(&event_id),
+        Some(second_remapped_source_key.clone())
+    );
+    assert_eq!(
+        retired_identities
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|identity| identity.object_id)
+            .collect::<Vec<_>>(),
+        vec![message_id, remapped_message_id]
+    );
+    let version = versions.lock().unwrap()[&event_id].clone();
+    assert_eq!(version.change_key, second_client_change_key);
+    assert_eq!(version.predecessor_change_list, second_client_pcl);
+    assert_eq!(
+        version.last_modification_time,
+        test_filetime("2026-07-17", "12:00") as u64
+    );
+
+    // Reproduce the Probe 4 -> Probe 5 failure boundary: after Outlook has
+    // acknowledged Probe 4 under its second replacement MID, creating Probe 5
+    // causes a fresh Calendar content sync. The retired Probe 4 MID must be the
+    // only deletion; both current objects must remain in IdsetGiven.
+    let probe5_event_id = Uuid::parse_str("20260717-1012-4078-8000-000000000308").unwrap();
+    let probe5_message_id = crate::mapi::identity::mapi_store_id(0x0df8_974b_803b);
+    let probe5_source_key = crate::mapi::identity::source_key_for_object_id(probe5_message_id);
+    let probe5_change_number = version.change_number.saturating_add(2);
+    let probe5_change_key = mapi_mailstore::change_key_for_change_number(probe5_change_number);
+    let probe5_predecessor_change_list =
+        mapi_mailstore::predecessor_change_list(probe5_change_number);
+    let probe5_last_modification_time = test_filetime("2026-07-17", "13:00") as u64;
+    let mut probe5_event = events.lock().unwrap()[0].clone();
+    probe5_event.id = probe5_event_id;
+    probe5_event.uid = "probe-5@example.test".to_string();
+    probe5_event.time = "13:00".to_string();
+    probe5_event.title = "Probe 5".to_string();
+    events.lock().unwrap().push(probe5_event);
+    store
+        .event_versions
+        .lock()
+        .unwrap()
+        .insert(probe5_event_id, 1);
+    identities
+        .lock()
+        .unwrap()
+        .insert(probe5_event_id, probe5_message_id);
+    source_keys
+        .lock()
+        .unwrap()
+        .insert(probe5_event_id, probe5_source_key.clone());
+    store
+        .mapi_identity_change_numbers
+        .lock()
+        .unwrap()
+        .insert(probe5_event_id, probe5_change_number);
+    store
+        .mapi_identity_change_keys
+        .lock()
+        .unwrap()
+        .insert(probe5_event_id, probe5_change_key.clone());
+    store
+        .mapi_identity_predecessor_change_lists
+        .lock()
+        .unwrap()
+        .insert(probe5_event_id, probe5_predecessor_change_list.clone());
+    store
+        .mapi_identity_last_modification_times
+        .lock()
+        .unwrap()
+        .insert(probe5_event_id, probe5_last_modification_time);
+    versions.lock().unwrap().insert(
+        probe5_event_id,
+        MapiEventVersion {
+            event_id: probe5_event_id,
+            canonical_modseq: 1,
+            change_number: probe5_change_number,
+            search_key: None,
+            change_key: probe5_change_key,
+            predecessor_change_list: probe5_predecessor_change_list,
+            last_modification_time: probe5_last_modification_time,
+            created_at: "2026-07-17T13:00:00Z".to_string(),
+            updated_at: "2026-07-17T13:00:00Z".to_string(),
+        },
+    );
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 4,
+        current_modseq: 4,
+        changed_calendar_event_ids: vec![event_id, probe5_event_id],
+        deleted_calendar_event_object_ids: vec![message_id, remapped_message_id],
+        ..Default::default()
+    };
+
+    let client_state = outlook_content_sync_state_properties(
+        &[
+            message_id >> 16,
+            second_remapped_message_id >> 16,
+            probe5_message_id >> 16,
+        ],
+        &[version.change_number, probe5_change_number],
+        &[],
+        &[],
+    );
+    let sync_response = outlook_content_sync_response_rops_for_store(
+        store,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+        &client_state,
+    )
+    .await;
+    let stream = strict_content_sync_transfer_from_response(&sync_response).unwrap();
+
+    assert!(
+        stream.message_changes.is_empty(),
+        "Outlook already acknowledged the current Probe 4 and Probe 5 versions"
+    );
+    let deleted = stream
+        .deleted_idset
+        .as_deref()
+        .expect("retired Probe 4 MID");
+    assert_eq!(
+        strict_replid_globset_ranges(deleted).unwrap(),
+        vec![(message_id >> 16, message_id >> 16)]
+    );
+    for current_message_id in [second_remapped_message_id, probe5_message_id] {
+        assert!(!strict_replid_globset_contains_counter(
+            deleted,
+            &globcnt_bytes(current_message_id >> 16),
+        )
+        .unwrap());
+        assert!(strict_replguid_globset_contains_counter(
+            &stream.idset_given,
+            &globcnt_bytes(current_message_id >> 16),
+        )
+        .unwrap());
+    }
+    assert!(!strict_replguid_globset_contains_counter(
+        &stream.idset_given,
+        &globcnt_bytes(message_id >> 16),
+    )
+    .unwrap());
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_sync_import_top_level_occurrence_preserves_master() {
+    let event_id = Uuid::parse_str("20260717-1012-4078-8000-000000000309").unwrap();
+    let message_id = crate::mapi::identity::mapi_store_id(0x0df8_974b_803c);
+    let remapped_message_id = crate::mapi::identity::mapi_store_id(0x0df8_974b_803d);
+    let remapped_source_key = crate::mapi::identity::source_key_for_object_id(remapped_message_id);
+    let server_change_key = calendar_sync_conflict_xid(0x41, 30);
+    let client_change_key = calendar_sync_conflict_xid(0x41, 31);
+    let server_pcl = calendar_sync_conflict_pcl(&[&server_change_key]);
+    let client_pcl = calendar_sync_conflict_pcl(&[&client_change_key]);
+    let store = calendar_sync_conflict_store(
+        event_id,
+        message_id,
+        server_change_key.clone(),
+        server_pcl.clone(),
+        "2026-07-17T10:00:00Z",
+    );
+    let event_uid = "recurring-master@example.test";
+    {
+        let mut events = store.events.lock().unwrap();
+        events[0].uid = event_uid.to_string();
+        events[0].recurrence_rule = "FREQ=DAILY;COUNT=3".to_string();
+    }
+    let mut occurrence_global_object_id = third_party_calendar_global_object_id(event_uid);
+    occurrence_global_object_id[16..20].copy_from_slice(&[0x07, 0xEA, 0x08, 0x18]);
+    let events = store.events.clone();
+    let identities = store.mapi_identities.clone();
+    let source_keys = store.mapi_identity_source_keys.clone();
+    let retired_identities = store.retired_mapi_identities.clone();
+    let versions = store.mapi_event_identity_versions.clone();
+    let original_version = versions.lock().unwrap()[&event_id].clone();
+
+    let response = execute_existing_calendar_sync_import(
+        store,
+        &remapped_source_key,
+        test_filetime("2026-07-18", "11:00"),
+        &client_change_key,
+        &client_pcl,
+        0,
+        Some(&occurrence_global_object_id),
+        Some("Orphan occurrence must not overwrite master"),
+        false,
+    )
+    .await;
+
+    assert!(contains_bytes(&response, &[0x72, 0x02, 0, 0, 0, 0]));
+    assert!(
+        contains_bytes(&response, &[0x0c, 0x02, 0x02, 0x01, 0x04, 0x80]),
+        "unexpected orphan-import response: {}",
+        lpe_domain::crypto::hex_lower(&response)
+    );
+    let events = events.lock().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].title, "Server version");
+    assert_eq!(events[0].recurrence_rule, "FREQ=DAILY;COUNT=3");
+    drop(events);
+    assert_eq!(identities.lock().unwrap()[&event_id], message_id);
+    assert_eq!(
+        source_keys.lock().unwrap()[&event_id],
+        crate::mapi::identity::source_key_for_object_id(message_id)
+    );
+    assert!(retired_identities.lock().unwrap().is_empty());
+    let current_version = versions.lock().unwrap()[&event_id].clone();
+    assert_eq!(current_version.change_key, server_change_key);
+    assert_eq!(current_version.predecessor_change_list, server_pcl);
+    assert_eq!(
+        current_version.canonical_modseq,
+        original_version.canonical_modseq
     );
 }
 
@@ -15654,6 +15989,77 @@ async fn mapi_over_http_calendar_sync_import_ignores_an_older_client_version_at_
     assert!(
         metrics_after.ics_ignored_older_or_same_total
             >= metrics_before.ics_ignored_older_or_same_total + 1
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_sync_import_older_remapped_mid_keeps_content_and_rekeys() {
+    let event_id = Uuid::parse_str("20260717-1012-4078-8000-000000000307").unwrap();
+    let message_id = crate::mapi::identity::mapi_store_id(0x0df8_974b_803a);
+    let remapped_message_id = crate::mapi::identity::mapi_store_id(0x0df8_974b_803b);
+    let remapped_source_key = crate::mapi::identity::source_key_for_object_id(remapped_message_id);
+    let client_change_key = calendar_sync_conflict_xid(0x31, 10);
+    let server_change_key = calendar_sync_conflict_xid(0x31, 11);
+    let client_pcl = calendar_sync_conflict_pcl(&[&client_change_key]);
+    let server_pcl = calendar_sync_conflict_pcl(&[&server_change_key]);
+    let store = calendar_sync_conflict_store(
+        event_id,
+        message_id,
+        server_change_key.clone(),
+        server_pcl.clone(),
+        "2026-07-17T10:00:00Z",
+    );
+    let event_uid = "probe-older-remap@example.test";
+    let global_object_id = third_party_calendar_global_object_id(event_uid);
+    store.events.lock().unwrap()[0].uid = event_uid.to_string();
+    let events = store.events.clone();
+    let identities = store.mapi_identities.clone();
+    let source_keys = store.mapi_identity_source_keys.clone();
+    let retired_identities = store.retired_mapi_identities.clone();
+    let versions = store.mapi_event_identity_versions.clone();
+    let previous_change_number = versions.lock().unwrap()[&event_id].change_number;
+
+    let response = execute_existing_calendar_sync_import(
+        store,
+        &remapped_source_key,
+        test_filetime("2026-07-17", "09:00"),
+        &client_change_key,
+        &client_pcl,
+        0,
+        Some(&global_object_id),
+        Some("Older replacement content"),
+        true,
+    )
+    .await;
+
+    assert!(contains_bytes(&response, &[0x72, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response, &[0x0c, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response,
+        &mapi_wire_id_bytes(remapped_message_id)
+    ));
+    assert_eq!(events.lock().unwrap()[0].title, "Server version");
+    assert_eq!(identities.lock().unwrap()[&event_id], remapped_message_id);
+    assert_eq!(source_keys.lock().unwrap()[&event_id], remapped_source_key);
+    assert_eq!(retired_identities.lock().unwrap()[0].object_id, message_id);
+    let version = versions.lock().unwrap()[&event_id].clone();
+    assert!(version.change_number > previous_change_number);
+    assert_eq!(version.change_key, server_change_key);
+    assert_eq!(version.predecessor_change_list, server_pcl);
+    assert_eq!(
+        version.last_modification_time,
+        test_filetime("2026-07-17", "10:00") as u64
+    );
+    let state_chunks = mapi_fast_transfer_chunks(&response);
+    assert_eq!(state_chunks.len(), 1);
+    let cnset_seen = mapi_binary_property_value(&state_chunks[0].1, META_TAG_CNSET_SEEN);
+    assert!(
+        !strict_replguid_globset_contains_counter(
+            cnset_seen,
+            &globcnt_bytes(version.change_number),
+        )
+        .unwrap(),
+        "the upload state must leave the authoritative server version eligible for download"
     );
 }
 
@@ -15764,7 +16170,8 @@ async fn mapi_over_http_calendar_sync_import_conflict_keeps_the_newer_server_con
     // the server contents, but the resolved PCL still succeeds both versions.
     let event_id = Uuid::parse_str("20260717-1012-4078-8000-000000000304").unwrap();
     let message_id = crate::mapi::identity::mapi_store_id(0x0df8_974b_8034);
-    let source_key = crate::mapi::identity::source_key_for_object_id(message_id);
+    let remapped_message_id = crate::mapi::identity::mapi_store_id(0x0df8_974b_8039);
+    let remapped_source_key = crate::mapi::identity::source_key_for_object_id(remapped_message_id);
     let server_change_key = calendar_sync_conflict_xid(0x11, 5);
     let client_change_key = calendar_sync_conflict_xid(0x22, 7);
     let server_pcl = calendar_sync_conflict_pcl(&[&server_change_key]);
@@ -15776,19 +16183,25 @@ async fn mapi_over_http_calendar_sync_import_conflict_keeps_the_newer_server_con
         server_pcl,
         "2026-07-17T10:00:00.000000Z",
     );
+    let event_uid = "probe-conflict-remap@example.test";
+    let global_object_id = third_party_calendar_global_object_id(event_uid);
+    store.events.lock().unwrap()[0].uid = event_uid.to_string();
     let events = store.events.clone();
+    let identities = store.mapi_identities.clone();
+    let source_keys = store.mapi_identity_source_keys.clone();
+    let retired_identities = store.retired_mapi_identities.clone();
     let versions = store.mapi_event_identity_versions.clone();
     let previous_change_number = versions.lock().unwrap()[&event_id].change_number;
     let metrics_before = crate::mapi::mapi_calendar_event_save_metrics();
 
     let response = execute_existing_calendar_sync_import(
         store,
-        &source_key,
+        &remapped_source_key,
         test_filetime("2026-07-17", "09:00"),
         &client_change_key,
         &client_pcl,
         0,
-        None,
+        Some(&global_object_id),
         Some("Losing client version"),
         false,
     )
@@ -15796,7 +16209,14 @@ async fn mapi_over_http_calendar_sync_import_conflict_keeps_the_newer_server_con
 
     assert!(contains_bytes(&response, &[0x72, 0x02, 0, 0, 0, 0]));
     assert!(contains_bytes(&response, &[0x0c, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response,
+        &mapi_wire_id_bytes(remapped_message_id)
+    ));
     assert_eq!(events.lock().unwrap()[0].title, "Server version");
+    assert_eq!(identities.lock().unwrap()[&event_id], remapped_message_id);
+    assert_eq!(source_keys.lock().unwrap()[&event_id], remapped_source_key);
+    assert_eq!(retired_identities.lock().unwrap()[0].object_id, message_id);
     let version = versions.lock().unwrap()[&event_id].clone();
     assert!(version.change_number > previous_change_number);
     assert_ne!(

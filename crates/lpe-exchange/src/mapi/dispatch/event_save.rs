@@ -64,16 +64,22 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
                 return;
             }
         };
-    if let (Some(mut imported_identity), Some(uid)) = (
-        imported_identity.clone(),
-        imported_event_global_object_id(&properties),
-    ) {
+    let imported_uid = match imported_event_global_object_id(&properties) {
+        Ok(uid) => uid,
+        Err(_) => {
+            responses.extend_from_slice(&rop_error_response(
+                0x0C,
+                request.response_handle_index(),
+                0x8004_0102,
+            ));
+            return;
+        }
+    };
+    if let (Some(imported_identity), Some(uid)) = (imported_identity.clone(), imported_uid) {
         if let Some(event) = snapshot.event_for_uid(folder_id, &uid).cloned() {
-            // Outlook can upload an existing appointment under a remapped local
-            // MID. The Global Object ID identifies the appointment; its durable
-            // SourceKey remains the server's identity and CK/PCL still decide
-            // whether this imported version may change canonical content.
-            imported_identity.source_key = event.source_key.clone();
+            // Outlook can replace a cached appointment under a new local MID.
+            // Global Object ID correlates canonical content, while the imported
+            // SourceKey remains the identity of the replacement ICS object.
             let mut transaction =
                 match imported_event_transaction(&event, imported_identity, fail_on_conflict) {
                     Ok(transaction) => transaction,
@@ -207,17 +213,8 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
     }
 }
 
-fn imported_event_global_object_id(properties: &HashMap<u32, MapiValue>) -> Option<String> {
-    properties
-        .get(&PID_LID_GLOBAL_OBJECT_ID_TAG)
-        .or_else(|| properties.get(&PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG))
-        .and_then(|value| match value {
-            MapiValue::Binary(value) => Some(format!(
-                "mapi-goid:{}",
-                lpe_domain::crypto::hex_lower(value)
-            )),
-            _ => None,
-        })
+fn imported_event_global_object_id(properties: &HashMap<u32, MapiValue>) -> Result<Option<String>> {
+    calendar_event_uid_from_mapi(properties)
 }
 
 fn imported_event_content_properties(
@@ -352,13 +349,20 @@ pub(super) async fn save_existing_event<S: ExchangeStore>(
             };
             record_mapi_calendar_event_save(metric_flow, metric_outcome);
             let updated_event = event_after_commit(event.event.clone(), event_input.as_ref());
+            let saved_event_id = saved.mapi_object_id;
             let version = saved.version;
             snapshot.remember_updated_event(
                 folder_id,
                 event_id,
+                saved_event_id,
                 updated_event,
                 version.clone(),
                 saved.attachments,
+            );
+            crate::mapi::identity::remember_mapi_identity_with_source_key(
+                event.canonical_id,
+                saved_event_id,
+                Some(mapi_mailstore::source_key_for_store_id(saved_event_id)),
             );
             snapshot.remember_event_custom_property_changes(
                 event.canonical_id,
@@ -370,28 +374,42 @@ pub(super) async fn save_existing_event<S: ExchangeStore>(
                 session,
                 handle,
                 folder_id,
-                event_id,
+                saved_event_id,
                 disposition,
                 version.canonical_modseq,
             );
             clear_event_attachment_transaction(session, handle);
-            session.record_notification(MapiNotificationEvent::content(folder_id, Some(event_id)));
-            // [MS-OXCFXICS] sections 2.2.1.1.4 and 3.2.5.6: saving Event
-            // content changes the normal CNSET, not the read-state CNSET.
-            record_sync_upload_content_change(
-                session,
-                folder_id,
-                event_id,
-                version.change_number,
-                false,
-                false,
-            );
+            let notification = MapiNotificationEvent::content(folder_id, Some(saved_event_id))
+                .with_canonical_ids(None, Some(event.canonical_id))
+                .with_object_kind("calendar_event");
+            if let Some(rekey_events) =
+                notification.calendar_identity_rekey_events(event_id, saved_event_id)
+            {
+                for notification in rekey_events {
+                    session.record_notification(notification);
+                }
+            } else {
+                session.record_notification(notification);
+            }
+            // [MS-OXCFXICS] sections 2.2.1.1.2 and 3.2.5.3: only content
+            // reflected in the client replica enters its seen set. A retained
+            // server winner must remain eligible for the next download.
+            if transaction.import_disposition == MapiEventImportDisposition::Apply {
+                record_sync_upload_content_change(
+                    session,
+                    folder_id,
+                    saved_event_id,
+                    version.change_number,
+                    false,
+                    false,
+                );
+            }
             append_save_changes_message_response(
                 responses,
                 handle_slots,
                 request,
                 handle,
-                event_id,
+                saved_event_id,
             );
         }
         Ok(MapiEventCommitOutcome::ObjectModified { .. }) => {

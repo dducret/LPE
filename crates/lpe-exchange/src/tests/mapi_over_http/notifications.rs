@@ -1190,6 +1190,144 @@ async fn mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgre
 }
 
 #[tokio::test]
+async fn mapi_calendar_identity_rekey_replays_deleted_old_mid_and_created_new_mid_from_postgresql(
+) -> anyhow::Result<()> {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let account_id = fixture.account_id;
+    let collection = storage
+        .create_accessible_calendar_collection(account_id, "Rekey notification lab")
+        .await?;
+    let calendar_id = Uuid::parse_str(&collection.id)?;
+    let event_id = Uuid::parse_str("82828282-8282-4282-9282-828282828282")?;
+    let event_uid = "mapi-calendar-rekey-notification-postgresql";
+    storage
+        .create_accessible_event(
+            account_id,
+            Some(&collection.id),
+            notification_event_input(account_id, event_id, event_uid, "Before rekey", 0),
+        )
+        .await?;
+    let (folder_id, old_message_id) =
+        calendar_notification_ids(&storage, account_id, &collection.id, event_id).await?;
+    let version = storage
+        .fetch_mapi_event_versions(account_id, &[event_id])
+        .await?
+        .into_iter()
+        .next()
+        .expect("Calendar event has a MAPI version");
+    let baseline_cursor = storage
+        .fetch_mapi_notification_cursor(account_id)
+        .await?
+        .unwrap_or(0);
+    let replacement_counter = storage
+        .reserve_mapi_local_replica_ids(account_id, 1)
+        .await?;
+    let new_message_id = crate::mapi::identity::mapi_store_id(replacement_counter);
+    let replacement_change_key =
+        mapi_mailstore::change_key_for_change_number(replacement_counter.saturating_add(0x100));
+    let replacement_predecessor_change_list = {
+        let mut value = vec![replacement_change_key.len() as u8];
+        value.extend_from_slice(&replacement_change_key);
+        value
+    };
+    let outcome = storage
+        .commit_mapi_event_update(MapiEventCommitInput {
+            principal_account_id: account_id,
+            event_id,
+            expected_modseq: version.canonical_modseq,
+            force_save: false,
+            imported_identity: Some(MapiEventImportedIdentity {
+                source_key: crate::mapi::identity::source_key_for_object_id(new_message_id),
+                change_key: replacement_change_key,
+                predecessor_change_list: replacement_predecessor_change_list,
+                last_modification_time: 134_309_167_800_000_000,
+            }),
+            event: Some(notification_event_input(
+                account_id,
+                event_id,
+                event_uid,
+                "After rekey",
+                1,
+            )),
+            reminder: MapiEventReminderPatch::default(),
+            custom_property_upserts: Vec::new(),
+            custom_property_deletes: Vec::new(),
+            attachment_changes: MapiEventAttachmentChanges::default(),
+        })
+        .await?;
+    let MapiEventCommitOutcome::Saved(saved) = outcome else {
+        anyhow::bail!("Calendar identity rekey was not committed");
+    };
+    assert_eq!(saved.mapi_object_id, new_message_id);
+
+    let rekey_cursor = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT cursor
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND object_kind = 'calendar_event'
+          AND object_id = $2
+          AND change_kind = 'updated'
+          AND cursor > $3
+        ORDER BY cursor DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(account_id)
+    .bind(event_id)
+    .bind(baseline_cursor)
+    .fetch_one(storage.pool())
+    .await?;
+    let poll = storage
+        .poll_mapi_notifications(account_id, baseline_cursor)
+        .await?;
+
+    assert!(poll.event_pending);
+    assert_eq!(poll.cursor, Some(rekey_cursor));
+    assert_eq!(poll.events.len(), 2);
+    assert_eq!(
+        poll.events[0].notification_test_shape(),
+        (
+            MapiNotificationKind::Content,
+            0x0008,
+            folder_id,
+            Some(old_message_id),
+            None,
+            None,
+            Some("calendar_event"),
+        )
+    );
+    assert_eq!(poll.events[0].parent_folder_id(), None);
+    assert_eq!(
+        poll.events[1].notification_test_shape(),
+        (
+            MapiNotificationKind::Content,
+            0x0004,
+            folder_id,
+            Some(new_message_id),
+            None,
+            None,
+            Some("calendar_event"),
+        )
+    );
+    assert_eq!(
+        poll.events[1].parent_folder_id(),
+        Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+    );
+    for event in &poll.events {
+        assert_eq!(event.change_cursor(), Some(rekey_cursor));
+        assert_eq!(event.canonical_folder_id(), Some(calendar_id));
+        assert_eq!(event.canonical_message_id(), Some(event_id));
+    }
+
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn mapi_contact_notification_create_carries_current_total_in_postgresql() -> anyhow::Result<()>
 {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {

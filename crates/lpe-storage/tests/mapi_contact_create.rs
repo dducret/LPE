@@ -338,7 +338,7 @@ async fn mapi_contact_create_is_atomic_and_preserves_reserved_import_identity() 
             tenant_id, account_id, replica_guid,
             first_global_counter, end_global_counter_exclusive
         )
-        VALUES ($1, $2, $3, 500, 501)
+        VALUES ($1, $2, $3, 500, 502)
         "#,
     )
     .bind(fixture.tenant_id)
@@ -378,6 +378,19 @@ async fn mapi_contact_create_is_atomic_and_preserves_reserved_import_identity() 
         .bind(fixture.account_id)
         .execute(fixture.storage.pool())
         .await?;
+    let retired_alias_error = fixture
+        .storage
+        .create_mapi_contact(create_input(
+            fixture.account_id,
+            Uuid::new_v4(),
+            Some(imported_identity(500)),
+        ))
+        .await
+        .expect_err("a deleted special-folder alias identity must remain permanently claimed");
+    assert!(
+        format!("{retired_alias_error:#}").contains("mapi_object_identity_claims"),
+        "unexpected retired alias identity rejection: {retired_alias_error:#}"
+    );
 
     sqlx::query(
         r#"
@@ -427,7 +440,7 @@ async fn mapi_contact_create_is_atomic_and_preserves_reserved_import_identity() 
         .create_canonical_change_listener(fixture.account_id)
         .await?;
     let imported_contact_id = Uuid::new_v4();
-    let identity = imported_identity(500);
+    let identity = imported_identity(501);
     let created = fixture
         .storage
         .create_mapi_contact(create_input(
@@ -443,9 +456,9 @@ async fn mapi_contact_create_is_atomic_and_preserves_reserved_import_identity() 
     assert_eq!(created.contact.emails_json.as_array().unwrap().len(), 2);
     assert_eq!(created.contact.phones_json.as_array().unwrap().len(), 2);
     assert_eq!(created.contact.addresses_json.as_array().unwrap().len(), 2);
-    assert_eq!(created.mapi_object_id, mapi_store_id(500));
+    assert_eq!(created.mapi_object_id, mapi_store_id(501));
     assert_eq!(created.version.change_number, 1000);
-    assert_ne!(created.version.change_number, 500);
+    assert_ne!(created.version.change_number, 501);
     assert_eq!(created.version.change_key, identity.change_key);
     assert_eq!(
         created.version.predecessor_change_list,
@@ -496,12 +509,12 @@ async fn mapi_contact_create_is_atomic_and_preserves_reserved_import_identity() 
         persisted.get::<Uuid, _>("identity_account_id"),
         fixture.account_id
     );
-    assert_eq!(persisted.get::<i64, _>("mapi_global_counter"), 500);
+    assert_eq!(persisted.get::<i64, _>("mapi_global_counter"), 501);
     assert_eq!(
         persisted.get::<i64, _>("mapi_object_id"),
-        mapi_store_id(500) as i64
+        mapi_store_id(501) as i64
     );
-    assert_eq!(persisted.get::<Vec<u8>, _>("source_key"), source_key(500));
+    assert_eq!(persisted.get::<Vec<u8>, _>("source_key"), source_key(501));
     assert_eq!(
         persisted.get::<Vec<u8>, _>("change_key"),
         identity.change_key
@@ -594,7 +607,7 @@ async fn mapi_contact_create_is_atomic_and_preserves_reserved_import_identity() 
         ))
         .await?;
     assert_eq!(replay.contact.id, imported_contact_id);
-    assert_eq!(replay.mapi_object_id, mapi_store_id(500));
+    assert_eq!(replay.mapi_object_id, mapi_store_id(501));
     assert_eq!(replay.version.change_number, 1000);
     assert_eq!(
         replay.import_disposition,
@@ -643,7 +656,7 @@ async fn mapi_contact_create_is_atomic_and_preserves_reserved_import_identity() 
     }]));
     let updated = fixture.storage.create_mapi_contact(successor_input).await?;
     assert_eq!(updated.contact.id, imported_contact_id);
-    assert_eq!(updated.mapi_object_id, mapi_store_id(500));
+    assert_eq!(updated.mapi_object_id, mapi_store_id(501));
     assert_eq!(updated.contact.name, "René Maguaretaz modifié");
     assert_eq!(updated.contact.email, "rene.updated@example.test");
     assert_eq!(updated.version.change_number, 1001);
